@@ -1,0 +1,33 @@
+[package]
+name = "keeper-registry"
+version = "0.1.0"
+edition = "2021"
+authors = ["Soroban Keeper Network Contributors"]
+description = "Decentralized Keeper Network registry contract for Soroban/Stellar"
+license = "Apache-2.0"
+repository = "https://github.com/arandomogg/soroban-keeper-network"
+keywords = ["soroban", "stellar", "keeper", "automation", "defi"]
+categories = ["cryptography::cryptocurrencies"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = []
+testutils = ["soroban-sdk/testutils"]
+
+[dependencies]
+soroban-sdk = { version = "22.0.1" }
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.1", features = ["testutils"] }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true

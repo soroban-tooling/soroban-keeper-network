@@ -1,0 +1,30 @@
+{
+  "name": "soroban-keeper-bot",
+  "version": "0.1.0",
+  "description": "Example off-chain keeper bot for the Soroban Keeper Network",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "start:testnet": "NETWORK=testnet node index.js",
+    "start:mainnet": "NETWORK=mainnet node index.js",
+    "lint": "eslint ."
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "keeper",
+    "automation",
+    "defi"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@stellar/stellar-sdk": "^13.0.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
