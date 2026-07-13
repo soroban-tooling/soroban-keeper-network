@@ -1,0 +1,11 @@
+# Code owners — automatically requested for review on matching paths.
+# https://docs.github.com/articles/about-code-owners
+
+# Default owner for everything
+*                                   @Andreschuks101
+
+# Contract logic requires contract-maintainer review
+/contracts/                         @Andreschuks101
+
+# CI and repo automation
+/.github/                           @Andreschuks101
