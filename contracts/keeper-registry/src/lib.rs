@@ -196,6 +196,13 @@ pub fn emit_fee_updated(e: &Env, old_bps: u32, new_bps: u32) {
     );
 }
 
+pub fn emit_admin_transferred(e: &Env, old_admin: &Address, new_admin: &Address) {
+    e.events().publish(
+        (symbol_short!("admin"), symbol_short!("xfer")),
+        (old_admin.clone(), new_admin.clone()),
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -618,6 +625,7 @@ impl KeeperRegistry {
         require_admin(&e, &admin)?;
         new_admin.require_auth();
         e.storage().instance().set(&DataKey::Admin, &new_admin);
+        emit_admin_transferred(&e, &admin, &new_admin);
         log!(&e, "Admin transferred from {} to {}", admin, new_admin);
         Ok(())
     }

@@ -741,6 +741,15 @@ fn test_transfer_admin_moves_control() {
 }
 
 #[test]
+fn test_transfer_admin_emits_event() {
+    let s = setup();
+    let new_admin = Address::generate(&s.env);
+    let before = s.env.events().all().len();
+    s.registry.transfer_admin(&s.admin, &new_admin);
+    assert!(s.env.events().all().len() > before);
+}
+
+#[test]
 fn test_upgrade_by_non_admin_fails() {
     let s = setup();
     let stranger = Address::generate(&s.env);
