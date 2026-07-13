@@ -450,12 +450,87 @@ fn test_execute_past_deadline_fails() {
 }
 
 #[test]
-#[ignore = "implement cancel_task first — GitHub issue #3"]
-fn test_cancel_task() {}
+fn test_cancel_pending_task_refunds_owner() {
+    let s = setup();
+    let token = token::Client::new(&s.env, &s.token_id);
+    let before = token.balance(&s.admin);
+    let id = register_default_task(&s); // escrows 1_000_000
+    assert_eq!(token.balance(&s.admin), before - 1_000_000i128);
+
+    s.registry.cancel_task(&s.admin, &id);
+
+    assert_eq!(token.balance(&s.admin), before); // fully refunded
+    assert_eq!(s.registry.get_task(&id).status, TaskStatus::Cancelled);
+}
 
 #[test]
-#[ignore = "implement expire_task first — GitHub issue #4"]
-fn test_expire_task() {}
+fn test_cancel_by_non_owner_fails() {
+    let s = setup();
+    let stranger = Address::generate(&s.env);
+    let id = register_default_task(&s);
+    assert_eq!(
+        s.registry.try_cancel_task(&stranger, &id),
+        Err(Ok(KeeperError::NotTaskOwner))
+    );
+}
+
+#[test]
+fn test_cancel_claimed_task_fails() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s);
+    s.registry.claim_task(&keeper, &id);
+    // Owner can no longer cancel once a keeper is working on it.
+    assert_eq!(
+        s.registry.try_cancel_task(&s.admin, &id),
+        Err(Ok(KeeperError::InvalidTaskStatus))
+    );
+}
+
+#[test]
+fn test_expire_after_deadline_refunds_owner() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let token = token::Client::new(&s.env, &s.token_id);
+    let before = token.balance(&s.admin);
+    let id = register_default_task(&s);
+    s.registry.claim_task(&keeper, &id); // claimed but never executed
+
+    advance(&s.env, 1, 3_601); // past deadline
+    // Permissionless: a third party can trigger the refund.
+    let anyone = Address::generate(&s.env);
+    s.registry.expire_task(&id);
+
+    assert_eq!(token.balance(&s.admin), before); // owner made whole
+    assert_eq!(s.registry.get_task(&id).status, TaskStatus::Expired);
+}
+
+#[test]
+fn test_expire_before_deadline_fails() {
+    let s = setup();
+    let anyone = Address::generate(&s.env);
+    let id = register_default_task(&s);
+    assert_eq!(
+        s.registry.try_expire_task(&id),
+        Err(Ok(KeeperError::DeadlineNotPassed))
+    );
+}
+
+#[test]
+fn test_expire_executed_task_fails() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s);
+    s.registry.claim_task(&keeper, &id);
+    s.registry.execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p"));
+
+    advance(&s.env, 1, 3_601);
+    let anyone = Address::generate(&s.env);
+    assert_eq!(
+        s.registry.try_expire_task(&id),
+        Err(Ok(KeeperError::InvalidTaskStatus))
+    );
+}
 
 #[test]
 #[ignore = "implement withdraw_rewards first — GitHub issue #5"]

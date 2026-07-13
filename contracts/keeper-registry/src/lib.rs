@@ -452,36 +452,59 @@ impl KeeperRegistry {
 
     // ── cancel_task ──────────────────────────────────────────────────────────
     //
-    // TODO(contributors): let a task owner cancel a Pending task and get refunded.
-    //
-    // Rules to enforce:
-    //   - caller must be task.owner
-    //   - task must be in Pending status (cannot cancel once claimed)
-    //   - transfer task.reward back to owner
-    //   - set task.status = Cancelled
-    //   - emit emit_task_cancelled(...)
-    //
-    // Tracking issue: https://github.com/arandomogg/soroban-keeper-network/issues/3
+    // The owner reclaims a task that no keeper has picked up yet. Only Pending
+    // tasks can be cancelled — once a keeper has claimed one, the owner must
+    // wait for execution or for the deadline to pass (expire_task), so a keeper
+    // that has started work can't have the reward pulled out from under it.
 
-    pub fn cancel_task(_e: Env, _owner: Address, _task_id: u64) -> Result<(), KeeperError> {
-        panic!("not yet implemented — see GitHub issue #3")
+    pub fn cancel_task(e: Env, owner: Address, task_id: u64) -> Result<(), KeeperError> {
+        owner.require_auth();
+
+        let mut task = load_task(&e, task_id)?;
+        if task.owner != owner {
+            return Err(KeeperError::NotTaskOwner);
+        }
+        if task.status != TaskStatus::Pending {
+            return Err(KeeperError::InvalidTaskStatus);
+        }
+
+        // Refund the escrow, then mark cancelled (CEI: state after transfer is
+        // safe here because status guards prevent re-entry into a fresh cancel).
+        reward_token(&e).transfer(&e.current_contract_address(), &owner, &task.reward);
+        task.status = TaskStatus::Cancelled;
+        save_task(&e, task_id, &task);
+
+        emit_task_cancelled(&e, task_id, &owner);
+        log!(&e, "Task {} cancelled, {} refunded to {}", task_id, task.reward, owner);
+        Ok(())
     }
 
     // ── expire_task ──────────────────────────────────────────────────────────
     //
-    // TODO(contributors): permissionless expiry — anyone calls this after deadline.
-    //
-    // Rules to enforce:
-    //   - task must be Pending or Claimed
-    //   - ledger.timestamp() must be >= task.deadline
-    //   - return task.reward to task.owner
-    //   - set task.status = Expired
-    //   - emit emit_task_expired(...)
-    //
-    // Tracking issue: https://github.com/arandomogg/soroban-keeper-network/issues/4
+    // Permissionless deadline enforcement: once a task's deadline has passed
+    // without execution, anyone may call this to return the escrow to the owner.
+    // It is intentionally callable by any address (not just the owner) so a
+    // stuck task can always be unwound and its funds recovered — a keeper bot
+    // can even do this as a courtesy while scanning.
 
-    pub fn expire_task(_e: Env, _task_id: u64) -> Result<(), KeeperError> {
-        panic!("not yet implemented — see GitHub issue #4")
+    pub fn expire_task(e: Env, task_id: u64) -> Result<(), KeeperError> {
+        let mut task = load_task(&e, task_id)?;
+
+        match task.status {
+            TaskStatus::Pending | TaskStatus::Claimed => {}
+            _ => return Err(KeeperError::InvalidTaskStatus),
+        }
+        if e.ledger().timestamp() < task.deadline {
+            return Err(KeeperError::DeadlineNotPassed);
+        }
+
+        reward_token(&e).transfer(&e.current_contract_address(), &task.owner, &task.reward);
+        task.status = TaskStatus::Expired;
+        save_task(&e, task_id, &task);
+
+        emit_task_expired(&e, task_id);
+        log!(&e, "Task {} expired, {} refunded to owner", task_id, task.reward);
+        Ok(())
     }
 
     // ── withdraw_rewards ─────────────────────────────────────────────────────
