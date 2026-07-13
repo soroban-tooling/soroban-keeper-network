@@ -15,10 +15,14 @@
  *   # Fill in your secret key and contract address
  *   node index.js
  *
- * Production keepers should add:
+ * This example already includes:
+ *   - Retry with exponential back-off + jitter on transient RPC errors
+ *   - Graceful shutdown (SIGINT/SIGTERM) that drains the in-flight round
+ *   - Permissionless expiry of stale tasks to refund owners
+ *
+ * Production keepers should additionally add:
  *   - Persistent task state DB (SQLite / Redis) to avoid double-claiming
  *   - MEV-aware submission (bundle multiple tasks)
- *   - Retry logic with exponential back-off
  *   - Prometheus metrics endpoint
  *   - Alerting (PagerDuty / Telegram) on missed executions
  */
@@ -51,6 +55,12 @@ const CONFIG = {
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "10000", 10),
   withdrawThreshold: BigInt(process.env.WITHDRAW_THRESHOLD || "10000000"), // 1 XLM in stroops
   maxTasksPerRound: parseInt(process.env.MAX_TASKS_PER_ROUND || "5", 10),
+  maxRetries: parseInt(process.env.MAX_RETRIES || "3", 10),
+  retryBaseMs: parseInt(process.env.RETRY_BASE_MS || "500", 10),
+  // When true, the bot calls expire_task on past-deadline tasks as a courtesy
+  // so owners' escrow is refunded even if no keeper executed. This is a public
+  // good and costs only the transaction fee.
+  expireStaleTasks: (process.env.EXPIRE_STALE_TASKS || "true") === "true",
 };
 
 const NETWORK_CONFIG = {
@@ -85,6 +95,52 @@ function validateConfig() {
     console.error(`❌  Unknown NETWORK '${CONFIG.network}'. Use testnet, futurenet, or mainnet.`);
     process.exit(1);
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reliability helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Retries an async operation with exponential back-off and jitter.
+ *
+ * Only transient failures (RPC timeouts, network blips, transaction not-yet-
+ * confirmed) should be retried. Deterministic contract errors — e.g. a task
+ * already claimed by another keeper — are surfaced immediately so we don't
+ * waste fees resubmitting a call that can never succeed.
+ */
+async function withRetry(label, fn) {
+  let lastErr;
+  for (let attempt = 0; attempt <= CONFIG.maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (isPermanentError(err) || attempt === CONFIG.maxRetries) {
+        throw err;
+      }
+      const backoff = CONFIG.retryBaseMs * 2 ** attempt;
+      const jitter = Math.floor(Math.random() * CONFIG.retryBaseMs);
+      const delay = backoff + jitter;
+      console.warn(`  ↻  ${label} failed (attempt ${attempt + 1}), retrying in ${delay}ms: ${err.message}`);
+      await sleep(delay);
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * Heuristic: contract-level business errors are permanent for this bot and must
+ * not be retried, whereas transport/consensus errors are worth another attempt.
+ */
+function isPermanentError(err) {
+  const msg = (err && err.message ? err.message : "").toLowerCase();
+  return (
+    msg.includes("simulation failed") || // contract returned an Err()
+    msg.includes("invalidaction") ||
+    msg.includes("unauthorized") ||
+    msg.includes("already")
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -218,31 +274,50 @@ async function keeperLoop(server, keypair, networkPassphrase, contractId) {
   for (const task of pendingTasks) {
     if (processed >= CONFIG.maxTasksPerRound) break;
 
-    // Skip tasks past their deadline
+    // Past-deadline tasks can't be executed. Optionally unwind them so the
+    // owner's escrow is refunded (permissionless — anyone may call expire_task).
     if (task.deadline <= nowSeconds) {
-      console.log(`  ⏰  Task ${task.taskId} is past deadline, skipping`);
+      if (CONFIG.expireStaleTasks) {
+        try {
+          await withRetry(`expire_task ${task.taskId}`, () =>
+            invokeContract(server, keypair, networkPassphrase, contractId, "expire_task", [
+              nativeToScVal(task.taskId, { type: "u64" }),
+            ])
+          );
+          console.log(`  ♻️  Task ${task.taskId} expired — escrow refunded to owner`);
+        } catch (err) {
+          // Already expired/executed by someone else — nothing to do.
+          console.log(`  ⏰  Task ${task.taskId} past deadline (skip: ${err.message})`);
+        }
+      } else {
+        console.log(`  ⏰  Task ${task.taskId} is past deadline, skipping`);
+      }
       continue;
     }
 
     try {
       console.log(`  📌  Attempting to claim task ${task.taskId} (reward: ${task.reward})...`);
 
-      // 1. Claim the task
-      await invokeContract(server, keypair, networkPassphrase, contractId, "claim_task", [
-        nativeToScVal(keypair.publicKey(), { type: "address" }),
-        nativeToScVal(task.taskId, { type: "u64" }),
-      ]);
+      // 1. Claim the task (retry transient RPC errors; bail on "already claimed")
+      await withRetry(`claim_task ${task.taskId}`, () =>
+        invokeContract(server, keypair, networkPassphrase, contractId, "claim_task", [
+          nativeToScVal(keypair.publicKey(), { type: "address" }),
+          nativeToScVal(task.taskId, { type: "u64" }),
+        ])
+      );
       console.log(`  ✅  Task ${task.taskId} claimed!`);
 
       // 2. Execute off-chain
       const proof = await executeTaskOffChain(task);
 
       // 3. Submit execution proof on-chain
-      await invokeContract(server, keypair, networkPassphrase, contractId, "execute_task", [
-        nativeToScVal(keypair.publicKey(), { type: "address" }),
-        nativeToScVal(task.taskId, { type: "u64" }),
-        nativeToScVal(Buffer.from(proof, "hex"), { type: "bytes" }),
-      ]);
+      await withRetry(`execute_task ${task.taskId}`, () =>
+        invokeContract(server, keypair, networkPassphrase, contractId, "execute_task", [
+          nativeToScVal(keypair.publicKey(), { type: "address" }),
+          nativeToScVal(task.taskId, { type: "u64" }),
+          nativeToScVal(Buffer.from(proof, "hex"), { type: "bytes" }),
+        ])
+      );
       console.log(`  💰  Task ${task.taskId} executed! Proof: ${proof.slice(0, 20)}...`);
       processed++;
     } catch (err) {
@@ -305,16 +380,45 @@ async function main() {
     process.exit(1);
   }
 
-  // Run initial round immediately, then poll
-  await keeperLoop(server, keypair, networkPassphrase, CONFIG.registryContractId);
+  // Graceful shutdown: stop scheduling new rounds and let the in-flight round
+  // finish so we never leave a task claimed-but-unexecuted on our account.
+  let shuttingDown = false;
+  let roundInFlight = false;
+  let timer = null;
 
-  setInterval(async () => {
+  function requestShutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`\n🛑  ${signal} received — finishing current round then exiting...`);
+    if (timer) clearInterval(timer);
+    // If nothing is running, exit now; otherwise the runner exits when it drains.
+    if (!roundInFlight) {
+      console.log("👋  Clean shutdown.");
+      process.exit(0);
+    }
+  }
+  process.on("SIGINT", () => requestShutdown("SIGINT"));
+  process.on("SIGTERM", () => requestShutdown("SIGTERM"));
+
+  async function runRound() {
+    if (shuttingDown || roundInFlight) return;
+    roundInFlight = true;
     try {
       await keeperLoop(server, keypair, networkPassphrase, CONFIG.registryContractId);
     } catch (err) {
       console.error("❌  Keeper loop error:", err.message);
+    } finally {
+      roundInFlight = false;
+      if (shuttingDown) {
+        console.log("👋  Clean shutdown.");
+        process.exit(0);
+      }
     }
-  }, CONFIG.pollIntervalMs);
+  }
+
+  // Run initial round immediately, then poll.
+  await runRound();
+  timer = setInterval(runRound, CONFIG.pollIntervalMs);
 }
 
 function sleep(ms) {
