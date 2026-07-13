@@ -6,6 +6,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — contract capabilities & views
+
+- `increase_reward` — owners can top up a task bounty (Pending/Claimed).
+- `extend_deadline` — owners can push out a task's deadline.
+- `set_min_reward` + `min_reward` view — admin-set anti-dust floor for new tasks.
+- `is_claimable` view — cheap keeper-side eligibility check.
+- `version` view + `VERSION` constant for ABI detection.
+- Governance events on pause/unpause, fee change, and admin transfer, plus
+  `topup`/`extend` task events.
+
+### Added — tests
+
+- `split_reward` accounting-invariant sweep (conservation, bounds, formula).
+- Multi-keeper end-to-end conservation test across execute/expire/cancel.
+- Test count grown from 38 to 52.
+
+### Added — contributor infrastructure
+
+- CONTRIBUTING-facing repo setup: `.editorconfig`, `rustfmt.toml`, `.gitignore`,
+  Code of Conduct, issue templates (bug / feature / good-first-issue) + chooser,
+  PR template, `CODEOWNERS`, a Wave-Program label taxonomy, and a `Makefile`.
+- `docs/ARCHITECTURE.md` and `docs/DEPLOYING.md`; README documentation index.
+- `scripts/optimize.sh` build/optimize helper.
+
+### Changed
+
+- CI: concurrency control (cancels superseded runs) and `--locked` builds.
+- Repository references updated to the `soroban-tooling` org.
+
+### Fixed
+
+- Cleared all compiler and `clippy -D warnings` findings and applied `rustfmt`
+  so the CI lint/format gates pass. Removed the ignored child-manifest
+  `[profile.release]`.
+
 ### Added — MVP contract feature-complete
 
 The `KeeperRegistry` contract's core lifecycle is now fully implemented and
