@@ -1,0 +1,25 @@
+# Rust build output
+/target/
+**/target/
+
+# Soroban test snapshots (regenerated on every test run)
+**/test_snapshots/
+
+# Compiled contract artifacts
+*.wasm
+
+# Environment / secrets — NEVER commit these
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
