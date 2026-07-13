@@ -13,7 +13,7 @@
 #![cfg(test)]
 
 use soroban_sdk::{
-    testutils::{Address as _, Ledger, LedgerInfo},
+    testutils::{Address as _, Events as _, Ledger, LedgerInfo},
     token,
     Address, Bytes, Env,
 };
@@ -669,6 +669,14 @@ fn test_unpause_restores_registration() {
     // Now registration works again.
     let id = register_default_task(&s);
     assert_eq!(s.registry.get_task(&id).status, TaskStatus::Pending);
+}
+
+#[test]
+fn test_pause_emits_event() {
+    let s = setup();
+    s.registry.pause(&s.admin);
+    // A governance event was published for the pause.
+    assert!(!s.env.events().all().is_empty());
 }
 
 #[test]

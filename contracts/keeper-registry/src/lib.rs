@@ -182,6 +182,13 @@ pub fn emit_rewards_withdrawn(e: &Env, keeper: &Address, amount: i128) {
     );
 }
 
+pub fn emit_paused(e: &Env, paused: bool) {
+    e.events().publish(
+        (symbol_short!("paused"), symbol_short!("admin")),
+        (paused,),
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -560,6 +567,7 @@ impl KeeperRegistry {
     pub fn pause(e: Env, admin: Address) -> Result<(), KeeperError> {
         require_admin(&e, &admin)?;
         e.storage().instance().set(&DataKey::Paused, &true);
+        emit_paused(&e, true);
         log!(&e, "Registry paused by {}", admin);
         Ok(())
     }
@@ -567,6 +575,7 @@ impl KeeperRegistry {
     pub fn unpause(e: Env, admin: Address) -> Result<(), KeeperError> {
         require_admin(&e, &admin)?;
         e.storage().instance().set(&DataKey::Paused, &false);
+        emit_paused(&e, false);
         log!(&e, "Registry unpaused by {}", admin);
         Ok(())
     }
