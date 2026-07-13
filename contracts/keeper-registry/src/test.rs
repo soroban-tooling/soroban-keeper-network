@@ -319,6 +319,30 @@ fn test_register_increments_task_counter() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
+fn test_increase_reward_escrows_and_raises_bounty() {
+    let s = setup();
+    let token = token::Client::new(&s.env, &s.token_id);
+    let id = register_default_task(&s); // reward 1_000_000
+    let contract_before = token.balance(&s.registry.address);
+
+    s.registry.increase_reward(&s.admin, &id, &500_000i128);
+
+    assert_eq!(s.registry.get_task(&id).reward, 1_500_000i128);
+    assert_eq!(token.balance(&s.registry.address), contract_before + 500_000i128);
+}
+
+#[test]
+fn test_increase_reward_by_non_owner_fails() {
+    let s = setup();
+    let stranger = Address::generate(&s.env);
+    let id = register_default_task(&s);
+    assert_eq!(
+        s.registry.try_increase_reward(&stranger, &id, &1i128),
+        Err(Ok(KeeperError::NotTaskOwner))
+    );
+}
+
+#[test]
 fn test_claim_pending_task() {
     let s = setup();
     let keeper = Address::generate(&s.env);

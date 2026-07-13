@@ -206,6 +206,13 @@ pub fn emit_admin_transferred(e: &Env, old_admin: &Address, new_admin: &Address)
     );
 }
 
+pub fn emit_reward_increased(e: &Env, task_id: u64, new_reward: i128) {
+    e.events().publish(
+        (symbol_short!("topup"), symbol_short!("task")),
+        (task_id, new_reward),
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -413,6 +420,41 @@ impl KeeperRegistry {
 
         log!(&e, "Task {} registered reward={}", task_id, reward);
         Ok(task_id)
+    }
+
+    // ── increase_reward ──────────────────────────────────────────────────────
+    //
+    // The owner tops up the bounty on a task that hasn't finished yet (Pending
+    // or Claimed) to attract keepers. The extra amount is escrowed immediately.
+
+    pub fn increase_reward(
+        e: Env,
+        owner: Address,
+        task_id: u64,
+        additional: i128,
+    ) -> Result<(), KeeperError> {
+        require_not_paused(&e)?;
+        owner.require_auth();
+
+        if additional <= 0 {
+            return Err(KeeperError::InvalidReward);
+        }
+        let mut task = load_task(&e, task_id)?;
+        if task.owner != owner {
+            return Err(KeeperError::NotTaskOwner);
+        }
+        match task.status {
+            TaskStatus::Pending | TaskStatus::Claimed => {}
+            _ => return Err(KeeperError::InvalidTaskStatus),
+        }
+
+        reward_token(&e).transfer(&owner, &e.current_contract_address(), &additional);
+        task.reward = task.reward.checked_add(additional).expect("reward overflow");
+        save_task(&e, task_id, &task);
+
+        emit_reward_increased(&e, task_id, task.reward);
+        log!(&e, "Task {} reward increased to {}", task_id, task.reward);
+        Ok(())
     }
 
     // ── claim_task ───────────────────────────────────────────────────────────
