@@ -409,26 +409,45 @@ impl KeeperRegistry {
 
     // ── execute_task ─────────────────────────────────────────────────────────
     //
-    // TODO(contributors): implement execution proof submission + reward payout.
-    //
-    // Rules to enforce:
-    //   - caller must be the task.claimer
-    //   - task must be in Claimed status
-    //   - deadline must not have passed
-    //   - split reward: credit net to keeper via credit_keeper(), fee stays in contract
-    //   - set task.status = Executed
-    //   - emit emit_task_executed(...)
-    //
-    // Helpful internal fns: split_reward(), save_task(), reward_token()
-    // Tracking issue: https://github.com/arandomogg/soroban-keeper-network/issues/2
+    // The claiming keeper submits proof that it performed the off-chain action
+    // and is credited its share of the escrowed reward. The protocol fee stays
+    // in the contract (later swept by admin via `sweep_fees`). The reward is
+    // credited to an internal balance rather than transferred out here so the
+    // keeper controls when it pays the withdrawal transfer cost.
 
     pub fn execute_task(
-        _e: Env,
-        _keeper: Address,
-        _task_id: u64,
-        _proof: Bytes,
+        e: Env,
+        keeper: Address,
+        task_id: u64,
+        proof: Bytes,
     ) -> Result<(), KeeperError> {
-        panic!("not yet implemented — see GitHub issue #2")
+        require_not_paused(&e)?;
+        keeper.require_auth();
+
+        let mut task = load_task(&e, task_id)?;
+
+        if task.status != TaskStatus::Claimed {
+            return Err(KeeperError::InvalidTaskStatus);
+        }
+        // Only the keeper that currently holds the claim may execute.
+        if task.claimer.as_ref() != Some(&keeper) {
+            return Err(KeeperError::NotTaskClaimer);
+        }
+        if e.ledger().timestamp() >= task.deadline {
+            return Err(KeeperError::DeadlinePassed);
+        }
+
+        let fee_bps: u32 = e.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
+        let (keeper_net, _fee) = split_reward(task.reward, fee_bps);
+        credit_keeper(&e, &keeper, keeper_net);
+
+        task.status = TaskStatus::Executed;
+        save_task(&e, task_id, &task);
+
+        emit_task_executed(&e, task_id, &keeper, keeper_net);
+        log!(&e, "Task {} executed by {} net={} proof_len={}",
+             task_id, keeper, keeper_net, proof.len());
+        Ok(())
     }
 
     // ── cancel_task ──────────────────────────────────────────────────────────

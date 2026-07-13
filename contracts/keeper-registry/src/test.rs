@@ -381,8 +381,73 @@ fn test_claim_unknown_task_fails() {
 }
 
 #[test]
-#[ignore = "implement execute_task first — GitHub issue #2"]
-fn test_execute_task() {}
+fn test_execute_task_credits_keeper_net_of_fee() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s); // reward 1_000_000, fee 300 bps (3%)
+
+    s.registry.claim_task(&keeper, &id);
+    s.registry.execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof"));
+
+    // 3% fee → keeper receives 970_000, contract retains 30_000 as fee.
+    assert_eq!(s.registry.keeper_balance(&keeper), 970_000i128);
+    assert_eq!(s.registry.get_task(&id).status, TaskStatus::Executed);
+}
+
+#[test]
+fn test_execute_by_non_claimer_fails() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let stranger = Address::generate(&s.env);
+    let id = register_default_task(&s);
+
+    s.registry.claim_task(&keeper, &id);
+    assert_eq!(
+        s.registry.try_execute_task(&stranger, &id, &Bytes::from_slice(&s.env, b"x")),
+        Err(Ok(KeeperError::NotTaskClaimer))
+    );
+}
+
+#[test]
+fn test_execute_unclaimed_task_fails() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s); // still Pending
+
+    assert_eq!(
+        s.registry.try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"x")),
+        Err(Ok(KeeperError::InvalidTaskStatus))
+    );
+}
+
+#[test]
+fn test_execute_twice_fails() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s);
+
+    s.registry.claim_task(&keeper, &id);
+    s.registry.execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p"));
+    // Second execution must fail — task is no longer Claimed.
+    assert_eq!(
+        s.registry.try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p")),
+        Err(Ok(KeeperError::InvalidTaskStatus))
+    );
+}
+
+#[test]
+fn test_execute_past_deadline_fails() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s);
+
+    s.registry.claim_task(&keeper, &id);
+    advance(&s.env, 1, 3_601); // deadline passes while claimed
+    assert_eq!(
+        s.registry.try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p")),
+        Err(Ok(KeeperError::DeadlinePassed))
+    );
+}
 
 #[test]
 #[ignore = "implement cancel_task first — GitHub issue #3"]
