@@ -213,6 +213,13 @@ pub fn emit_reward_increased(e: &Env, task_id: u64, new_reward: i128) {
     );
 }
 
+pub fn emit_deadline_extended(e: &Env, task_id: u64, new_deadline: u64) {
+    e.events().publish(
+        (symbol_short!("extend"), symbol_short!("task")),
+        (task_id, new_deadline),
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -454,6 +461,39 @@ impl KeeperRegistry {
 
         emit_reward_increased(&e, task_id, task.reward);
         log!(&e, "Task {} reward increased to {}", task_id, task.reward);
+        Ok(())
+    }
+
+    // ── extend_deadline ──────────────────────────────────────────────────────
+    //
+    // The owner pushes out the deadline on an unfinished task so keepers have
+    // more time. The new deadline must be strictly later than the current one.
+
+    pub fn extend_deadline(
+        e: Env,
+        owner: Address,
+        task_id: u64,
+        new_deadline: u64,
+    ) -> Result<(), KeeperError> {
+        owner.require_auth();
+
+        let mut task = load_task(&e, task_id)?;
+        if task.owner != owner {
+            return Err(KeeperError::NotTaskOwner);
+        }
+        match task.status {
+            TaskStatus::Pending | TaskStatus::Claimed => {}
+            _ => return Err(KeeperError::InvalidTaskStatus),
+        }
+        if new_deadline <= task.deadline {
+            return Err(KeeperError::DeadlinePassed);
+        }
+
+        task.deadline = new_deadline;
+        save_task(&e, task_id, &task);
+
+        emit_deadline_extended(&e, task_id, new_deadline);
+        log!(&e, "Task {} deadline extended to {}", task_id, new_deadline);
         Ok(())
     }
 

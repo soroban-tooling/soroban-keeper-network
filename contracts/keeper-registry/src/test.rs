@@ -343,6 +343,28 @@ fn test_increase_reward_by_non_owner_fails() {
 }
 
 #[test]
+fn test_extend_deadline_pushes_it_out() {
+    let s = setup();
+    let id = register_default_task(&s);
+    let old = s.registry.get_task(&id).deadline;
+
+    s.registry.extend_deadline(&s.admin, &id, &(old + 7_200));
+    assert_eq!(s.registry.get_task(&id).deadline, old + 7_200);
+}
+
+#[test]
+fn test_extend_deadline_backwards_fails() {
+    let s = setup();
+    let id = register_default_task(&s);
+    let old = s.registry.get_task(&id).deadline;
+    // A new deadline that isn't strictly later is rejected.
+    assert_eq!(
+        s.registry.try_extend_deadline(&s.admin, &id, &old),
+        Err(Ok(KeeperError::DeadlinePassed))
+    );
+}
+
+#[test]
 fn test_claim_pending_task() {
     let s = setup();
     let keeper = Address::generate(&s.env);
