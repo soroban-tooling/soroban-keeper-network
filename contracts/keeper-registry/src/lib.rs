@@ -284,6 +284,10 @@ fn lock_expired(e: &Env, task: &Task) -> bool {
 // Contract
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Semantic version of the contract logic. Bumped on behavior changes so
+/// off-chain clients and indexers can detect which ABI they are talking to.
+pub const VERSION: u32 = 1;
+
 #[contract]
 pub struct KeeperRegistry;
 
@@ -678,6 +682,11 @@ impl KeeperRegistry {
 
     pub fn reward_token_address(e: Env) -> Option<Address> {
         e.storage().instance().get(&DataKey::RewardToken)
+    }
+
+    /// Contract logic version. See [`VERSION`].
+    pub fn version(_e: Env) -> u32 {
+        VERSION
     }
 }
 

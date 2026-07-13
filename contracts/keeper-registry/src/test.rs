@@ -85,6 +85,12 @@ fn advance(env: &Env, ledgers: u32, seconds: u64) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
+fn test_version_is_exposed() {
+    let s = setup();
+    assert_eq!(s.registry.version(), 1u32);
+}
+
+#[test]
 fn test_initialize_sets_state() {
     let env = Env::default();
     env.mock_all_auths();
