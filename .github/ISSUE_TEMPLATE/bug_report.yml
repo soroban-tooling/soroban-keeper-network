@@ -1,0 +1,41 @@
+name: "🐛 Bug report"
+description: Report incorrect behavior in the contract, keeper-bot, or scripts
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to file a bug! Please fill out the sections below.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - contract (keeper-registry)
+        - keeper-bot
+        - scripts / tooling
+        - docs
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Ideally a failing `cargo test` case or a sequence of contract calls.
+      placeholder: |
+        1. Register a task with ...
+        2. Claim it as ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit / version
+      description: The git SHA or release tag you observed this on.
