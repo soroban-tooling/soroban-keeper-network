@@ -1,0 +1,32 @@
+name: "✨ Feature request"
+description: Propose a new capability for the network (Phase 2 roadmap or beyond)
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What can't be done today, and who needs it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should it work? Include contract API or event changes if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Rough scope
+      options:
+        - small (good-first-issue)
+        - medium
+        - large (needs design discussion)
+    validations:
+      required: true
