@@ -14,11 +14,12 @@
 
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger},
-    token,
-    Address, Bytes, Env,
+    token, Address, Bytes, Env,
 };
 
-use crate::{split_reward, KeeperRegistry, KeeperRegistryClient, KeeperError, TaskStatus, TaskType};
+use crate::{
+    split_reward, KeeperError, KeeperRegistry, KeeperRegistryClient, TaskStatus, TaskType,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared test setup
@@ -53,7 +54,12 @@ fn setup() -> Setup {
 
     // Leak env to get a 'static lifetime — standard soroban test pattern.
     let env = unsafe { core::mem::transmute::<Env, Env>(env) };
-    Setup { env, admin, registry: unsafe { core::mem::transmute(registry) }, token_id }
+    Setup {
+        env,
+        admin,
+        registry: unsafe { core::mem::transmute(registry) },
+        token_id,
+    }
 }
 
 fn calldata(env: &Env) -> Bytes {
@@ -108,7 +114,8 @@ fn test_multi_keeper_end_to_end_conserves_funds() {
 
     // k1 executes the first task (3% fee → 970_000 to k1, 30_000 accrued).
     s.registry.claim_task(&k1, &t_exec);
-    s.registry.execute_task(&k1, &t_exec, &Bytes::from_slice(&s.env, b"p1"));
+    s.registry
+        .execute_task(&k1, &t_exec, &Bytes::from_slice(&s.env, b"p1"));
 
     // k2 claims the second but never executes; owner cancels the third now.
     s.registry.claim_task(&k2, &t_expire);
@@ -140,7 +147,16 @@ fn test_split_reward_invariants() {
     // Exhaustively sweep a grid of rewards and fee rates and assert the core
     // accounting invariants hold for every combination — no value is ever
     // created or destroyed by the split.
-    let rewards = [1i128, 2, 7, 100, 999, 1_000_000, 7_777_777, i128::from(u64::MAX)];
+    let rewards = [
+        1i128,
+        2,
+        7,
+        100,
+        999,
+        1_000_000,
+        7_777_777,
+        i128::from(u64::MAX),
+    ];
     let fee_rates = [0u32, 1, 3, 250, 300, 1_000, 5_000, 9_999, 10_000];
 
     for &reward in &rewards {
@@ -154,7 +170,11 @@ fn test_split_reward_invariants() {
             // 3. Fee never exceeds the reward.
             assert!(fee <= reward, "reward={reward} bps={bps}");
             // 4. Fee matches the basis-point formula (floor division).
-            assert_eq!(fee, reward * bps as i128 / 10_000, "reward={reward} bps={bps}");
+            assert_eq!(
+                fee,
+                reward * bps as i128 / 10_000,
+                "reward={reward} bps={bps}"
+            );
         }
     }
 }
@@ -403,7 +423,10 @@ fn test_increase_reward_escrows_and_raises_bounty() {
     s.registry.increase_reward(&s.admin, &id, &500_000i128);
 
     assert_eq!(s.registry.get_task(&id).reward, 1_500_000i128);
-    assert_eq!(token.balance(&s.registry.address), contract_before + 500_000i128);
+    assert_eq!(
+        token.balance(&s.registry.address),
+        contract_before + 500_000i128
+    );
 }
 
 #[test]
@@ -531,7 +554,8 @@ fn test_execute_task_credits_keeper_net_of_fee() {
     let id = register_default_task(&s); // reward 1_000_000, fee 300 bps (3%)
 
     s.registry.claim_task(&keeper, &id);
-    s.registry.execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof"));
+    s.registry
+        .execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof"));
 
     // 3% fee → keeper receives 970_000, contract retains 30_000 as fee.
     assert_eq!(s.registry.keeper_balance(&keeper), 970_000i128);
@@ -547,7 +571,8 @@ fn test_execute_by_non_claimer_fails() {
 
     s.registry.claim_task(&keeper, &id);
     assert_eq!(
-        s.registry.try_execute_task(&stranger, &id, &Bytes::from_slice(&s.env, b"x")),
+        s.registry
+            .try_execute_task(&stranger, &id, &Bytes::from_slice(&s.env, b"x")),
         Err(Ok(KeeperError::NotTaskClaimer))
     );
 }
@@ -559,7 +584,8 @@ fn test_execute_unclaimed_task_fails() {
     let id = register_default_task(&s); // still Pending
 
     assert_eq!(
-        s.registry.try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"x")),
+        s.registry
+            .try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"x")),
         Err(Ok(KeeperError::InvalidTaskStatus))
     );
 }
@@ -571,10 +597,12 @@ fn test_execute_twice_fails() {
     let id = register_default_task(&s);
 
     s.registry.claim_task(&keeper, &id);
-    s.registry.execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p"));
+    s.registry
+        .execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p"));
     // Second execution must fail — task is no longer Claimed.
     assert_eq!(
-        s.registry.try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p")),
+        s.registry
+            .try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p")),
         Err(Ok(KeeperError::InvalidTaskStatus))
     );
 }
@@ -588,7 +616,8 @@ fn test_execute_past_deadline_fails() {
     s.registry.claim_task(&keeper, &id);
     advance(&s.env, 1, 3_601); // deadline passes while claimed
     assert_eq!(
-        s.registry.try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p")),
+        s.registry
+            .try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p")),
         Err(Ok(KeeperError::DeadlinePassed))
     );
 }
@@ -641,7 +670,7 @@ fn test_expire_after_deadline_refunds_owner() {
     s.registry.claim_task(&keeper, &id); // claimed but never executed
 
     advance(&s.env, 1, 3_601); // past deadline
-    // Permissionless: a third party can trigger the refund.
+                               // Permissionless: a third party can trigger the refund.
     s.registry.expire_task(&id);
 
     assert_eq!(token.balance(&s.admin), before); // owner made whole
@@ -664,7 +693,8 @@ fn test_expire_executed_task_fails() {
     let keeper = Address::generate(&s.env);
     let id = register_default_task(&s);
     s.registry.claim_task(&keeper, &id);
-    s.registry.execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p"));
+    s.registry
+        .execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p"));
 
     advance(&s.env, 1, 3_601);
     assert_eq!(
@@ -682,7 +712,8 @@ fn executed_task_keeper(s: &Setup) -> Address {
     let keeper = Address::generate(&s.env);
     let id = register_default_task(s);
     s.registry.claim_task(&keeper, &id);
-    s.registry.execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof"));
+    s.registry
+        .execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof"));
     keeper
 }
 
@@ -834,7 +865,8 @@ fn test_set_fee_bps_affects_future_executions() {
     let keeper = Address::generate(&s.env);
     let id = register_default_task(&s);
     s.registry.claim_task(&keeper, &id);
-    s.registry.execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p"));
+    s.registry
+        .execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p"));
 
     // 10% fee now: keeper nets 900_000, 100_000 accrues.
     assert_eq!(s.registry.keeper_balance(&keeper), 900_000i128);

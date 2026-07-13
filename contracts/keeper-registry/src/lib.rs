@@ -29,9 +29,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, contracterror,
-    log, symbol_short, token,
-    Address, Bytes, BytesN, Env,
+    contract, contracterror, contractimpl, contracttype, log, symbol_short, token, Address, Bytes,
+    BytesN, Env,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -66,12 +65,12 @@ pub enum DataKey {
 #[contracttype]
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum TaskType {
-    Liquidation        = 0,
-    OraclePricePush    = 1,
-    FundingRateUpdate  = 2,
+    Liquidation = 0,
+    OraclePricePush = 1,
+    FundingRateUpdate = 2,
     LiquidityRebalance = 3,
-    TtlExtension       = 4,
-    Custom             = 5,
+    TtlExtension = 4,
+    Custom = 5,
 }
 
 /// Lifecycle state of a task. Transitions are enforced by each function.
@@ -86,11 +85,11 @@ pub enum TaskType {
 #[contracttype]
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum TaskStatus {
-    Pending   = 0,
-    Claimed   = 1,
-    Executed  = 2,
+    Pending = 0,
+    Claimed = 1,
+    Executed = 2,
     Cancelled = 3,
-    Expired   = 4,
+    Expired = 4,
 }
 
 /// Full task record stored in Persistent storage.
@@ -125,17 +124,17 @@ pub struct Task {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum KeeperError {
     AlreadyInitialized = 1,
-    Unauthorized       = 2,
-    ContractPaused     = 3,
-    TaskNotFound       = 4,
-    InvalidTaskStatus  = 5,
-    DeadlinePassed     = 6,
-    DeadlineNotPassed  = 7,
-    InvalidReward      = 8,
-    LockPeriodActive   = 9,
-    InvalidFeeBps      = 10,
-    NotTaskOwner       = 11,
-    NotTaskClaimer     = 12,
+    Unauthorized = 2,
+    ContractPaused = 3,
+    TaskNotFound = 4,
+    InvalidTaskStatus = 5,
+    DeadlinePassed = 6,
+    DeadlineNotPassed = 7,
+    InvalidReward = 8,
+    LockPeriodActive = 9,
+    InvalidFeeBps = 10,
+    NotTaskOwner = 11,
+    NotTaskClaimer = 12,
     NoRewardsAvailable = 13,
 }
 
@@ -165,10 +164,8 @@ pub fn emit_task_executed(e: &Env, task_id: u64, keeper: &Address, net_reward: i
 }
 
 pub fn emit_task_expired(e: &Env, task_id: u64) {
-    e.events().publish(
-        (symbol_short!("exp"), symbol_short!("task")),
-        (task_id,),
-    );
+    e.events()
+        .publish((symbol_short!("exp"), symbol_short!("task")), (task_id,));
 }
 
 pub fn emit_task_cancelled(e: &Env, task_id: u64, owner: &Address) {
@@ -186,10 +183,8 @@ pub fn emit_rewards_withdrawn(e: &Env, keeper: &Address, amount: i128) {
 }
 
 pub fn emit_paused(e: &Env, paused: bool) {
-    e.events().publish(
-        (symbol_short!("paused"), symbol_short!("admin")),
-        (paused,),
-    );
+    e.events()
+        .publish((symbol_short!("paused"), symbol_short!("admin")), (paused,));
 }
 
 pub fn emit_fee_updated(e: &Env, old_bps: u32, new_bps: u32) {
@@ -225,7 +220,11 @@ pub fn emit_deadline_extended(e: &Env, task_id: u64, new_deadline: u64) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn require_not_paused(e: &Env) -> Result<(), KeeperError> {
-    if e.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+    if e.storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
         Err(KeeperError::ContractPaused)
     } else {
         Ok(())
@@ -246,7 +245,11 @@ fn require_admin(e: &Env, caller: &Address) -> Result<(), KeeperError> {
 }
 
 fn next_task_id(e: &Env) -> u64 {
-    let id: u64 = e.storage().instance().get(&DataKey::TaskCounter).unwrap_or(0u64);
+    let id: u64 = e
+        .storage()
+        .instance()
+        .get(&DataKey::TaskCounter)
+        .unwrap_or(0u64);
     let next = id.checked_add(1).expect("task id overflow");
     e.storage().instance().set(&DataKey::TaskCounter, &next);
     next
@@ -261,9 +264,11 @@ fn load_task(e: &Env, task_id: u64) -> Result<Task, KeeperError> {
 
 fn save_task(e: &Env, task_id: u64, task: &Task) {
     e.storage().persistent().set(&DataKey::Task(task_id), task);
-    e.storage()
-        .persistent()
-        .extend_ttl(&DataKey::Task(task_id), task.ttl_ledgers, task.ttl_ledgers);
+    e.storage().persistent().extend_ttl(
+        &DataKey::Task(task_id),
+        task.ttl_ledgers,
+        task.ttl_ledgers,
+    );
 }
 
 fn reward_token(e: &Env) -> token::Client<'_> {
@@ -278,8 +283,10 @@ fn reward_token(e: &Env) -> token::Client<'_> {
 /// Returns (keeper_net, protocol_fee).
 fn split_reward(reward: i128, fee_bps: u32) -> (i128, i128) {
     let fee = reward
-        .checked_mul(fee_bps as i128).expect("overflow")
-        .checked_div(10_000).expect("div zero");
+        .checked_mul(fee_bps as i128)
+        .expect("overflow")
+        .checked_div(10_000)
+        .expect("div zero");
     (reward.checked_sub(fee).expect("underflow"), fee)
 }
 
@@ -290,7 +297,9 @@ fn split_reward(reward: i128, fee_bps: u32) -> (i128, i128) {
 fn credit_keeper(e: &Env, keeper: &Address, amount: i128) {
     let key = DataKey::KeeperReward(keeper.clone());
     let current: i128 = e.storage().persistent().get(&key).unwrap_or(0);
-    let updated = current.checked_add(amount).expect("keeper balance overflow");
+    let updated = current
+        .checked_add(amount)
+        .expect("keeper balance overflow");
     e.storage().persistent().set(&key, &updated);
     e.storage().persistent().extend_ttl(&key, 100_000, 100_000);
 }
@@ -300,8 +309,14 @@ fn accrue_fee(e: &Env, amount: i128) {
     if amount == 0 {
         return;
     }
-    let current: i128 = e.storage().instance().get(&DataKey::FeesAccrued).unwrap_or(0);
-    let updated = current.checked_add(amount).expect("fee accumulator overflow");
+    let current: i128 = e
+        .storage()
+        .instance()
+        .get(&DataKey::FeesAccrued)
+        .unwrap_or(0);
+    let updated = current
+        .checked_add(amount)
+        .expect("fee accumulator overflow");
     e.storage().instance().set(&DataKey::FeesAccrued, &updated);
 }
 
@@ -331,7 +346,6 @@ pub struct KeeperRegistry;
 
 #[contractimpl]
 impl KeeperRegistry {
-
     // ── initialize ───────────────────────────────────────────────────────────
     //
     // Fully implemented. Call once after deployment.
@@ -356,7 +370,9 @@ impl KeeperRegistry {
         admin.require_auth();
 
         e.storage().instance().set(&DataKey::Admin, &admin);
-        e.storage().instance().set(&DataKey::RewardToken, &reward_token);
+        e.storage()
+            .instance()
+            .set(&DataKey::RewardToken, &reward_token);
         e.storage().instance().set(&DataKey::FeeBps, &fee_bps);
         e.storage().instance().set(&DataKey::Paused, &false);
         e.storage().instance().set(&DataKey::TaskCounter, &0u64);
@@ -459,7 +475,10 @@ impl KeeperRegistry {
         }
 
         reward_token(&e).transfer(&owner, &e.current_contract_address(), &additional);
-        task.reward = task.reward.checked_add(additional).expect("reward overflow");
+        task.reward = task
+            .reward
+            .checked_add(additional)
+            .expect("reward overflow");
         save_task(&e, task_id, &task);
 
         emit_reward_increased(&e, task_id, task.reward);
@@ -577,8 +596,14 @@ impl KeeperRegistry {
         save_task(&e, task_id, &task);
 
         emit_task_executed(&e, task_id, &keeper, keeper_net);
-        log!(&e, "Task {} executed by {} net={} proof_len={}",
-             task_id, keeper, keeper_net, proof.len());
+        log!(
+            &e,
+            "Task {} executed by {} net={} proof_len={}",
+            task_id,
+            keeper,
+            keeper_net,
+            proof.len()
+        );
         Ok(())
     }
 
@@ -607,7 +632,13 @@ impl KeeperRegistry {
         save_task(&e, task_id, &task);
 
         emit_task_cancelled(&e, task_id, &owner);
-        log!(&e, "Task {} cancelled, {} refunded to {}", task_id, task.reward, owner);
+        log!(
+            &e,
+            "Task {} cancelled, {} refunded to {}",
+            task_id,
+            task.reward,
+            owner
+        );
         Ok(())
     }
 
@@ -635,7 +666,12 @@ impl KeeperRegistry {
         save_task(&e, task_id, &task);
 
         emit_task_expired(&e, task_id);
-        log!(&e, "Task {} expired, {} refunded to owner", task_id, task.reward);
+        log!(
+            &e,
+            "Task {} expired, {} refunded to owner",
+            task_id,
+            task.reward
+        );
         Ok(())
     }
 
@@ -724,11 +760,7 @@ impl KeeperRegistry {
     // incoming admin must authorize, so the role can never be transferred to an
     // address that has not consented to take it (no accidental lock-out).
 
-    pub fn transfer_admin(
-        e: Env,
-        admin: Address,
-        new_admin: Address,
-    ) -> Result<(), KeeperError> {
+    pub fn transfer_admin(e: Env, admin: Address, new_admin: Address) -> Result<(), KeeperError> {
         require_admin(&e, &admin)?;
         new_admin.require_auth();
         e.storage().instance().set(&DataKey::Admin, &new_admin);
@@ -766,13 +798,19 @@ impl KeeperRegistry {
         if amount <= 0 {
             return Err(KeeperError::InvalidReward);
         }
-        let accrued: i128 = e.storage().instance().get(&DataKey::FeesAccrued).unwrap_or(0);
+        let accrued: i128 = e
+            .storage()
+            .instance()
+            .get(&DataKey::FeesAccrued)
+            .unwrap_or(0);
         if amount > accrued {
             return Err(KeeperError::NoRewardsAvailable);
         }
 
         // Effects before interaction.
-        e.storage().instance().set(&DataKey::FeesAccrued, &(accrued - amount));
+        e.storage()
+            .instance()
+            .set(&DataKey::FeesAccrued, &(accrued - amount));
         reward_token(&e).transfer(&e.current_contract_address(), &treasury, &amount);
 
         log!(&e, "Swept {} fees to {}", amount, treasury);
@@ -781,7 +819,10 @@ impl KeeperRegistry {
 
     /// Read-only: protocol fees accrued and awaiting sweep.
     pub fn fees_accrued(e: Env) -> i128 {
-        e.storage().instance().get(&DataKey::FeesAccrued).unwrap_or(0)
+        e.storage()
+            .instance()
+            .get(&DataKey::FeesAccrued)
+            .unwrap_or(0)
     }
 
     // ── Read-only views ───────────────────────────────────────────────────────
@@ -791,7 +832,10 @@ impl KeeperRegistry {
     }
 
     pub fn task_count(e: Env) -> u64 {
-        e.storage().instance().get(&DataKey::TaskCounter).unwrap_or(0u64)
+        e.storage()
+            .instance()
+            .get(&DataKey::TaskCounter)
+            .unwrap_or(0u64)
     }
 
     pub fn keeper_balance(e: Env, keeper: Address) -> i128 {
@@ -806,11 +850,17 @@ impl KeeperRegistry {
     }
 
     pub fn get_fee_bps(e: Env) -> u32 {
-        e.storage().instance().get(&DataKey::FeeBps).unwrap_or(300u32)
+        e.storage()
+            .instance()
+            .get(&DataKey::FeeBps)
+            .unwrap_or(300u32)
     }
 
     pub fn is_paused(e: Env) -> bool {
-        e.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+        e.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     pub fn reward_token_address(e: Env) -> Option<Address> {
