@@ -189,6 +189,13 @@ pub fn emit_paused(e: &Env, paused: bool) {
     );
 }
 
+pub fn emit_fee_updated(e: &Env, old_bps: u32, new_bps: u32) {
+    e.events().publish(
+        (symbol_short!("fee"), symbol_short!("admin")),
+        (old_bps, new_bps),
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -590,7 +597,9 @@ impl KeeperRegistry {
         if new_bps > 10_000 {
             return Err(KeeperError::InvalidFeeBps);
         }
+        let old_bps: u32 = e.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
         e.storage().instance().set(&DataKey::FeeBps, &new_bps);
+        emit_fee_updated(&e, old_bps, new_bps);
         log!(&e, "Fee updated to {} bps", new_bps);
         Ok(())
     }

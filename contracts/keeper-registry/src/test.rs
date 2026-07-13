@@ -706,6 +706,14 @@ fn test_set_fee_bps_affects_future_executions() {
 }
 
 #[test]
+fn test_set_fee_emits_event() {
+    let s = setup();
+    let before = s.env.events().all().len();
+    s.registry.set_fee_bps(&s.admin, &500u32);
+    assert!(s.env.events().all().len() > before);
+}
+
+#[test]
 fn test_set_fee_over_max_fails() {
     let s = setup();
     assert_eq!(
