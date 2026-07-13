@@ -1,0 +1,37 @@
+name: "🌱 Good first issue (maintainers)"
+description: Maintainer template for posting a scoped, beginner-friendly task
+labels: ["good-first-issue"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Maintainers use this to post Wave-Program tasks. Keep the scope small
+        and point at exact files so a newcomer can finish it in one PR.
+  - type: textarea
+    id: task
+    attributes:
+      label: Task
+      description: One specific, self-contained change.
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Files to touch
+      placeholder: contracts/keeper-registry/src/lib.rs, ...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] New test added and passing
+        - [ ] `cargo fmt` / `cargo clippy` clean
+    validations:
+      required: true
+  - type: input
+    id: mentor
+    attributes:
+      label: Mentor
+      description: Maintainer who will review and unblock the contributor.
