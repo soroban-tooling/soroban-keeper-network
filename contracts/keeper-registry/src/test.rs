@@ -365,6 +365,24 @@ fn test_extend_deadline_backwards_fails() {
 }
 
 #[test]
+fn test_is_claimable_lifecycle() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s);
+
+    assert!(s.registry.is_claimable(&id)); // Pending → claimable
+    s.registry.claim_task(&keeper, &id);
+    assert!(!s.registry.is_claimable(&id)); // Claimed, lock active → not
+
+    advance(&s.env, 121, 60); // lock window elapses
+    assert!(s.registry.is_claimable(&id)); // re-claimable
+
+    advance(&s.env, 1, 3_601); // past deadline
+    assert!(!s.registry.is_claimable(&id)); // deadline passed → not
+    assert!(!s.registry.is_claimable(&999u64)); // unknown → not
+}
+
+#[test]
 fn test_claim_pending_task() {
     let s = setup();
     let keeper = Address::generate(&s.env);

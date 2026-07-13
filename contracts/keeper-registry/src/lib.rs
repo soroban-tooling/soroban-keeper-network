@@ -814,6 +814,26 @@ impl KeeperRegistry {
         e.storage().instance().get(&DataKey::RewardToken)
     }
 
+    /// True if the task can be claimed right now: it exists, its deadline has
+    /// not passed, and it is either Pending or a Claimed task whose lock window
+    /// has elapsed. Lets keeper bots pre-filter candidates without simulating a
+    /// full claim_task call.
+    pub fn is_claimable(e: Env, task_id: u64) -> bool {
+        match load_task(&e, task_id) {
+            Ok(task) => {
+                if e.ledger().timestamp() >= task.deadline {
+                    return false;
+                }
+                match task.status {
+                    TaskStatus::Pending => true,
+                    TaskStatus::Claimed => lock_expired(&e, &task),
+                    _ => false,
+                }
+            }
+            Err(_) => false,
+        }
+    }
+
     /// Minimum reward required to register a task (0 if unset).
     pub fn min_reward(e: Env) -> i128 {
         e.storage().instance().get(&DataKey::MinReward).unwrap_or(0)
