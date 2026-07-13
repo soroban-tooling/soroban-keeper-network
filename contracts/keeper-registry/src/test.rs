@@ -706,6 +706,54 @@ fn test_set_fee_bps_affects_future_executions() {
 }
 
 #[test]
+fn test_min_reward_defaults_to_zero() {
+    let s = setup();
+    assert_eq!(s.registry.min_reward(), 0i128);
+}
+
+#[test]
+fn test_set_min_reward_rejects_below_floor() {
+    let s = setup();
+    s.registry.set_min_reward(&s.admin, &500_000i128);
+    assert_eq!(s.registry.min_reward(), 500_000i128);
+
+    // A task below the floor is rejected...
+    assert_eq!(
+        s.registry.try_register_task(
+            &s.admin,
+            &TaskType::Custom,
+            &calldata(&s.env),
+            &499_999i128,
+            &(s.env.ledger().timestamp() + 3_600),
+            &17_280u32,
+            &60u32,
+        ),
+        Err(Ok(KeeperError::InvalidReward))
+    );
+    // ...but one at the floor is accepted.
+    let id = s.registry.register_task(
+        &s.admin,
+        &TaskType::Custom,
+        &calldata(&s.env),
+        &500_000i128,
+        &(s.env.ledger().timestamp() + 3_600),
+        &17_280u32,
+        &60u32,
+    );
+    assert_eq!(id, 1u64);
+}
+
+#[test]
+fn test_set_min_reward_by_non_admin_fails() {
+    let s = setup();
+    let stranger = Address::generate(&s.env);
+    assert_eq!(
+        s.registry.try_set_min_reward(&stranger, &1i128),
+        Err(Ok(KeeperError::Unauthorized))
+    );
+}
+
+#[test]
 fn test_set_fee_emits_event() {
     let s = setup();
     let before = s.env.events().all().len();

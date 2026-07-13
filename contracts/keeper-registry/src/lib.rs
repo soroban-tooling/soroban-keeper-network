@@ -52,6 +52,9 @@ pub enum DataKey {
     /// `sweep_fees`. Kept separate from task escrow so a sweep can never touch
     /// funds owed to owners or keepers.
     FeesAccrued,
+    /// Minimum reward a task may be registered with. Guards against dust-spam
+    /// tasks that would cost keepers more in fees than they pay out. Default 0.
+    MinReward,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -381,6 +384,10 @@ impl KeeperRegistry {
         if reward <= 0 {
             return Err(KeeperError::InvalidReward);
         }
+        let min_reward: i128 = e.storage().instance().get(&DataKey::MinReward).unwrap_or(0);
+        if reward < min_reward {
+            return Err(KeeperError::InvalidReward);
+        }
         if deadline <= e.ledger().timestamp() {
             return Err(KeeperError::DeadlinePassed);
         }
@@ -611,6 +618,21 @@ impl KeeperRegistry {
         Ok(())
     }
 
+    // ── set_min_reward ────────────────────────────────────────────────────────
+    //
+    // Admin sets the minimum reward a task may be registered with. Existing
+    // tasks are unaffected; only future registrations are validated.
+
+    pub fn set_min_reward(e: Env, admin: Address, min_reward: i128) -> Result<(), KeeperError> {
+        require_admin(&e, &admin)?;
+        if min_reward < 0 {
+            return Err(KeeperError::InvalidReward);
+        }
+        e.storage().instance().set(&DataKey::MinReward, &min_reward);
+        log!(&e, "Min reward set to {}", min_reward);
+        Ok(())
+    }
+
     // ── transfer_admin ────────────────────────────────────────────────────────
     //
     // Hands the admin role to a new address. Both the current admin and the
@@ -708,6 +730,11 @@ impl KeeperRegistry {
 
     pub fn reward_token_address(e: Env) -> Option<Address> {
         e.storage().instance().get(&DataKey::RewardToken)
+    }
+
+    /// Minimum reward required to register a task (0 if unset).
+    pub fn min_reward(e: Env) -> i128 {
+        e.storage().instance().get(&DataKey::MinReward).unwrap_or(0)
     }
 
     /// Contract logic version. See [`VERSION`].
