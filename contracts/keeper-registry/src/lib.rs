@@ -549,49 +549,67 @@ impl KeeperRegistry {
 
     // ── pause / unpause ───────────────────────────────────────────────────────
     //
-    // TODO(contributors): admin emergency circuit breaker.
-    //   - require_admin() then flip DataKey::Paused
-    // Tracking issue: https://github.com/arandomogg/soroban-keeper-network/issues/6
+    // Admin emergency circuit breaker. While paused, register_task/claim_task/
+    // execute_task are blocked, but expire_task and withdraw_rewards remain open
+    // so funds can always be recovered even during an incident.
 
-    pub fn pause(_e: Env, _admin: Address) -> Result<(), KeeperError> {
-        panic!("not yet implemented — see GitHub issue #6")
+    pub fn pause(e: Env, admin: Address) -> Result<(), KeeperError> {
+        require_admin(&e, &admin)?;
+        e.storage().instance().set(&DataKey::Paused, &true);
+        log!(&e, "Registry paused by {}", admin);
+        Ok(())
     }
 
-    pub fn unpause(_e: Env, _admin: Address) -> Result<(), KeeperError> {
-        panic!("not yet implemented — see GitHub issue #6")
+    pub fn unpause(e: Env, admin: Address) -> Result<(), KeeperError> {
+        require_admin(&e, &admin)?;
+        e.storage().instance().set(&DataKey::Paused, &false);
+        log!(&e, "Registry unpaused by {}", admin);
+        Ok(())
     }
 
     // ── set_fee_bps ───────────────────────────────────────────────────────────
     //
-    // TODO(contributors): admin adjusts the platform fee (max 10 000 bps).
-    // Tracking issue: https://github.com/arandomogg/soroban-keeper-network/issues/7
+    // Admin adjusts the platform fee. The new rate only affects tasks executed
+    // after this call; already-accrued fees are unaffected.
 
-    pub fn set_fee_bps(_e: Env, _admin: Address, _new_bps: u32) -> Result<(), KeeperError> {
-        panic!("not yet implemented — see GitHub issue #7")
+    pub fn set_fee_bps(e: Env, admin: Address, new_bps: u32) -> Result<(), KeeperError> {
+        require_admin(&e, &admin)?;
+        if new_bps > 10_000 {
+            return Err(KeeperError::InvalidFeeBps);
+        }
+        e.storage().instance().set(&DataKey::FeeBps, &new_bps);
+        log!(&e, "Fee updated to {} bps", new_bps);
+        Ok(())
     }
 
     // ── transfer_admin ────────────────────────────────────────────────────────
     //
-    // TODO(contributors): hand admin role to a new address.
-    //   - both current admin AND new_admin must require_auth()
-    // Tracking issue: https://github.com/arandomogg/soroban-keeper-network/issues/8
+    // Hands the admin role to a new address. Both the current admin and the
+    // incoming admin must authorize, so the role can never be transferred to an
+    // address that has not consented to take it (no accidental lock-out).
 
     pub fn transfer_admin(
-        _e: Env,
-        _admin: Address,
-        _new_admin: Address,
+        e: Env,
+        admin: Address,
+        new_admin: Address,
     ) -> Result<(), KeeperError> {
-        panic!("not yet implemented — see GitHub issue #8")
+        require_admin(&e, &admin)?;
+        new_admin.require_auth();
+        e.storage().instance().set(&DataKey::Admin, &new_admin);
+        log!(&e, "Admin transferred from {} to {}", admin, new_admin);
+        Ok(())
     }
 
     // ── upgrade ───────────────────────────────────────────────────────────────
     //
-    // TODO(contributors): upgrade the contract WASM hash (admin only).
-    //   - call e.deployer().update_current_contract_wasm(new_wasm_hash)
-    // Tracking issue: https://github.com/arandomogg/soroban-keeper-network/issues/9
+    // Admin swaps the contract WASM for a new hash (already installed on-chain).
+    // Storage layout is preserved across the upgrade.
 
-    pub fn upgrade(_e: Env, _admin: Address, _new_wasm_hash: BytesN<32>) -> Result<(), KeeperError> {
-        panic!("not yet implemented — see GitHub issue #9")
+    pub fn upgrade(e: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), KeeperError> {
+        require_admin(&e, &admin)?;
+        e.deployer().update_current_contract_wasm(new_wasm_hash);
+        log!(&e, "Contract upgraded by {}", admin);
+        Ok(())
     }
 
     // ── sweep_fees ────────────────────────────────────────────────────────────
