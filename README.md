@@ -118,9 +118,9 @@ A **shared, permissionless, on-chain coordination layer** where:
 │  │                    KeeperRegistry Contract                          │  │
 │  │                                                                     │  │
 │  │  Instance Storage (hot, short-TTL)                                  │  │
-│  │  ┌──────────┬─────────┬────────┬─────────────┬───────────────────┐ │  │
-│  │  │  Admin   │ FeeBps  │ Paused │ TaskCounter  │   RewardToken     │ │  │
-│  │  └──────────┴─────────┴────────┴─────────────┴───────────────────┘ │  │
+│  │  ┌──────────┬─────────┬────────┬─────────────┬─────────────┬──────┐ │  │
+│  │  │  Admin   │ FeeBps  │ Paused │ TaskCounter  │ RewardToken │ Fees │ │  │
+│  │  └──────────┴─────────┴────────┴─────────────┴─────────────┴──────┘ │  │
 │  │                                                                     │  │
 │  │  Persistent Storage (task lifetime)                                 │  │
 │  │  ┌────────────────────────────────────────────────────────────┐    │  │

@@ -1,15 +1,14 @@
-//! # KeeperRegistry — Starter Tests
+//! # KeeperRegistry — Test Suite
 //!
-//! These tests cover the two functions that are currently implemented:
-//! `initialize` and `register_task`.
+//! Covers the full task lifecycle (register → claim → execute → withdraw) plus
+//! the refund paths (cancel/expire), fee accounting, and every admin control.
 //!
 //! ## For contributors
-//! When you implement a new function, add tests here.
-//! Every public function must have at least:
+//! When you add a function, add tests here. Every public function should have:
 //!   - one happy-path test
 //!   - a test for each KeeperError variant it can return
 //!
-//! Run with: `cargo test --features testutils`
+//! Run with: `cargo test -p keeper-registry`
 
 #![cfg(test)]
 

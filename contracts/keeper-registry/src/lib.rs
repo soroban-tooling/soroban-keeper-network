@@ -4,26 +4,26 @@
 //! dApps register automation tasks (liquidations, oracle pushes, TTL extensions…)
 //! with an XLM reward bounty. Permissionless keeper bots compete to execute them.
 //!
-//! ## What is implemented here (starter scope)
-//! - All storage keys, types, errors, and events — the full schema
-//! - `initialize` — deploy and configure the registry
-//! - `register_task` — dApps deposit a reward and post a task
-//! - Read-only view helpers — `get_task`, `task_count`, `is_paused`, etc.
+//! ## Implemented surface (MVP complete)
+//! - Full schema: storage keys, types, errors, and events
+//! - `initialize` / `register_task` — deploy, configure, and post funded tasks
+//! - `claim_task` — first-come-first-served keeper locking with re-claim after
+//!   the lock window elapses
+//! - `execute_task` — proof submission, reward split, keeper crediting
+//! - `cancel_task` / `expire_task` — owner refund and permissionless expiry
+//! - `withdraw_rewards` — keeper pulls its accrued balance (CEI-safe)
+//! - Admin: `pause`/`unpause`, `set_fee_bps`, `transfer_admin`, `upgrade`,
+//!   `sweep_fees`
+//! - Read-only views — `get_task`, `task_count`, `keeper_balance`,
+//!   `fees_accrued`, `is_paused`, etc.
 //!
-//! ## What contributors should implement
-//! Every function marked `TODO(contributors)` below is an open issue.
-//! See CONTRIBUTING.md and the GitHub Issues tab to pick one up.
-//!
-//! Recommended order for new contributors:
-//!   1. `claim_task`        — first-come-first-served keeper locking
-//!   2. `execute_task`      — proof submission + reward crediting
-//!   3. `cancel_task`       — owner refund path
-//!   4. `expire_task`       — permissionless deadline enforcement
-//!   5. `withdraw_rewards`  — keeper pulls accumulated balance
-//!   6. Admin functions     — pause, set_fee_bps, transfer_admin, upgrade
+//! ## Where contributors come in
+//! The MVP is functional; the open issues now target Phase 2 (see README
+//! Roadmap): on-chain execution verifiers, batch registration, keeper
+//! staking/reputation, and an events indexer. See CONTRIBUTING.md.
 //!
 //! ## Storage Layout
-//! - Instance:   Admin, FeeBps, Paused, TaskCounter, RewardToken
+//! - Instance:   Admin, FeeBps, Paused, TaskCounter, RewardToken, FeesAccrued
 //! - Persistent: Task(id) → Task struct, KeeperReward(address) → i128
 
 #![no_std]
