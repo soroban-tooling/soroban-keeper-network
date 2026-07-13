@@ -532,6 +532,95 @@ fn test_expire_executed_task_fails() {
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// withdraw_rewards / sweep_fees
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Drives a full register → claim → execute cycle and returns the keeper.
+fn executed_task_keeper(s: &Setup) -> Address {
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(s);
+    s.registry.claim_task(&keeper, &id);
+    s.registry.execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof"));
+    keeper
+}
+
 #[test]
-#[ignore = "implement withdraw_rewards first — GitHub issue #5"]
-fn test_withdraw_rewards() {}
+fn test_withdraw_transfers_balance_and_zeroes_it() {
+    let s = setup();
+    let token = token::Client::new(&s.env, &s.token_id);
+    let keeper = executed_task_keeper(&s); // credited 970_000
+
+    assert_eq!(token.balance(&keeper), 0i128);
+    let withdrawn = s.registry.withdraw_rewards(&keeper);
+
+    assert_eq!(withdrawn, 970_000i128);
+    assert_eq!(token.balance(&keeper), 970_000i128);
+    assert_eq!(s.registry.keeper_balance(&keeper), 0i128);
+}
+
+#[test]
+fn test_withdraw_with_no_balance_fails() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    assert_eq!(
+        s.registry.try_withdraw_rewards(&keeper),
+        Err(Ok(KeeperError::NoRewardsAvailable))
+    );
+}
+
+#[test]
+fn test_double_withdraw_fails() {
+    let s = setup();
+    let keeper = executed_task_keeper(&s);
+    s.registry.withdraw_rewards(&keeper);
+    assert_eq!(
+        s.registry.try_withdraw_rewards(&keeper),
+        Err(Ok(KeeperError::NoRewardsAvailable))
+    );
+}
+
+#[test]
+fn test_execute_accrues_protocol_fee() {
+    let s = setup();
+    let _ = executed_task_keeper(&s);
+    // 3% of 1_000_000 withheld.
+    assert_eq!(s.registry.fees_accrued(), 30_000i128);
+}
+
+#[test]
+fn test_sweep_fees_to_treasury() {
+    let s = setup();
+    let token = token::Client::new(&s.env, &s.token_id);
+    let _ = executed_task_keeper(&s); // 30_000 fee accrued
+    let treasury = Address::generate(&s.env);
+
+    s.registry.sweep_fees(&s.admin, &treasury, &30_000i128);
+
+    assert_eq!(token.balance(&treasury), 30_000i128);
+    assert_eq!(s.registry.fees_accrued(), 0i128);
+}
+
+#[test]
+fn test_sweep_more_than_accrued_fails() {
+    let s = setup();
+    let _ = executed_task_keeper(&s); // 30_000 accrued
+    let treasury = Address::generate(&s.env);
+    // Guard: cannot sweep into task escrow / keeper balances.
+    assert_eq!(
+        s.registry.try_sweep_fees(&s.admin, &treasury, &30_001i128),
+        Err(Ok(KeeperError::NoRewardsAvailable))
+    );
+}
+
+#[test]
+fn test_sweep_by_non_admin_fails() {
+    let s = setup();
+    let _ = executed_task_keeper(&s);
+    let stranger = Address::generate(&s.env);
+    let treasury = Address::generate(&s.env);
+    assert_eq!(
+        s.registry.try_sweep_fees(&stranger, &treasury, &1i128),
+        Err(Ok(KeeperError::Unauthorized))
+    );
+}

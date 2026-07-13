@@ -48,6 +48,10 @@ pub enum DataKey {
     RewardToken,
     Task(u64),
     KeeperReward(Address),
+    /// Running total of protocol fees withheld from executed tasks, awaiting
+    /// `sweep_fees`. Kept separate from task escrow so a sweep can never touch
+    /// funds owed to owners or keepers.
+    FeesAccrued,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -253,6 +257,16 @@ fn credit_keeper(e: &Env, keeper: &Address, amount: i128) {
     e.storage().persistent().extend_ttl(&key, 100_000, 100_000);
 }
 
+/// Adds `amount` to the swept-able protocol fee accumulator (instance storage).
+fn accrue_fee(e: &Env, amount: i128) {
+    if amount == 0 {
+        return;
+    }
+    let current: i128 = e.storage().instance().get(&DataKey::FeesAccrued).unwrap_or(0);
+    let updated = current.checked_add(amount).expect("fee accumulator overflow");
+    e.storage().instance().set(&DataKey::FeesAccrued, &updated);
+}
+
 /// True once a claimed task's exclusive lock window has elapsed, meaning any
 /// keeper may re-claim it. This is what prevents a keeper from claiming and then
 /// never executing: after `lock_ledgers`, the task is fair game again.
@@ -438,8 +452,9 @@ impl KeeperRegistry {
         }
 
         let fee_bps: u32 = e.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
-        let (keeper_net, _fee) = split_reward(task.reward, fee_bps);
+        let (keeper_net, fee) = split_reward(task.reward, fee_bps);
         credit_keeper(&e, &keeper, keeper_net);
+        accrue_fee(&e, fee);
 
         task.status = TaskStatus::Executed;
         save_task(&e, task_id, &task);
@@ -509,21 +524,27 @@ impl KeeperRegistry {
 
     // ── withdraw_rewards ─────────────────────────────────────────────────────
     //
-    // TODO(contributors): keepers call this to pull their accumulated balance.
-    //
-    // Rules to enforce:
-    //   - balance must be > 0 (return NoRewardsAvailable otherwise)
-    //   - zero the balance BEFORE transferring (CEI pattern — prevents re-entrancy)
-    //   - transfer balance to keeper
-    //   - emit emit_rewards_withdrawn(...)
-    //   - return the withdrawn amount
-    //
-    // Hint: the keeper's balance is stored at DataKey::KeeperReward(address).
-    //       You will need a credit_keeper() helper used by execute_task too.
-    // Tracking issue: https://github.com/arandomogg/soroban-keeper-network/issues/5
+    // A keeper pulls its accumulated balance. Follows checks-effects-
+    // interactions: the stored balance is zeroed BEFORE the token transfer, so
+    // even a malicious reward token that re-enters cannot double-spend the
+    // balance. Returns the amount withdrawn.
 
-    pub fn withdraw_rewards(_e: Env, _keeper: Address) -> Result<i128, KeeperError> {
-        panic!("not yet implemented — see GitHub issue #5")
+    pub fn withdraw_rewards(e: Env, keeper: Address) -> Result<i128, KeeperError> {
+        keeper.require_auth();
+
+        let key = DataKey::KeeperReward(keeper.clone());
+        let balance: i128 = e.storage().persistent().get(&key).unwrap_or(0);
+        if balance <= 0 {
+            return Err(KeeperError::NoRewardsAvailable);
+        }
+
+        // Effects before interaction.
+        e.storage().persistent().set(&key, &0i128);
+        reward_token(&e).transfer(&e.current_contract_address(), &keeper, &balance);
+
+        emit_rewards_withdrawn(&e, &keeper, balance);
+        log!(&e, "Keeper {} withdrew {}", keeper, balance);
+        Ok(balance)
     }
 
     // ── pause / unpause ───────────────────────────────────────────────────────
@@ -575,16 +596,37 @@ impl KeeperRegistry {
 
     // ── sweep_fees ────────────────────────────────────────────────────────────
     //
-    // TODO(contributors): admin moves accumulated protocol fees to a treasury.
-    // Tracking issue: https://github.com/arandomogg/soroban-keeper-network/issues/10
+    // Admin moves up to the accrued protocol fees to a treasury address. The
+    // amount is checked against the FeesAccrued accumulator, so a sweep can
+    // never dip into task escrow or keeper balances.
 
     pub fn sweep_fees(
-        _e: Env,
-        _admin: Address,
-        _treasury: Address,
-        _amount: i128,
+        e: Env,
+        admin: Address,
+        treasury: Address,
+        amount: i128,
     ) -> Result<(), KeeperError> {
-        panic!("not yet implemented — see GitHub issue #10")
+        require_admin(&e, &admin)?;
+
+        if amount <= 0 {
+            return Err(KeeperError::InvalidReward);
+        }
+        let accrued: i128 = e.storage().instance().get(&DataKey::FeesAccrued).unwrap_or(0);
+        if amount > accrued {
+            return Err(KeeperError::NoRewardsAvailable);
+        }
+
+        // Effects before interaction.
+        e.storage().instance().set(&DataKey::FeesAccrued, &(accrued - amount));
+        reward_token(&e).transfer(&e.current_contract_address(), &treasury, &amount);
+
+        log!(&e, "Swept {} fees to {}", amount, treasury);
+        Ok(())
+    }
+
+    /// Read-only: protocol fees accrued and awaiting sweep.
+    pub fn fees_accrued(e: Env) -> i128 {
+        e.storage().instance().get(&DataKey::FeesAccrued).unwrap_or(0)
     }
 
     // ── Read-only views ───────────────────────────────────────────────────────
