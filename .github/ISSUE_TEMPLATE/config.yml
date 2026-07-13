@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions & discussion
+    url: https://github.com/soroban-tooling/soroban-keeper-network/discussions
+    about: Ask questions, propose ideas, or discuss the roadmap here.
+  - name: 🔐 Security disclosure
+    url: https://github.com/soroban-tooling/soroban-keeper-network/blob/main/SECURITY.md
+    about: Please report vulnerabilities privately — do not open a public issue.
