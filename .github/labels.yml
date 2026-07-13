@@ -1,0 +1,44 @@
+# Label taxonomy for the Soroban Keeper Network Wave Program.
+# Apply with a label-sync action (e.g. github-label-sync) or by hand.
+
+# ── Difficulty (Wave Program) ──────────────────────────────────────────
+- name: good-first-issue
+  color: "7057ff"
+  description: Small, scoped, newcomer-friendly — pick this if it's your first PR
+- name: intermediate
+  color: "0e8a16"
+  description: Assumes familiarity with the codebase
+- name: advanced
+  color: "b60205"
+  description: Phase 2 / design-heavy work for experienced contributors
+
+# ── Area ───────────────────────────────────────────────────────────────
+- name: contract
+  color: "1d76db"
+  description: keeper-registry Soroban contract
+- name: keeper-bot
+  color: "5319e7"
+  description: Off-chain keeper bot
+- name: docs
+  color: "006b75"
+  description: Documentation
+- name: testing
+  color: "fbca04"
+  description: Tests, fuzzing, benchmarks
+- name: tooling
+  color: "c2e0c6"
+  description: CI, scripts, developer experience
+
+# ── Type / status ──────────────────────────────────────────────────────
+- name: bug
+  color: "d73a4a"
+  description: Something isn't working
+- name: enhancement
+  color: "a2eeef"
+  description: New feature or request
+- name: security
+  color: "ee0701"
+  description: Security-sensitive — handle with care
+- name: needs-triage
+  color: "ededed"
+  description: Awaiting maintainer review
