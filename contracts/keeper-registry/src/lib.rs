@@ -266,7 +266,7 @@ fn save_task(e: &Env, task_id: u64, task: &Task) {
         .extend_ttl(&DataKey::Task(task_id), task.ttl_ledgers, task.ttl_ledgers);
 }
 
-fn reward_token(e: &Env) -> token::Client {
+fn reward_token(e: &Env) -> token::Client<'_> {
     let addr: Address = e
         .storage()
         .instance()
@@ -382,6 +382,9 @@ impl KeeperRegistry {
     //
     // Returns the new task_id.
 
+    // The task parameters are all distinct scalars a caller must supply; a
+    // params struct would just move them without improving the ABI.
+    #[allow(clippy::too_many_arguments)]
     pub fn register_task(
         e: Env,
         owner: Address,

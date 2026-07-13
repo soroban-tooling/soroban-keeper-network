@@ -13,7 +13,7 @@
 #![cfg(test)]
 
 use soroban_sdk::{
-    testutils::{Address as _, Events as _, Ledger, LedgerInfo},
+    testutils::{Address as _, Events as _, Ledger},
     token,
     Address, Bytes, Env,
 };
@@ -31,6 +31,9 @@ struct Setup {
     token_id: Address,
 }
 
+// The transmutes below intentionally re-bind the env/client to a 'static
+// lifetime — the standard Soroban test-harness pattern for a shared Setup.
+#[allow(clippy::useless_transmute, clippy::missing_transmute_annotations)]
 fn setup() -> Setup {
     let env = Env::default();
     env.mock_all_auths();
@@ -639,7 +642,6 @@ fn test_expire_after_deadline_refunds_owner() {
 
     advance(&s.env, 1, 3_601); // past deadline
     // Permissionless: a third party can trigger the refund.
-    let anyone = Address::generate(&s.env);
     s.registry.expire_task(&id);
 
     assert_eq!(token.balance(&s.admin), before); // owner made whole
@@ -649,7 +651,6 @@ fn test_expire_after_deadline_refunds_owner() {
 #[test]
 fn test_expire_before_deadline_fails() {
     let s = setup();
-    let anyone = Address::generate(&s.env);
     let id = register_default_task(&s);
     assert_eq!(
         s.registry.try_expire_task(&id),
@@ -666,7 +667,6 @@ fn test_expire_executed_task_fails() {
     s.registry.execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p"));
 
     advance(&s.env, 1, 3_601);
-    let anyone = Address::generate(&s.env);
     assert_eq!(
         s.registry.try_expire_task(&id),
         Err(Ok(KeeperError::InvalidTaskStatus))
