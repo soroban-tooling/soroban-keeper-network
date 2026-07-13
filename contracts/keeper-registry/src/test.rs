@@ -18,7 +18,7 @@ use soroban_sdk::{
     Address, Bytes, Env,
 };
 
-use crate::{KeeperRegistry, KeeperRegistryClient, KeeperError, TaskStatus, TaskType};
+use crate::{split_reward, KeeperRegistry, KeeperRegistryClient, KeeperError, TaskStatus, TaskType};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared test setup
@@ -83,6 +83,34 @@ fn advance(env: &Env, ledgers: u32, seconds: u64) {
 // ─────────────────────────────────────────────────────────────────────────────
 // initialize
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pure-function invariants: split_reward
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_split_reward_invariants() {
+    // Exhaustively sweep a grid of rewards and fee rates and assert the core
+    // accounting invariants hold for every combination — no value is ever
+    // created or destroyed by the split.
+    let rewards = [1i128, 2, 7, 100, 999, 1_000_000, 7_777_777, i128::from(u64::MAX)];
+    let fee_rates = [0u32, 1, 3, 250, 300, 1_000, 5_000, 9_999, 10_000];
+
+    for &reward in &rewards {
+        for &bps in &fee_rates {
+            let (keeper_net, fee) = split_reward(reward, bps);
+
+            // 1. Conservation: nothing leaks.
+            assert_eq!(keeper_net + fee, reward, "reward={reward} bps={bps}");
+            // 2. Non-negative shares.
+            assert!(keeper_net >= 0 && fee >= 0, "reward={reward} bps={bps}");
+            // 3. Fee never exceeds the reward.
+            assert!(fee <= reward, "reward={reward} bps={bps}");
+            // 4. Fee matches the basis-point formula (floor division).
+            assert_eq!(fee, reward * bps as i128 / 10_000, "reward={reward} bps={bps}");
+        }
+    }
+}
 
 #[test]
 fn test_version_is_exposed() {
