@@ -58,6 +58,29 @@ fn calldata(env: &Env) -> Bytes {
     Bytes::from_slice(env, b"liquidate:position:42")
 }
 
+/// Registers a standard 1-hour task funded by `admin` and returns its id.
+fn register_default_task(s: &Setup) -> u64 {
+    let deadline = s.env.ledger().timestamp() + 3_600;
+    s.registry.register_task(
+        &s.admin,
+        &TaskType::Liquidation,
+        &calldata(&s.env),
+        &1_000_000i128,
+        &deadline,
+        &17_280u32,
+        &120u32,
+    )
+}
+
+/// Advances the ledger sequence and timestamp so lock-window / deadline logic
+/// can be exercised deterministically.
+fn advance(env: &Env, ledgers: u32, seconds: u64) {
+    env.ledger().with_mut(|li| {
+        li.sequence_number += ledgers;
+        li.timestamp += seconds;
+    });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // initialize
 // ─────────────────────────────────────────────────────────────────────────────
@@ -291,8 +314,71 @@ fn test_register_increments_task_counter() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
-#[ignore = "implement claim_task first — GitHub issue #1"]
-fn test_claim_task() {}
+fn test_claim_pending_task() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s);
+
+    s.registry.claim_task(&keeper, &id);
+
+    let task = s.registry.get_task(&id);
+    assert_eq!(task.status, TaskStatus::Claimed);
+    assert_eq!(task.claimer, Some(keeper));
+    assert!(task.claim_ledger.is_some());
+}
+
+#[test]
+fn test_claim_locked_task_by_second_keeper_fails() {
+    let s = setup();
+    let first = Address::generate(&s.env);
+    let second = Address::generate(&s.env);
+    let id = register_default_task(&s);
+
+    s.registry.claim_task(&first, &id);
+    // Still inside the 120-ledger lock window.
+    assert_eq!(
+        s.registry.try_claim_task(&second, &id),
+        Err(Ok(KeeperError::LockPeriodActive))
+    );
+}
+
+#[test]
+fn test_reclaim_after_lock_window_elapses() {
+    let s = setup();
+    let first = Address::generate(&s.env);
+    let second = Address::generate(&s.env);
+    let id = register_default_task(&s);
+
+    s.registry.claim_task(&first, &id);
+    // Move past the lock window (120 ledgers) but stay before the deadline.
+    advance(&s.env, 121, 60);
+
+    s.registry.claim_task(&second, &id);
+    assert_eq!(s.registry.get_task(&id).claimer, Some(second));
+}
+
+#[test]
+fn test_claim_past_deadline_fails() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s);
+
+    advance(&s.env, 1, 3_601); // step past the 1-hour deadline
+    assert_eq!(
+        s.registry.try_claim_task(&keeper, &id),
+        Err(Ok(KeeperError::DeadlinePassed))
+    );
+}
+
+#[test]
+fn test_claim_unknown_task_fails() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    assert_eq!(
+        s.registry.try_claim_task(&keeper, &999u64),
+        Err(Ok(KeeperError::TaskNotFound))
+    );
+}
 
 #[test]
 #[ignore = "implement execute_task first — GitHub issue #2"]

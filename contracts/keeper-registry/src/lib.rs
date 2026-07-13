@@ -241,6 +241,31 @@ fn split_reward(reward: i128, fee_bps: u32) -> (i128, i128) {
     (reward.checked_sub(fee).expect("underflow"), fee)
 }
 
+/// Adds `amount` to a keeper's withdrawable balance in Persistent storage.
+/// Shared by `execute_task` (credit) and used as the source of truth for
+/// `withdraw_rewards`. Kept as a single helper so the CEI invariant lives in
+/// one place.
+fn credit_keeper(e: &Env, keeper: &Address, amount: i128) {
+    let key = DataKey::KeeperReward(keeper.clone());
+    let current: i128 = e.storage().persistent().get(&key).unwrap_or(0);
+    let updated = current.checked_add(amount).expect("keeper balance overflow");
+    e.storage().persistent().set(&key, &updated);
+    e.storage().persistent().extend_ttl(&key, 100_000, 100_000);
+}
+
+/// True once a claimed task's exclusive lock window has elapsed, meaning any
+/// keeper may re-claim it. This is what prevents a keeper from claiming and then
+/// never executing: after `lock_ledgers`, the task is fair game again.
+fn lock_expired(e: &Env, task: &Task) -> bool {
+    match task.claim_ledger {
+        Some(claimed_at) => {
+            let unlock_at = claimed_at.saturating_add(task.lock_ledgers);
+            e.ledger().sequence() >= unlock_at
+        }
+        None => true,
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Contract
 // ─────────────────────────────────────────────────────────────────────────────
@@ -346,18 +371,40 @@ impl KeeperRegistry {
 
     // ── claim_task ───────────────────────────────────────────────────────────
     //
-    // TODO(contributors): implement permissionless task claiming.
-    //
-    // Rules to enforce:
-    //   - task must be Pending, OR Claimed but lock_ledgers have elapsed
-    //   - task deadline must not have passed
-    //   - set task.status = Claimed, task.claimer = keeper, task.claim_ledger = now
-    //   - emit emit_task_claimed(...)
-    //
-    // Tracking issue: https://github.com/arandomogg/soroban-keeper-network/issues/1
+    // Permissionless first-come-first-served claiming. A Pending task may be
+    // claimed by anyone; a Claimed task may be re-claimed only after its
+    // previous claimer's lock window has elapsed (see `lock_expired`), which
+    // stops a keeper from squatting on a task it never intends to execute.
 
-    pub fn claim_task(_e: Env, _keeper: Address, _task_id: u64) -> Result<(), KeeperError> {
-        panic!("not yet implemented — see GitHub issue #1")
+    pub fn claim_task(e: Env, keeper: Address, task_id: u64) -> Result<(), KeeperError> {
+        require_not_paused(&e)?;
+        keeper.require_auth();
+
+        let mut task = load_task(&e, task_id)?;
+
+        if e.ledger().timestamp() >= task.deadline {
+            return Err(KeeperError::DeadlinePassed);
+        }
+
+        match task.status {
+            TaskStatus::Pending => {}
+            TaskStatus::Claimed => {
+                // Only allow a takeover once the current lock has expired.
+                if !lock_expired(&e, &task) {
+                    return Err(KeeperError::LockPeriodActive);
+                }
+            }
+            _ => return Err(KeeperError::InvalidTaskStatus),
+        }
+
+        task.status = TaskStatus::Claimed;
+        task.claimer = Some(keeper.clone());
+        task.claim_ledger = Some(e.ledger().sequence());
+        save_task(&e, task_id, &task);
+
+        emit_task_claimed(&e, task_id, &keeper);
+        log!(&e, "Task {} claimed by {}", task_id, keeper);
+        Ok(())
     }
 
     // ── execute_task ─────────────────────────────────────────────────────────
