@@ -15,7 +15,7 @@
 ### Responsible Disclosure Process
 
 1. **Email** your report to: `security@soroban-keeper.network`  
-   *(Until the domain is registered, DM `@arandomogg` on GitHub with subject line: `[SECURITY] Keeper Network`)*
+   *(Until the domain is registered, DM `@Andreschuks101` on GitHub with subject line: `[SECURITY] Keeper Network`)*
 
 2. **Include** in your report:
    - A description of the vulnerability

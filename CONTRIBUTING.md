@@ -71,7 +71,7 @@ Add to `.vscode/extensions.json` (not committed to avoid forcing preferences):
 
 ```bash
 # Clone
-git clone https://github.com/arandomogg/soroban-keeper-network
+git clone https://github.com/soroban-tooling/soroban-keeper-network
 cd soroban-keeper-network
 
 # Verify Rust and WASM target
@@ -338,7 +338,7 @@ Closes #<!-- issue number -->
 
 1. Open PR against `develop`.
 2. CI must be green before review is requested.
-3. Request review from at least one maintainer (tag `@arandomogg` for now).
+3. Request review from at least one maintainer (tag `@Andreschuks101` for now).
 4. Address all review comments. Mark conversations resolved after addressing.
 5. Maintainer squash-merges the PR with a conventional commit message.
 6. Delete the feature branch after merge.

@@ -3,9 +3,22 @@
 > **The decentralized automation & upkeep layer for the Stellar/Soroban ecosystem.**
 > Chainlink Keepers — but native to Soroban.
 
-[![CI](https://github.com/arandomogg/soroban-keeper-network/actions/workflows/ci.yml/badge.svg)](https://github.com/arandomogg/soroban-keeper-network/actions/workflows/ci.yml)
+[![CI](https://github.com/soroban-tooling/soroban-keeper-network/actions/workflows/ci.yml/badge.svg)](https://github.com/soroban-tooling/soroban-keeper-network/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Built on Soroban](https://img.shields.io/badge/built%20on-Soroban-blueviolet)](https://soroban.stellar.org)
+
+---
+
+## Documentation
+
+| Doc | What's inside |
+|-----|---------------|
+| [Architecture](docs/ARCHITECTURE.md) | Components, task lifecycle, storage, money invariants, trust model |
+| [Deploying & running](docs/DEPLOYING.md) | Testnet deploy walkthrough and keeper-bot operator guide |
+| [Contributing](CONTRIBUTING.md) | How to pick up an issue and open your first PR |
+| [Changelog](CHANGELOG.md) | Notable changes |
+
+**Quick start:** `make help` lists every common command (build, test, fmt, lint, wasm, optimize, bot).
 
 ---
 
@@ -397,7 +410,7 @@ node --version
 ### Local Development
 
 ```bash
-git clone https://github.com/arandomogg/soroban-keeper-network
+git clone https://github.com/soroban-tooling/soroban-keeper-network
 cd soroban-keeper-network
 
 # Run all tests
