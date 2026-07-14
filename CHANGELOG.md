@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — live testnet deployment
+
+- Deployed `KeeperRegistry` to Stellar testnet
+  (`CDJOYHBS7C2PVJS47BTRDLGBNG2YOE43VX6Y3EWIZPPPKOPRNYQQ54U4`) and ran a full
+  register → claim → execute → withdraw cycle on-chain.
+- Added [docs/DEMO.md](docs/DEMO.md) (transaction-by-transaction trace) and
+  [DEPLOYMENTS.md](DEPLOYMENTS.md) (canonical address record); surfaced the live
+  deployment in the README.
+
 ### Added — contract capabilities & views
 
 - `increase_reward` — owners can top up a task bounty (Pending/Claimed).
