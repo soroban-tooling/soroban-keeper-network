@@ -1,161 +1,278 @@
 name: CI
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+# Runs automatically on every pull request and on every push to main.
+# No manual step is needed — open a PR and this workflow starts.
+#
+# Job policy (see docs/CI.md for the rationale):
+#   REQUIRED  — format, test, build-wasm. These block the merge.
+#   ADVISORY  — clippy, audit, wasm-size, bot. These report findings as
+#               annotations or a job summary but never fail your PR.
+#
+# The split is deliberate. A contributor should never be blocked by a new
+# upstream advisory or a subjective lint, but formatting, a green test suite,
+# and a contract that actually compiles to WASM are non-negotiable.
 
-# Cancel superseded runs on the same ref so pushes don't pile up CI jobs.
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+# Superseded runs on the same branch are cancelled so a series of pushes
+# doesn't queue up redundant jobs.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-D warnings"
+  # Keep incremental compilation off in CI: it costs cache space and buys
+  # nothing on a cold runner.
+  CARGO_INCREMENTAL: 0
 
 jobs:
-  # ── Lint & Format ────────────────────────────────────────────────────────────
-  lint:
-    name: Lint & Format
+  # ───────────────────────────────────────────────────────────────────────────
+  # REQUIRED — formatting
+  # ───────────────────────────────────────────────────────────────────────────
+  format:
+    name: Format (required)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt
 
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-lint-
-
-      - name: Check formatting
+      - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
-      - name: Run Clippy (all features)
-        run: cargo clippy --all --all-targets --all-features -- -D warnings
+      - name: How to fix
+        if: failure()
+        run: |
+          echo "::error::Formatting check failed. Run 'cargo fmt --all' locally and commit the result."
 
-  # ── Unit & Integration Tests ─────────────────────────────────────────────────
+  # ───────────────────────────────────────────────────────────────────────────
+  # REQUIRED — test suite
+  # ───────────────────────────────────────────────────────────────────────────
   test:
-    name: Tests
+    name: Tests (required)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
 
-      - name: Cache Cargo registry
+      - name: Cache cargo
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
             target
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-test-
+          restore-keys: ${{ runner.os }}-cargo-test-
 
-      - name: Run unit tests
-        run: cargo test --all --locked --features testutils -- --nocapture
+      - name: cargo test
+        run: cargo test --workspace --locked
 
-  # ── WASM Build ───────────────────────────────────────────────────────────────
+  # ───────────────────────────────────────────────────────────────────────────
+  # REQUIRED — the contract must compile to WASM
+  # ───────────────────────────────────────────────────────────────────────────
   build-wasm:
-    name: Build WASM
+    name: Build WASM (required)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Cache Cargo registry
+      - name: Cache cargo
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
             target
           key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-wasm-
+          restore-keys: ${{ runner.os }}-cargo-wasm-
 
-      - name: Install soroban CLI
+      - name: Build release WASM
         run: |
-          curl -sSL https://raw.githubusercontent.com/stellar/soroban-tools/main/scripts/install_soroban.sh | bash
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Build WASM (release)
-        run: |
-          cargo build --release --locked --target wasm32-unknown-unknown \
+          cargo build --locked --release \
+            --target wasm32-unknown-unknown \
             --package keeper-registry
-
-      - name: Install wasm-opt
-        run: |
-          cargo install wasm-opt --locked || true
-
-      - name: Optimize WASM
-        run: |
-          WASM_FILE="target/wasm32-unknown-unknown/release/keeper_registry.wasm"
-          if [ -f "$WASM_FILE" ]; then
-            wasm-opt -Oz --strip-debug "$WASM_FILE" -o "${WASM_FILE%.wasm}.optimized.wasm"
-            ls -lh "${WASM_FILE%.wasm}.optimized.wasm"
-          fi
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
           name: keeper-registry-wasm
-          path: |
-            target/wasm32-unknown-unknown/release/keeper_registry.wasm
-            target/wasm32-unknown-unknown/release/keeper_registry.optimized.wasm
-          retention-days: 30
+          path: target/wasm32-unknown-unknown/release/keeper_registry.wasm
+          retention-days: 14
+          if-no-files-found: error
 
-  # ── Security Audit ───────────────────────────────────────────────────────────
-  audit:
-    name: Security Audit
+  # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — clippy. Findings appear as inline PR annotations.
+  # ───────────────────────────────────────────────────────────────────────────
+  clippy:
+    name: Clippy (advisory)
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-clippy-
+
+      # Warnings are surfaced, not denied. Maintainers decide during review
+      # whether a given lint is worth acting on.
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — dependency advisories. A new upstream CVE should notify us,
+  # not break every open PR.
+  # ───────────────────────────────────────────────────────────────────────────
+  audit:
+    name: Dependency audit (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
-      - name: Run audit
-        run: cargo audit
 
-  # ── Example Bot (Node.js) ────────────────────────────────────────────────────
-  example-bot:
-    name: Keeper Bot (Node.js)
+      - name: cargo audit
+        run: |
+          cargo audit --json > audit.json || true
+          {
+            echo "### Dependency audit"
+            echo
+            if [ "$(jq '.vulnerabilities.count' audit.json)" = "0" ]; then
+              echo "No known advisories affect this dependency tree."
+            else
+              echo "\`cargo audit\` reported $(jq '.vulnerabilities.count' audit.json) advisory/advisories:"
+              echo
+              jq -r '.vulnerabilities.list[] | "- **\(.advisory.id)** in `\(.package.name) \(.package.version)` — \(.advisory.title)"' audit.json
+              echo
+              echo "_Advisory only — this does not block the PR._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — report the optimized WASM size so reviewers can spot a
+  # regression without having to build locally.
+  # ───────────────────────────────────────────────────────────────────────────
+  wasm-size:
+    name: WASM size report (advisory)
     runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: build-wasm
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download WASM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: keeper-registry-wasm
+          path: wasm
+
+      - name: Install wasm-opt
+        run: |
+          VERSION=version_119
+          curl -sSL "https://github.com/WebAssembly/binaryen/releases/download/${VERSION}/binaryen-${VERSION}-x86_64-linux.tar.gz" \
+            | tar -xz
+          echo "$PWD/binaryen-${VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Optimize and report
+        run: |
+          RAW=wasm/keeper_registry.wasm
+          wasm-opt -Oz --strip-debug "$RAW" -o optimized.wasm
+          raw_bytes=$(stat -c%s "$RAW")
+          opt_bytes=$(stat -c%s optimized.wasm)
+          {
+            echo "### Contract WASM size"
+            echo
+            echo "| Build | Bytes | KiB |"
+            echo "|-------|-------|-----|"
+            printf '| release | %s | %s |\n' "$raw_bytes" "$((raw_bytes / 1024))"
+            printf '| release + wasm-opt -Oz | %s | %s |\n' "$opt_bytes" "$((opt_bytes / 1024))"
+            echo
+            echo "The optimized figure is what actually gets deployed to the network."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — the example keeper bot. It is a reference implementation, so a
+  # lint nit there should not gate a contract PR.
+  # ───────────────────────────────────────────────────────────────────────────
+  bot:
+    name: Keeper bot (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: examples/keeper-bot
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: examples/keeper-bot/package.json
 
       - name: Install dependencies
-        working-directory: examples/keeper-bot
-        run: npm install
+        run: npm install --no-audit --no-fund
 
-      - name: Lint bot code
-        working-directory: examples/keeper-bot
+      - name: Syntax check
+        run: node --check index.js
+
+      - name: Lint
         run: npm run lint --if-present
 
-      - name: Type check (if TypeScript)
-        working-directory: examples/keeper-bot
-        run: npm run typecheck --if-present || true
+  # ───────────────────────────────────────────────────────────────────────────
+  # Aggregate gate. Branch protection should require only this single check;
+  # it passes when all REQUIRED jobs pass and ignores advisory outcomes.
+  # ───────────────────────────────────────────────────────────────────────────
+  ci-required:
+    name: CI required checks
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [format, test, build-wasm]
+    steps:
+      - name: Verify required jobs succeeded
+        run: |
+          results='${{ join(needs.*.result, ' ') }}'
+          echo "Required job results: $results"
+          for r in $results; do
+            if [ "$r" != "success" ]; then
+              echo "::error::A required CI job did not succeed."
+              exit 1
+            fi
+          done
+          echo "All required checks passed."

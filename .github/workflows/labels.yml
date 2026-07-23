@@ -1,0 +1,49 @@
+name: Sync labels
+
+# Keeps the repository's labels in sync with .github/labels.yml, so the label
+# taxonomy is version-controlled and reviewable rather than clicked into the
+# GitHub UI by hand.
+#
+# Runs when labels.yml changes on main, and on demand. Labels that exist on the
+# repository but are absent from the file are left alone — the sync is additive
+# and update-only, so a stray manual label is never silently deleted.
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/labels.yml"]
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  sync:
+    name: Apply labels.yml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create or update each label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # labels.yml is a flat list of {name, color, description}. Parse it
+          # with a small awk pass rather than pulling in a YAML dependency.
+          awk '
+            /^- name:/      { if (name != "") print name "\t" color "\t" desc
+                              name = substr($0, index($0, ":") + 2); color = ""; desc = "" }
+            /^  color:/     { c = substr($0, index($0, ":") + 2); gsub(/"/, "", c); color = c }
+            /^  description:/ { desc = substr($0, index($0, ":") + 2) }
+            END             { if (name != "") print name "\t" color "\t" desc }
+          ' .github/labels.yml > labels.tsv
+
+          while IFS=$'\t' read -r name color desc; do
+            [ -z "$name" ] && continue
+            if gh label create "$name" --color "$color" --description "$desc" 2>/dev/null; then
+              echo "created: $name"
+            else
+              gh label edit "$name" --color "$color" --description "$desc"
+              echo "updated: $name"
+            fi
+          done < labels.tsv
