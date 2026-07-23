@@ -214,7 +214,13 @@ jobs:
       - name: Optimize and report
         run: |
           RAW=wasm/keeper_registry.wasm
-          wasm-opt -Oz --strip-debug "$RAW" -o optimized.wasm
+          # Soroban contracts are built against a WASM target that emits
+          # bulk-memory and sign-extension instructions. wasm-opt rejects both
+          # unless the features are enabled explicitly, so these flags are
+          # required, not tuning. `stellar contract optimize` passes the same set.
+          wasm-opt -Oz --strip-debug \
+            --enable-bulk-memory --enable-sign-ext --enable-mutable-globals \
+            "$RAW" -o optimized.wasm
           raw_bytes=$(stat -c%s "$RAW")
           opt_bytes=$(stat -c%s optimized.wasm)
           {

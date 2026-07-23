@@ -60,7 +60,13 @@ jobs:
         run: |
           mkdir -p dist
           RAW=target/wasm32-unknown-unknown/release/keeper_registry.wasm
-          wasm-opt -Oz --strip-debug "$RAW" -o dist/keeper_registry.optimized.wasm
+          # Bulk-memory and sign-extension are emitted by the Soroban WASM
+          # target; wasm-opt refuses to validate the module without them.
+          # This must match the flags used in ci.yml so the size reported on a
+          # PR is the size that ships in the release.
+          wasm-opt -Oz --strip-debug \
+            --enable-bulk-memory --enable-sign-ext --enable-mutable-globals \
+            "$RAW" -o dist/keeper_registry.optimized.wasm
           cp "$RAW" dist/keeper_registry.wasm
           cd dist
           sha256sum ./*.wasm > SHA256SUMS.txt
