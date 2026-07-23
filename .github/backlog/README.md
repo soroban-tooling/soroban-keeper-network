@@ -52,10 +52,17 @@ earlier work actually produced.
 | Wave | Issues | Theme | Status |
 |------|--------|-------|--------|
 | 1 | 0001–0050 | Correctness, spec alignment, and test gaps in the shipped MVP; keeper-bot fixes; contributor tooling | **Published** |
-| 2 | 0051–0150 | Execution verifier, batch operations, gas work, fuzzing and invariant testing | Drafted |
-| 3 | 0151–0300 | TypeScript SDK, Rust SDK, event indexer, keeper bot v2 | Drafted |
-| 4 | 0301–0450 | Staking, slashing, reputation, treasury, governance | Drafted |
-| 5 | 0451–0600 | Dashboard, CLI, observability, audit readiness, docs and ecosystem examples | Drafted |
+| 2 | 0051–0150 | Execution verifier, batch operations, gas work, fuzzing and invariant testing | Planned |
+| 3 | 0151–0300 | TypeScript SDK, Rust SDK, event indexer, keeper bot v2 | Planned |
+| 4 | 0301–0450 | Staking, slashing, reputation, treasury, governance | Planned |
+| 5 | 0451–0600 | Dashboard, CLI, observability, audit readiness, docs and ecosystem examples | Planned |
+
+"Planned" means the epic scope and issue count are fixed but the issue files
+are not written yet. Only wave 1 exists on disk today. Waves are written one at
+a time, deliberately: issues 0051 onward depend on decisions that wave 1 will
+settle — the TTL model, the proof-in-event shape, the branching workflow — and
+writing them before those land would produce issues that specify the wrong
+thing.
 
 ---
 
