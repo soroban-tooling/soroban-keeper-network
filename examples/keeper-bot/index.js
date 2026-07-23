@@ -39,9 +39,7 @@ const {
   BASE_FEE,
   nativeToScVal,
   scValToNative,
-  xdr,
   Contract,
-  Address,
 } = require("@stellar/stellar-sdk");
 
 // ─────────────────────────────────────────────────────────────────────────────
