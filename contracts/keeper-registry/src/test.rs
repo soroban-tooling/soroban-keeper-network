@@ -12,9 +12,12 @@
 
 #![cfg(test)]
 
+extern crate std;
+
 use soroban_sdk::{
+    symbol_short,
     testutils::{Address as _, Events as _, Ledger},
-    token, Address, Bytes, Env,
+    token, Address, Bytes, Env, IntoVal, Val,
 };
 
 use crate::{
@@ -67,17 +70,21 @@ fn calldata(env: &Env) -> Bytes {
 }
 
 /// Registers a standard 1-hour task funded by `admin` and returns its id.
-fn register_default_task(s: &Setup) -> u64 {
+fn register_task_with_reward(s: &Setup, reward: i128) -> u64 {
     let deadline = s.env.ledger().timestamp() + 3_600;
     s.registry.register_task(
         &s.admin,
         &TaskType::Liquidation,
         &calldata(&s.env),
-        &1_000_000i128,
+        &reward,
         &deadline,
         &17_280u32,
         &120u32,
     )
+}
+
+fn register_default_task(s: &Setup) -> u64 {
+    register_task_with_reward(s, 1_000_000i128)
 }
 
 /// Advances the ledger sequence and timestamp so lock-window / deadline logic
@@ -732,6 +739,74 @@ fn test_withdraw_transfers_balance_and_zeroes_it() {
 }
 
 #[test]
+fn test_keeper_balances_accumulate_across_tasks_and_withdraw_once() {
+    let s = setup();
+    let token = token::Client::new(&s.env, &s.token_id);
+    let keeper_one = Address::generate(&s.env);
+    let keeper_two = Address::generate(&s.env);
+    let rewards = [1_000_001i128, 2_000_002i128, 3_000_003i128];
+
+    let mut expected_keeper_one = 0i128;
+    let mut expected_fees = 0i128;
+    for (idx, reward) in rewards.iter().enumerate() {
+        let id = register_task_with_reward(&s, *reward);
+        let (net, fee) = split_reward(*reward, 300);
+        s.registry.claim_task(&keeper_one, &id);
+        let proof = [b'p', idx as u8];
+        s.registry
+            .execute_task(&keeper_one, &id, &Bytes::from_slice(&s.env, &proof));
+        expected_keeper_one += net;
+        expected_fees += fee;
+        assert_eq!(s.registry.keeper_balance(&keeper_one), expected_keeper_one);
+        assert_eq!(s.registry.keeper_balance(&keeper_two), 0i128);
+    }
+
+    let keeper_two_task = register_task_with_reward(&s, 3_900_004i128);
+    let (keeper_two_net, keeper_two_fee) = split_reward(3_900_004i128, 300);
+    s.registry.claim_task(&keeper_two, &keeper_two_task);
+    s.registry.execute_task(
+        &keeper_two,
+        &keeper_two_task,
+        &Bytes::from_slice(&s.env, b"p-second-keeper"),
+    );
+    expected_fees += keeper_two_fee;
+
+    assert_eq!(s.registry.keeper_balance(&keeper_one), expected_keeper_one);
+    assert_eq!(s.registry.keeper_balance(&keeper_two), keeper_two_net);
+    assert_eq!(s.registry.fees_accrued(), expected_fees);
+
+    let withdraw_topic: Val = symbol_short!("wdraw").into_val(&s.env);
+    let reward_topic: Val = symbol_short!("reward").into_val(&s.env);
+    let withdrawn_events_before = s
+        .env
+        .events()
+        .all()
+        .iter()
+        .filter(|(_, topics, _)| {
+            topics.get(0).map(|v| v.get_payload()) == Some(withdraw_topic.get_payload())
+                && topics.get(1).map(|v| v.get_payload()) == Some(reward_topic.get_payload())
+        })
+        .count();
+    let withdrawn = s.registry.withdraw_rewards(&keeper_one);
+    let withdrawn_events_after = s
+        .env
+        .events()
+        .all()
+        .iter()
+        .filter(|(_, topics, _)| {
+            topics.get(0).map(|v| v.get_payload()) == Some(withdraw_topic.get_payload())
+                && topics.get(1).map(|v| v.get_payload()) == Some(reward_topic.get_payload())
+        })
+        .count();
+
+    assert_eq!(withdrawn, expected_keeper_one);
+    assert_eq!(token.balance(&keeper_one), expected_keeper_one);
+    assert_eq!(s.registry.keeper_balance(&keeper_one), 0i128);
+    assert_eq!(s.registry.keeper_balance(&keeper_two), keeper_two_net);
+    assert_eq!(withdrawn_events_after, withdrawn_events_before + 1);
+}
+
+#[test]
 fn test_withdraw_with_no_balance_fails() {
     let s = setup();
     let keeper = Address::generate(&s.env);
@@ -853,6 +928,108 @@ fn test_pause_by_non_admin_fails() {
     assert_eq!(
         s.registry.try_pause(&stranger),
         Err(Ok(KeeperError::Unauthorized))
+    );
+}
+
+#[test]
+fn test_pause_policy_matrix_and_unpause_restores_blocked_entries() {
+    let s = setup();
+    let token = token::Client::new(&s.env, &s.token_id);
+    let keeper = Address::generate(&s.env);
+    let withdraw_keeper = executed_task_keeper(&s);
+    let claim_id = register_default_task(&s);
+    let execute_id = register_default_task(&s);
+    s.registry.claim_task(&keeper, &execute_id);
+    let increase_id = register_default_task(&s);
+    let extend_id = register_default_task(&s);
+    let cancel_id = register_default_task(&s);
+    let expire_id = register_default_task(&s);
+    let sweep_id = register_default_task(&s);
+    s.registry.claim_task(&keeper, &sweep_id);
+    s.registry
+        .execute_task(&keeper, &sweep_id, &Bytes::from_slice(&s.env, b"fee"));
+
+    s.registry.pause(&s.admin);
+    assert!(s.registry.is_paused());
+
+    assert_eq!(
+        s.registry.try_register_task(
+            &s.admin,
+            &TaskType::Custom,
+            &calldata(&s.env),
+            &101_003i128,
+            &(s.env.ledger().timestamp() + 3_600),
+            &17_280u32,
+            &60u32,
+        ),
+        Err(Ok(KeeperError::ContractPaused))
+    );
+    assert_eq!(
+        s.registry.try_claim_task(&keeper, &claim_id),
+        Err(Ok(KeeperError::ContractPaused))
+    );
+    assert_eq!(
+        s.registry
+            .try_execute_task(&keeper, &execute_id, &Bytes::from_slice(&s.env, b"p")),
+        Err(Ok(KeeperError::ContractPaused))
+    );
+    assert_eq!(
+        s.registry
+            .try_increase_reward(&s.admin, &increase_id, &123i128),
+        Err(Ok(KeeperError::ContractPaused))
+    );
+
+    let old_deadline = s.registry.get_task(&extend_id).deadline;
+    s.registry
+        .extend_deadline(&s.admin, &extend_id, &(old_deadline + 10));
+    assert_eq!(s.registry.get_task(&extend_id).deadline, old_deadline + 10);
+
+    let owner_before_cancel = token.balance(&s.admin);
+    s.registry.cancel_task(&s.admin, &cancel_id);
+    assert_eq!(
+        s.registry.get_task(&cancel_id).status,
+        TaskStatus::Cancelled
+    );
+    assert_eq!(token.balance(&s.admin), owner_before_cancel + 1_000_000i128);
+
+    advance(&s.env, 1, 3_601);
+    let owner_before_expire = token.balance(&s.admin);
+    s.registry.expire_task(&expire_id);
+    assert_eq!(s.registry.get_task(&expire_id).status, TaskStatus::Expired);
+    assert_eq!(token.balance(&s.admin), owner_before_expire + 1_000_000i128);
+
+    assert_eq!(s.registry.withdraw_rewards(&withdraw_keeper), 970_000i128);
+    assert_eq!(s.registry.get_task(&claim_id).status, TaskStatus::Pending);
+    assert_eq!(s.registry.task_count(), 8u64);
+    assert_eq!(s.registry.get_fee_bps(), 300u32);
+    assert_eq!(s.registry.reward_token_address(), Some(s.token_id.clone()));
+    assert_eq!(s.registry.admin(), Some(s.admin.clone()));
+    assert!(!s.registry.is_claimable(&expire_id));
+
+    let treasury = Address::generate(&s.env);
+    s.registry.sweep_fees(&s.admin, &treasury, &30_000i128);
+    assert_eq!(token.balance(&treasury), 30_000i128);
+
+    s.registry.unpause(&s.admin);
+    assert!(!s.registry.is_paused());
+
+    let restored_id = s.registry.register_task(
+        &s.admin,
+        &TaskType::Custom,
+        &calldata(&s.env),
+        &101_003i128,
+        &(s.env.ledger().timestamp() + 3_600),
+        &17_280u32,
+        &60u32,
+    );
+    s.registry.claim_task(&keeper, &restored_id);
+    s.registry
+        .increase_reward(&s.admin, &restored_id, &1_001i128);
+    s.registry
+        .execute_task(&keeper, &restored_id, &Bytes::from_slice(&s.env, b"p"));
+    assert_eq!(
+        s.registry.get_task(&restored_id).status,
+        TaskStatus::Executed
     );
 }
 

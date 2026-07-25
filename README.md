@@ -249,7 +249,9 @@ A **shared, permissionless, on-chain coordination layer** where:
 - MUST revert if balance is zero.
 
 #### FR-7: Admin Controls
-- `pause`/`unpause` MUST gate `register_task`, `claim_task`, `execute_task`.
+- `pause`/`unpause` MUST gate `register_task`, `claim_task`, `execute_task`, and `increase_reward`.
+- While paused, `cancel_task`, `expire_task`, and `withdraw_rewards` MUST remain available so owners and keepers can recover funds.
+- While paused, `extend_deadline`, admin maintenance functions, and read-only views remain available.
 - `set_fee_bps` MUST reject values > 10 000.
 - `transfer_admin` MUST require auth from BOTH current admin AND new admin.
 - `upgrade` MUST use `deployer().update_current_contract_wasm`.

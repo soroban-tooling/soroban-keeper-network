@@ -702,9 +702,13 @@ impl KeeperRegistry {
 
     // ── pause / unpause ───────────────────────────────────────────────────────
     //
-    // Admin emergency circuit breaker. While paused, register_task/claim_task/
-    // execute_task are blocked, but expire_task and withdraw_rewards remain open
-    // so funds can always be recovered even during an incident.
+    // Admin emergency circuit breaker. Pause policy matrix:
+    //   - blocked: register_task, claim_task, execute_task, increase_reward
+    //   - allowed fund recovery: cancel_task, expire_task, withdraw_rewards
+    //   - allowed maintenance/admin/read-only: extend_deadline, set_fee_bps,
+    //     set_min_reward, transfer_admin, upgrade, sweep_fees, and all views
+    // This keeps new work from entering/executing while preserving owner and
+    // keeper recovery paths during an incident.
 
     pub fn pause(e: Env, admin: Address) -> Result<(), KeeperError> {
         require_admin(&e, &admin)?;

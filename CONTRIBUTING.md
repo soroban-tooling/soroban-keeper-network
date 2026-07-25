@@ -90,7 +90,19 @@ cargo build --release --target wasm32-unknown-unknown --package keeper-registry
 # Check formatting and lints (must be clean before PR)
 cargo fmt --all -- --check
 cargo clippy --all --all-targets --all-features -- -D warnings
+
+# Optional advisory coverage report (same command CI publishes)
+cargo install cargo-llvm-cov --locked
+cargo llvm-cov --workspace --summary-only --ignore-filename-regex '(/src/test\.rs|/target/)'
+# For a browsable local report, use:
+cargo llvm-cov --workspace --html --ignore-filename-regex '(/src/test\.rs|/target/)'
 ```
+
+Coverage excludes Rust test modules and build output because those files either
+are the tests themselves or generated artifacts; including them would inflate
+the reported number without reflecting contract logic coverage. Coverage is
+advisory only: reviewers should use it to spot meaningful gaps, not as an
+automatic merge gate.
 
 ---
 
