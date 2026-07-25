@@ -19,6 +19,9 @@
  *   - Retry with exponential back-off + jitter on transient RPC errors
  *   - Graceful shutdown (SIGINT/SIGTERM) that drains the in-flight round
  *   - Permissionless expiry of stale tasks to refund owners
+ *   - In-memory scan cursor and bounded task outcome cache so one process does
+ *     not re-attempt tasks it already resolved. This state is lost on restart;
+ *     production keepers should persist it in the task state DB below.
  *
  * Production keepers should additionally add:
  *   - Persistent task state DB (SQLite / Redis) to avoid double-claiming
@@ -57,6 +60,8 @@ const CONFIG = {
   maxTasksPerRound: parseInt(process.env.MAX_TASKS_PER_ROUND || "5", 10),
   maxRetries: parseInt(process.env.MAX_RETRIES || "3", 10),
   retryBaseMs: parseInt(process.env.RETRY_BASE_MS || "500", 10),
+  initialLookbackLedgers: parseInt(process.env.INITIAL_LOOKBACK_LEDGERS || "1000", 10),
+  outcomeCacheMaxEntries: parseInt(process.env.OUTCOME_CACHE_MAX_ENTRIES || "5000", 10),
   // When true, the bot calls expire_task on past-deadline tasks as a courtesy
   // so owners' escrow is refunded even if no keeper executed. This is a public
   // good and costs only the transaction fee.
@@ -198,6 +203,7 @@ async function invokeContract(server, keypair, networkPassphrase, contractId, me
 
 async function fetchPendingTasks(server, contractId, startLedger) {
   const tasks = [];
+  let latestLedger = startLedger;
   try {
     // Query TaskRegistered events (topic: ["reg", "task"])
     const response = await server.getEvents({
@@ -214,6 +220,8 @@ async function fetchPendingTasks(server, contractId, startLedger) {
       limit: 100,
     });
 
+    latestLedger = response.latestLedger || response.latestLedgerSequence || latestLedger;
+
     for (const event of response.events || []) {
       try {
         const [taskIdVal, , rewardVal, deadlineVal] = event.value.value();
@@ -229,7 +237,44 @@ async function fetchPendingTasks(server, contractId, startLedger) {
   } catch (e) {
     console.warn("⚠️  Failed to fetch events:", e.message);
   }
-  return tasks;
+  return { tasks, latestLedger };
+}
+
+const keeperState = {
+  cursorLedger: null,
+  outcomes: new Map(),
+};
+
+function rememberOutcome(task, outcome) {
+  keeperState.outcomes.set(String(task.taskId), {
+    outcome,
+    deadline: Number(task.deadline),
+    recordedAt: Date.now(),
+  });
+  evictOutcomeCache();
+}
+
+function evictOutcomeCache() {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+
+  // Deadline-based eviction removes resolved tasks after they cannot be useful
+  // to retry. A hard cap then protects long-running processes during high event
+  // volume by evicting oldest insertions first (Map preserves insertion order).
+  for (const [taskId, entry] of keeperState.outcomes) {
+    if (entry.deadline <= nowSeconds) {
+      keeperState.outcomes.delete(taskId);
+    }
+  }
+
+  while (keeperState.outcomes.size > CONFIG.outcomeCacheMaxEntries) {
+    const oldestTaskId = keeperState.outcomes.keys().next().value;
+    keeperState.outcomes.delete(oldestTaskId);
+  }
+}
+
+function hasHandledTask(task) {
+  evictOutcomeCache();
+  return keeperState.outcomes.has(String(task.taskId));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -263,16 +308,26 @@ async function keeperLoop(server, keypair, networkPassphrase, contractId) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   console.log(`\n🔄  Keeper round at ${new Date().toISOString()}`);
 
-  // Determine start ledger for event query (last ~1000 ledgers ≈ 1.4h at 5s)
-  const latestLedger = await server.getLatestLedger();
-  const startLedger = Math.max(1, latestLedger.sequence - 1000);
+  let latestLedgerForLookback = null;
+  let startLedger = keeperState.cursorLedger;
+  if (startLedger === null) {
+    latestLedgerForLookback = await server.getLatestLedger();
+    startLedger = Math.max(1, latestLedgerForLookback.sequence - CONFIG.initialLookbackLedgers);
+  }
 
-  const pendingTasks = await fetchPendingTasks(server, contractId, startLedger);
+  const { tasks: pendingTasks, latestLedger } = await fetchPendingTasks(server, contractId, startLedger);
+  const scannedThrough = Number(latestLedger || (latestLedgerForLookback && latestLedgerForLookback.sequence) || startLedger);
+  keeperState.cursorLedger = Math.max(startLedger, scannedThrough + 1);
+  console.log(`  🔎  Scanned ledger range ${startLedger}..${scannedThrough}`);
   console.log(`  📋  Found ${pendingTasks.length} TaskRegistered events to evaluate`);
 
   let processed = 0;
   for (const task of pendingTasks) {
     if (processed >= CONFIG.maxTasksPerRound) break;
+    if (hasHandledTask(task)) {
+      console.log(`  ↩️  Task ${task.taskId} already handled in this process, skipping`);
+      continue;
+    }
 
     // Past-deadline tasks can't be executed. Optionally unwind them so the
     // owner's escrow is refunded (permissionless — anyone may call expire_task).
@@ -284,9 +339,11 @@ async function keeperLoop(server, keypair, networkPassphrase, contractId) {
               nativeToScVal(task.taskId, { type: "u64" }),
             ])
           );
+          rememberOutcome(task, "expired");
           console.log(`  ♻️  Task ${task.taskId} expired — escrow refunded to owner`);
         } catch (err) {
           // Already expired/executed by someone else — nothing to do.
+          rememberOutcome(task, "expire-failed");
           console.log(`  ⏰  Task ${task.taskId} past deadline (skip: ${err.message})`);
         }
       } else {
@@ -318,10 +375,14 @@ async function keeperLoop(server, keypair, networkPassphrase, contractId) {
           nativeToScVal(Buffer.from(proof, "hex"), { type: "bytes" }),
         ])
       );
+      rememberOutcome(task, "executed");
       console.log(`  💰  Task ${task.taskId} executed! Proof: ${proof.slice(0, 20)}...`);
       processed++;
     } catch (err) {
       // Common reasons: already claimed by another keeper, or status mismatch
+      if (isPermanentError(err)) {
+        rememberOutcome(task, "permanent-error");
+      }
       console.warn(`  ⚠️  Failed to process task ${task.taskId}: ${err.message}`);
     }
   }

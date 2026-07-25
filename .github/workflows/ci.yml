@@ -71,6 +71,33 @@ jobs:
       - name: Run unit tests
         run: cargo test --all --locked --features testutils -- --nocapture
 
+
+  # ── Coverage (advisory) ─────────────────────────────────────────────────────
+  coverage:
+    name: Coverage (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Measure coverage
+        run: |
+          cargo llvm-cov --workspace --summary-only \
+            --ignore-filename-regex '(/src/test\.rs|/target/)' | tee cov.txt
+      - name: Publish summary
+        run: |
+          {
+            echo "### Coverage"
+            echo
+            echo '```'
+            cat cov.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # ── WASM Build ───────────────────────────────────────────────────────────────
   build-wasm:
     name: Build WASM

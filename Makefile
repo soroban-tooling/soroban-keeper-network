@@ -3,7 +3,7 @@
 
 WASM := target/wasm32-unknown-unknown/release/keeper_registry.wasm
 
-.PHONY: help build test fmt fmt-check lint wasm optimize clean bot
+.PHONY: help build test fmt fmt-check lint coverage wasm optimize clean bot
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -23,6 +23,9 @@ fmt-check: ## Check formatting (CI)
 
 lint: ## Run clippy with warnings denied
 	cargo clippy --all-targets -- -D warnings
+
+coverage: ## Measure advisory Rust test coverage
+	cargo llvm-cov --workspace --summary-only --ignore-filename-regex '(/src/test\.rs|/target/)'
 
 wasm: ## Build the release WASM contract
 	cargo build -p keeper-registry --target wasm32-unknown-unknown --release
