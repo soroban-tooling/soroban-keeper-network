@@ -274,7 +274,7 @@ not unix timestamp. Existing tasks with in-flight claims are unaffected.
 
 - **Style**: ES2022+, `"use strict"`, CommonJS (`require`).
 - **No TypeScript** in the example (to keep it beginner-friendly). A TypeScript version is welcome as a separate example.
-- **Linting**: ESLint with the config in `examples/keeper-bot/.eslintrc.json`.
+- **Linting**: ESLint with the config in `examples/keeper-bot/eslint.config.js`.
 
 ---
 

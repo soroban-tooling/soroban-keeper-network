@@ -344,6 +344,7 @@ async function fetchPendingTasks(server, contractId, startLedger) {
         tasks.push({ taskId, reward, deadline });
       } catch (e) {
         // Skip malformed events
+        console.warn(`⚠️  Skipping malformed event: ${e.message}`);
       }
     }
   } catch (e) {
