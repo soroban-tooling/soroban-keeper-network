@@ -55,6 +55,8 @@ const CONFIG = {
   maxTasksPerRound: parseInt(process.env.MAX_TASKS_PER_ROUND || "5", 10),
   maxRetries: parseInt(process.env.MAX_RETRIES || "3", 10),
   retryBaseMs: parseInt(process.env.RETRY_BASE_MS || "500", 10),
+  pageSize: parseInt(process.env.PAGE_SIZE || "100", 10),
+  maxPages: parseInt(process.env.MAX_PAGES || "10", 10),
   // When true, the bot calls expire_task on past-deadline tasks as a courtesy
   // so owners' escrow is refunded even if no keeper executed. This is a public
   // good and costs only the transaction fee.
@@ -196,37 +198,65 @@ async function invokeContract(server, keypair, networkPassphrase, contractId, me
 
 async function fetchPendingTasks(server, contractId, startLedger) {
   const tasks = [];
-  try {
-    // Query TaskRegistered events (topic: ["reg", "task"])
-    const response = await server.getEvents({
-      startLedger,
-      filters: [
-        {
-          type: "contract",
-          contractIds: [contractId],
-          topics: [
-            ["AAAADwAAAANyZWc=", "AAAADwAAAAR0YXNr"], // "reg", "task" as base64 XDR
-          ],
-        },
+  let cursor = null;
+  let pages = 0;
+  let totalEvents = 0;
+  const filters = [
+    {
+      type: "contract",
+      contractIds: [contractId],
+      topics: [
+        ["AAAADwAAAANyZWc=", "AAAADwAAAAR0YXNr"], // "reg", "task" as base64 XDR
       ],
-      limit: 100,
-    });
+    },
+  ];
 
-    for (const event of response.events || []) {
-      try {
-        const [taskIdVal, , rewardVal, deadlineVal] = event.value.value();
-        const taskId = scValToNative(taskIdVal);
-        const reward = scValToNative(rewardVal);
-        const deadline = scValToNative(deadlineVal);
+  // Verified against Soroban RPC `getEvents` version `2.0.0-rc3`
+  // (https://developers.stellar.org/docs/data/rpc/api-reference/methods/getEvents)
+  while (pages < CONFIG.maxPages) {
+    try {
+      const request = cursor
+        ? { filters, cursor, limit: CONFIG.pageSize }
+        : { filters, startLedger, limit: CONFIG.pageSize };
 
-        tasks.push({ taskId, reward, deadline });
-      } catch (e) {
-        // Skip malformed events
+      const response = await server.getEvents(request);
+
+      if (!response.events || response.events.length === 0) {
+        break; // No more events or empty page
       }
+
+      totalEvents += response.events.length;
+
+      for (const event of response.events) {
+        try {
+          const [taskIdVal, , rewardVal, deadlineVal] = event.value.value();
+          const taskId = scValToNative(taskIdVal);
+          const reward = scValToNative(rewardVal);
+          const deadline = scValToNative(deadlineVal);
+
+          tasks.push({ taskId, reward, deadline });
+        } catch (e) {
+          // Skip malformed events
+        }
+      }
+
+      pages++;
+      if (response.events.length < CONFIG.pageSize || !response.cursor) {
+        break; // Window exhausted or no more pages
+      }
+      cursor = response.cursor;
+    } catch (e) {
+      console.warn("⚠️  Failed to fetch events:", e.message);
+      break;
     }
-  } catch (e) {
-    console.warn("⚠️  Failed to fetch events:", e.message);
   }
+
+  if (pages === CONFIG.maxPages) {
+    console.warn(
+      `⚠️  Stopped after ${CONFIG.maxPages} pages — more events may remain in this window.`
+    );
+  }
+  console.log(`  📋  Found ${totalEvents} TaskRegistered events across ${pages} pages to evaluate`);
   return tasks;
 }
 
