@@ -69,6 +69,12 @@ stellar contract invoke --id <CONTRACT_ID> --source deployer --network testnet -
 
 ## 6. Run the keeper bot
 
+The bot can be run as a long-running daemon or as a one-shot process via cron.
+
+### Daemon mode
+
+This is the default. The bot will poll for tasks every `POLL_INTERVAL_MS`.
+
 ```bash
 cd examples/keeper-bot
 cp .env.example .env
@@ -82,6 +88,32 @@ off-chain, submits proof via `execute_task`, and periodically withdraws accrued
 rewards. It also expires past-deadline tasks (`EXPIRE_STALE_TASKS=true`) to
 refund owners. See the header of `examples/keeper-bot/index.js` for tuning knobs
 (`POLL_INTERVAL_MS`, `MAX_RETRIES`, `WITHDRAW_THRESHOLD`, …).
+
+### Cron mode
+
+For serverless or cron-based deployments, use the `--once` flag or the
+`RUN_ONCE=true` environment variable. The bot will run one round and exit with a
+status code indicating success (0) or failure (non-zero).
+
+**Example crontab (runs every minute):**
+
+```crontab
+# /etc/cron.d/keeper-bot
+* * * * * your-user /path/to/soroban-keeper-network/examples/keeper-bot/run.sh >> /var/log/keeper-bot.log 2>&1
+```
+
+You'll need a wrapper script like `run.sh` to `cd` into the right directory
+and invoke `node`.
+
+**`run.sh`**
+```bash
+#!/bin/sh
+cd /path/to/soroban-keeper-network/examples/keeper-bot
+/usr/bin/node index.js --once
+```
+
+This setup ensures that even if one run fails, the next minute's run will try
+again, providing resilience without requiring a long-lived process.
 
 ## Verifying a deployment
 

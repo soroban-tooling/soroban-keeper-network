@@ -124,29 +124,38 @@ soroban-keeper-network/
 
 ## Git Workflow
 
-We use a **trunk-based development** model with protected long-lived branches:
+We use **trunk-based development**. The `main` branch is the trunk, and it must always be stable and releasable.
+
+All work happens on short-lived branches prefixed with `feature/`, `fix/`, etc.
 
 ```
-main ──────────────────────────────────────────────────────── (always stable, released)
-  └── develop ────────────────────────────────────────────── (integration branch)
-        ├── feature/add-verifier-interface
-        ├── fix/reclaim-lock-ledger-check
-        └── chore/update-soroban-sdk-22
+main ────────────────────────────────────────────────── (always stable, releasable)
+  ├── feature/add-verifier-interface
+  ├── fix/reclaim-lock-ledger-check
+  └── chore/update-soroban-sdk-22
 ```
 
 ### Branch Purposes
 
 | Branch | Purpose | Direct push? |
 |--------|---------|-------------|
-| `main` | Latest stable release, tagged versions | **Never** |
-| `develop` | Integration of completed features before release | **Never** |
+| `main` | The single source of truth. Always stable. | **Never** |
 | `feature/*` | New features | Your own branch — yes |
 | `fix/*` | Bug fixes | Your own branch — yes |
 | `chore/*` | Dependency updates, tooling, CI | Your own branch — yes |
 | `docs/*` | Documentation only changes | Your own branch — yes |
 | `refactor/*` | Code restructuring (no behaviour change) | Your own branch — yes |
 
-> **CRITICAL**: Never push directly to `main` or `develop`. All changes go through PRs with at least one review. This rule is enforced via branch protection rules.
+### Branch Protection
+
+The `main` branch is protected by the following rules:
+
+- **Requires a Pull Request**: All changes must be made through a PR.
+- **Requires Status Checks to Pass**: CI jobs (build, test, lint) must pass before merging.
+- **Requires Review**: At least one maintainer must approve the PR.
+- **No Force Pushing**: History cannot be rewritten.
+
+> **CRITICAL**: Never push directly to `main`. All changes go through PRs with at least one review. This rule is enforced via branch protection rules.
 
 ---
 
@@ -156,11 +165,11 @@ main ─────────────────────────
 
 1. **Check Issues** — is this already being worked on? Comment on the issue to signal intent.
 2. **Open an issue** — if one doesn't exist, open it and get feedback before writing code.
-3. **Branch from `develop`**, not `main`:
+3. **Branch from `main`**:
 
 ```bash
-git checkout develop
-git pull origin develop
+git checkout main
+git pull origin main
 git checkout -b feature/your-feature-name
 ```
 
@@ -168,7 +177,7 @@ git checkout -b feature/your-feature-name
 
 Before opening a PR:
 
-- [ ] Branch is based on `develop` (not `main`)
+- [ ] Branch is based on `main`
 - [ ] `cargo fmt --all` passes (no formatting diff)
 - [ ] `cargo clippy --all --all-targets --all-features -- -D warnings` passes
 - [ ] All existing tests pass: `cargo test --all --features testutils`
@@ -303,8 +312,9 @@ cargo watch -x "test --all --features testutils"
 
 ## PR Template & Review Process
 
-When you open a PR, GitHub will populate this template automatically (save it at `.github/PULL_REQUEST_TEMPLATE.md`):
+When you open a PR, GitHub will populate this template automatically from `.github/PULL_REQUEST_TEMPLATE.md`.
 
+### Example Template
 ```markdown
 ## Summary
 
@@ -327,7 +337,7 @@ When you open a PR, GitHub will populate this template automatically (save it at
 - [ ] New tests added for new code
 - [ ] No `unwrap()` without explanation
 - [ ] No sensitive data in code or commits
-- [ ] PR targets `develop`, not `main`
+- [ ] PR targets `main`
 
 ## Related Issues
 
@@ -336,7 +346,7 @@ Closes #<!-- issue number -->
 
 ### Review Process
 
-1. Open PR against `develop`.
+1. Open PR against `main`.
 2. CI must be green before review is requested.
 3. Request review from at least one maintainer (tag `@Andreschuks101` for now).
 4. Address all review comments. Mark conversations resolved after addressing.
@@ -371,15 +381,14 @@ Maintainers aim to respond within **48 hours** on weekdays. Complex PRs may take
 
 ## Release Process
 
-1. **Feature freeze** — all features targeting the release are merged to `develop`.
-2. **Release branch** — create `release/vX.Y.Z` from `develop`.
-3. **Final testing** — run full test suite + testnet deployment on release branch.
-4. **Changelog** — update `CHANGELOG.md` (use Conventional Commits history as source).
-5. **Version bump** — update `version` in all `Cargo.toml` files.
-6. **PR to `main`** — merge `release/vX.Y.Z` → `main` via PR (requires 2 maintainer approvals).
-7. **Tag** — `git tag -s vX.Y.Z -m "Release vX.Y.Z"` + `git push origin vX.Y.Z`.
-8. **GitHub Release** — create release with changelog notes and attach optimized WASM artifact.
-9. **Back-merge** — merge `main` → `develop` to sync the version bump.
+1. **Agree on a release version** — maintainers decide on the next `vX.Y.Z` number.
+2. **Create a release branch** — `git checkout -b release/vX.Y.Z main`.
+3. **Final testing** — run the full test suite and deploy to testnet from the release branch.
+4. **Update `CHANGELOG.md`** — use the commit history to add notable changes.
+5. **Bump versions** — update the `version` in all relevant `Cargo.toml` files.
+6. **Open a PR** — merge the release branch into `main`. This PR requires at least two maintainer approvals.
+7. **Tag the release** — after merging, pull the latest `main`, then run `git tag -s vX.Y.Z -m "Release vX.Y.Z"` and `git push origin vX.Y.Z`.
+8. **Create a GitHub Release** — go to the tags page, create a new release from the tag, and paste the changelog notes. Attach the optimized WASM file.
 
 ### Versioning
 

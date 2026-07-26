@@ -13,8 +13,10 @@
 #![cfg(test)]
 
 use soroban_sdk::{
+    testutils::{Address as _, Deployer as _, Events as _, Ledger, MockAuth, MockAuthInvoke},
+    token, Address, Bytes, Env, IntoVal,
     testutils::{Address as _, Deployer as _, Events as _, Ledger},
-    token, Address, Bytes, Env,
+    token, Address, Bytes, Env, TryIntoVal,
 };
 
 use crate::{
@@ -525,6 +527,117 @@ fn test_reclaim_after_lock_window_elapses() {
     assert_eq!(s.registry.get_task(&id).claimer, Some(second));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// lock_expired boundary — pins the exact ledger the lock lifts, per issue #33.
+// A small `lock_ledgers` (10) keeps the arithmetic easy to follow.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Registers a task with the given `lock_ledgers`, claims it as `keeper`, and
+/// returns `(task_id, unlock_at)` where `unlock_at = claim_ledger + lock_ledgers`
+/// — the first ledger sequence at which the lock is considered expired.
+fn claim_with_lock(s: &Setup, keeper: &Address, lock_ledgers: u32) -> (u64, u32) {
+    let deadline = s.env.ledger().timestamp() + 3_600;
+    let id = s.registry.register_task(
+        &s.admin,
+        &TaskType::Liquidation,
+        &calldata(&s.env),
+        &1_000_000i128,
+        &deadline,
+        &17_280u32,
+        &lock_ledgers,
+    );
+    s.registry.claim_task(keeper, &id);
+    let claim_ledger = s.registry.get_task(&id).claim_ledger.unwrap();
+    (id, claim_ledger + lock_ledgers)
+}
+
+/// Advances the ledger sequence to exactly `target` (timestamp untouched).
+fn goto_ledger(env: &Env, target: u32) {
+    let current = env.ledger().sequence();
+    advance(env, target - current, 0);
+}
+
+#[test]
+fn test_lock_boundary_unlock_at_minus_one_is_still_locked() {
+    let s = setup();
+    let first = Address::generate(&s.env);
+    let second = Address::generate(&s.env);
+    let (id, unlock_at) = claim_with_lock(&s, &first, 10u32);
+
+    goto_ledger(&s.env, unlock_at - 1);
+
+    assert!(!s.registry.is_claimable(&id));
+    assert_eq!(
+        s.registry.try_claim_task(&second, &id),
+        Err(Ok(KeeperError::LockPeriodActive))
+    );
+}
+
+#[test]
+fn test_lock_boundary_at_unlock_at_is_reclaimable() {
+    let s = setup();
+    let first = Address::generate(&s.env);
+    let second = Address::generate(&s.env);
+    let (id, unlock_at) = claim_with_lock(&s, &first, 10u32);
+
+    goto_ledger(&s.env, unlock_at);
+
+    // The `>=` in `lock_expired` makes the boundary inclusive: exactly at
+    // `unlock_at`, the lock has already lifted.
+    assert!(s.registry.is_claimable(&id));
+    s.registry.claim_task(&second, &id);
+    let task = s.registry.get_task(&id);
+    assert_eq!(task.claimer, Some(second));
+    assert_eq!(task.claim_ledger, Some(unlock_at));
+}
+
+#[test]
+fn test_lock_boundary_unlock_at_plus_one_is_reclaimable() {
+    let s = setup();
+    let first = Address::generate(&s.env);
+    let second = Address::generate(&s.env);
+    let (id, unlock_at) = claim_with_lock(&s, &first, 10u32);
+
+    goto_ledger(&s.env, unlock_at + 1);
+
+    assert!(s.registry.is_claimable(&id));
+    s.registry.claim_task(&second, &id);
+    assert_eq!(s.registry.get_task(&id).claimer, Some(second));
+}
+
+#[test]
+fn test_lock_window_extending_past_deadline_is_blocked_by_deadline_first() {
+    let s = setup();
+    let first = Address::generate(&s.env);
+    let second = Address::generate(&s.env);
+
+    // The lock window (1000 ledgers) would far outlive the 10-second deadline.
+    let deadline = s.env.ledger().timestamp() + 10;
+    let id = s.registry.register_task(
+        &s.admin,
+        &TaskType::Liquidation,
+        &calldata(&s.env),
+        &1_000_000i128,
+        &deadline,
+        &17_280u32,
+        &1_000u32,
+    );
+    s.registry.claim_task(&first, &id);
+
+    // Advance past the deadline but nowhere near the lock's unlock_at.
+    advance(&s.env, 1, 11);
+    assert!(s.env.ledger().timestamp() >= deadline);
+
+    // The deadline check runs before the lock check in both `claim_task` and
+    // `is_claimable`, so the takeover path is unreachable here: the failure
+    // is DeadlinePassed, never LockPeriodActive.
+    assert!(!s.registry.is_claimable(&id));
+    assert_eq!(
+        s.registry.try_claim_task(&second, &id),
+        Err(Ok(KeeperError::DeadlinePassed))
+    );
+}
+
 #[test]
 fn test_claim_past_deadline_fails() {
     let s = setup();
@@ -603,6 +716,46 @@ fn test_get_fee_bps_matches_applied_fee_after_set_fee_bps() {
     let (expected_net, _) = split_reward(1_000_000i128, reported_fee_bps);
     assert_eq!(s.registry.keeper_balance(&keeper), expected_net);
     assert_eq!(reported_fee_bps, 750u32);
+}
+
+#[test]
+fn test_execute_task_emits_proof_in_event() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s);
+    let proof = Bytes::from_slice(&s.env, b"keeper-proof:task:1:tx:deadbeef");
+
+    s.registry.claim_task(&keeper, &id);
+    s.registry.execute_task(&keeper, &id, &proof);
+
+    let (_contract, _topics, data) = s.env.events().all().last().unwrap();
+    let (event_task_id, event_keeper, event_net, event_proof): (u64, Address, i128, Bytes) =
+        data.try_into_val(&s.env).unwrap();
+
+    assert_eq!(event_task_id, id);
+    assert_eq!(event_keeper, keeper);
+    assert_eq!(event_net, 970_000i128);
+    assert_eq!(event_proof, proof);
+}
+
+#[test]
+fn test_execute_task_over_max_proof_len_fails() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s);
+    s.registry.claim_task(&keeper, &id);
+
+    let oversized = Bytes::from_slice(&s.env, &[0u8; (crate::MAX_PROOF_LEN + 1) as usize]);
+    assert_eq!(
+        s.registry.try_execute_task(&keeper, &id, &oversized),
+        Err(Ok(KeeperError::ProofTooLarge))
+    );
+
+    // The task is untouched by the rejected call — still claimable/executable.
+    assert_eq!(s.registry.get_task(&id).status, TaskStatus::Claimed);
+    let at_limit = Bytes::from_slice(&s.env, &[0u8; crate::MAX_PROOF_LEN as usize]);
+    s.registry.execute_task(&keeper, &id, &at_limit);
+    assert_eq!(s.registry.get_task(&id).status, TaskStatus::Executed);
 }
 
 #[test]
@@ -840,6 +993,87 @@ fn test_sweep_by_non_admin_fails() {
     );
 }
 
+#[test]
+fn test_sweep_zero_amount_fails() {
+    let s = setup();
+    let _ = executed_task_keeper(&s); // 30_000 accrued
+    let treasury = Address::generate(&s.env);
+    assert_eq!(
+        s.registry.try_sweep_fees(&s.admin, &treasury, &0i128),
+        Err(Ok(KeeperError::InvalidReward))
+    );
+    assert_eq!(s.registry.fees_accrued(), 30_000i128);
+}
+
+#[test]
+fn test_sweep_negative_amount_fails() {
+    let s = setup();
+    let _ = executed_task_keeper(&s); // 30_000 accrued
+    let treasury = Address::generate(&s.env);
+    assert_eq!(
+        s.registry.try_sweep_fees(&s.admin, &treasury, &-1i128),
+        Err(Ok(KeeperError::InvalidReward))
+    );
+    assert_eq!(s.registry.fees_accrued(), 30_000i128);
+}
+
+#[test]
+fn test_sweep_with_nothing_accrued_fails() {
+    let s = setup();
+    // Fresh contract — no task has ever executed, so nothing is accrued.
+    let treasury = Address::generate(&s.env);
+    assert_eq!(s.registry.fees_accrued(), 0i128);
+    assert_eq!(
+        s.registry.try_sweep_fees(&s.admin, &treasury, &1i128),
+        Err(Ok(KeeperError::NoRewardsAvailable))
+    );
+}
+
+#[test]
+fn test_sweep_partial_sequence_conserves_remainder_and_leaves_other_balances_untouched() {
+    let s = setup();
+    let token = token::Client::new(&s.env, &s.token_id);
+    let treasury = Address::generate(&s.env);
+
+    // An unrelated open task and a credited keeper — the accumulator is the
+    // only thing sweep_fees is allowed to draw from, so neither should ever
+    // move as a result of sweeping.
+    let untouched_task_id = register_default_task(&s); // 1_000_000 escrowed
+    let keeper = executed_task_keeper(&s); // credits keeper 970_000, accrues 30_000 fee
+
+    assert_eq!(s.registry.fees_accrued(), 30_000i128);
+
+    // Three uneven partial sweeps summing to the full 30_000 accrued.
+    let parts = [12_000i128, 9_000i128, 9_000i128];
+    let mut swept_so_far = 0i128;
+    for &part in parts.iter() {
+        s.registry.sweep_fees(&s.admin, &treasury, &part);
+        swept_so_far += part;
+        assert_eq!(s.registry.fees_accrued(), 30_000i128 - swept_so_far);
+        assert_eq!(token.balance(&treasury), swept_so_far);
+    }
+    assert_eq!(s.registry.fees_accrued(), 0i128);
+
+    // Nothing left: a further sweep of 1 is rejected.
+    assert_eq!(
+        s.registry.try_sweep_fees(&s.admin, &treasury, &1i128),
+        Err(Ok(KeeperError::NoRewardsAvailable))
+    );
+
+    // The unrelated task's escrow and the keeper's credited balance are
+    // exactly as they were before any sweep — proving sweeping never dipped
+    // into either.
+    assert_eq!(
+        s.registry.get_task(&untouched_task_id).reward,
+        1_000_000i128
+    );
+    assert_eq!(
+        s.registry.get_task(&untouched_task_id).status,
+        TaskStatus::Pending
+    );
+    assert_eq!(s.registry.keeper_balance(&keeper), 970_000i128);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin controls: pause / set_fee_bps / transfer_admin / upgrade
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1006,6 +1240,106 @@ fn test_transfer_admin_emits_event() {
     let before = s.env.events().all().len();
     s.registry.transfer_admin(&s.admin, &new_admin);
     assert!(s.env.events().all().len() > before);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// transfer_admin — dual authorization
+//
+// `transfer_admin` calls both `require_admin` (which requires the *current*
+// admin's auth) and `new_admin.require_auth()`, so the role can never be
+// pushed onto an address that has not consented to take it. Every test above
+// runs under `setup()`'s `env.mock_all_auths()`, which satisfies every
+// `require_auth()` regardless of who "signed" — so it cannot distinguish a
+// working dual-auth check from a deleted one. These three tests deliberately
+// use `mock_auths` with an explicit, minimal authorization list instead, so
+// they actually exercise the guard. Do not "simplify" these to
+// `mock_all_auths()` — that would silently remove the only coverage of this
+// safety property.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_transfer_admin_fails_without_new_admin_auth() {
+    let s = setup();
+    let new_admin = Address::generate(&s.env);
+
+    // Authorize only the current admin. The incoming admin has not consented.
+    s.env.mock_auths(&[MockAuth {
+        address: &s.admin,
+        invoke: &MockAuthInvoke {
+            contract: &s.registry.address,
+            fn_name: "transfer_admin",
+            args: (s.admin.clone(), new_admin.clone()).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let result = s.registry.try_transfer_admin(&s.admin, &new_admin);
+    assert!(
+        result.is_err(),
+        "transfer must fail without the incoming admin's auth"
+    );
+    // The consequence that actually matters: admin is unchanged.
+    assert_eq!(s.registry.admin(), Some(s.admin.clone()));
+}
+
+#[test]
+fn test_transfer_admin_fails_without_current_admin_auth() {
+    let s = setup();
+    let new_admin = Address::generate(&s.env);
+
+    // Authorize only the incoming admin. The current admin did not sign.
+    s.env.mock_auths(&[MockAuth {
+        address: &new_admin,
+        invoke: &MockAuthInvoke {
+            contract: &s.registry.address,
+            fn_name: "transfer_admin",
+            args: (s.admin.clone(), new_admin.clone()).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let result = s.registry.try_transfer_admin(&s.admin, &new_admin);
+    assert!(
+        result.is_err(),
+        "transfer must fail without the current admin's auth"
+    );
+    assert_eq!(s.registry.admin(), Some(s.admin.clone()));
+}
+
+#[test]
+fn test_transfer_admin_succeeds_with_both_auths_explicit() {
+    let s = setup();
+    let new_admin = Address::generate(&s.env);
+
+    // Both required parties authorize explicitly (no mock_all_auths involved),
+    // proving the harness itself is capable of making the call succeed.
+    s.env.mock_auths(&[
+        MockAuth {
+            address: &s.admin,
+            invoke: &MockAuthInvoke {
+                contract: &s.registry.address,
+                fn_name: "transfer_admin",
+                args: (s.admin.clone(), new_admin.clone()).into_val(&s.env),
+                sub_invokes: &[],
+            },
+        },
+        MockAuth {
+            address: &new_admin,
+            invoke: &MockAuthInvoke {
+                contract: &s.registry.address,
+                fn_name: "transfer_admin",
+                args: (s.admin.clone(), new_admin.clone()).into_val(&s.env),
+                sub_invokes: &[],
+            },
+        },
+    ]);
+
+    let result = s.registry.try_transfer_admin(&s.admin, &new_admin);
+    assert!(
+        result.is_ok(),
+        "transfer must succeed when both parties explicitly authorize"
+    );
+    assert_eq!(s.registry.admin(), Some(new_admin));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
