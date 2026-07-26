@@ -1,0 +1,180 @@
+name: PR Hygiene
+
+# Fast, advisory checks on the shape of a pull request — title, size, and
+# obvious footguns in the diff. Runs automatically on every PR.
+#
+# Every job here is advisory. Nothing in this workflow blocks a merge; the
+# output is guidance for the contributor and a summary for the reviewer.
+# Hard gates live in ci.yml.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+concurrency:
+  group: pr-hygiene-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# Read-only. This workflow deliberately takes no write permissions so it
+# behaves identically for fork PRs, which is where most contributions arrive.
+permissions:
+  contents: read
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # PR title should follow Conventional Commits, because maintainers
+  # squash-merge and the title becomes the commit message on main.
+  # ───────────────────────────────────────────────────────────────────────────
+  title:
+    name: PR title (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Check Conventional Commits format
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|security|revert)(\([a-z0-9._/-]+\))?!?: .+'
+          if printf '%s' "$PR_TITLE" | grep -qE "$pattern"; then
+            echo "Title follows Conventional Commits."
+            printf '### PR title\n\n`%s` — looks good.\n' "$PR_TITLE" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### PR title"
+              echo
+              printf 'Current title: `%s`\n\n' "$PR_TITLE"
+              echo "This does not match the Conventional Commits format the project uses."
+              echo "Maintainers squash-merge, so the PR title becomes the commit message on \`main\`."
+              echo
+              echo '```'
+              echo '<type>(<optional scope>): <description>'
+              echo '```'
+              echo
+              echo "Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, security, revert"
+              echo
+              echo "Examples:"
+              echo '- `feat(registry): add batch task registration`'
+              echo '- `fix(claim): reject re-claim while the lock window is active`'
+              echo '- `docs(contributing): clarify the branching model`'
+              echo
+              echo "_Advisory — please edit the title, but this will not block the merge._"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::PR title does not follow Conventional Commits — see the job summary."
+          fi
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Report the diff size. Large PRs are allowed; they just need a reason.
+  # ───────────────────────────────────────────────────────────────────────────
+  size:
+    name: PR size (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Measure diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Compare against the merge base so unrelated commits landing on the
+          # base branch are not counted against this PR.
+          base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          added=$(git diff --numstat "$base" "$HEAD_SHA" | awk '{a+=$1} END {print a+0}')
+          removed=$(git diff --numstat "$base" "$HEAD_SHA" | awk '{r+=$2} END {print r+0}')
+          files=$(git diff --name-only "$base" "$HEAD_SHA" | wc -l)
+          total=$((added + removed))
+
+          if   [ "$total" -lt 30 ];   then bucket="XS"
+          elif [ "$total" -lt 120 ];  then bucket="S"
+          elif [ "$total" -lt 400 ];  then bucket="M"
+          elif [ "$total" -lt 1000 ]; then bucket="L"
+          else                             bucket="XL"
+          fi
+
+          {
+            echo "### PR size: $bucket"
+            echo
+            echo "| Files | Added | Removed | Total |"
+            echo "|-------|-------|---------|-------|"
+            echo "| $files | +$added | -$removed | $total |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$total" -gt 500 ]; then
+            {
+              echo
+              echo "This PR changes more than 500 lines. CONTRIBUTING.md asks for a short"
+              echo "justification in the description when a PR is this large, or for it to be"
+              echo "split into focused PRs. Reviewers read smaller PRs faster and more carefully."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::PR exceeds 500 changed lines — consider splitting it or justifying the size in the description."
+          fi
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Scan the diff for things that should never reach main: committed secrets,
+  # stray debug output, unexplained unwrap() in contract code.
+  # ───────────────────────────────────────────────────────────────────────────
+  diff-guard:
+    name: Diff guard (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Inspect added lines
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          # Only lines the PR ADDS are inspected. Pre-existing code is not the
+          # contributor's problem.
+          git diff "$base" "$HEAD_SHA" -- '*.rs' '*.js' '*.ts' '*.toml' '*.yml' '*.yaml' '*.json' '*.sh' \
+            | grep -E '^\+' | grep -vE '^\+\+\+' > added.txt || true
+
+          findings=0
+          note() { echo "- $1" >> notes.md; findings=$((findings + 1)); }
+          : > notes.md
+
+          # Stellar secret seeds are S + 55 base32 chars. A literal one in the
+          # diff is almost certainly a real key.
+          if grep -qE '\bS[A-Z2-7]{55}\b' added.txt; then
+            note "**Possible Stellar secret key** in the diff. Secrets belong in \`.env\` (gitignored), never in a commit. If a real key was pushed, rotate it now — rewriting history is not enough."
+          fi
+          if grep -qEi '(api[_-]?key|secret[_-]?key|private[_-]?key|password)[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']{8,}' added.txt; then
+            note "**Possible hardcoded credential** in the diff. Read it from the environment instead."
+          fi
+          if grep -qE '^\+.*\bdbg!\(' added.txt; then
+            note "\`dbg!\` left in the diff. Use \`log!\` for contract diagnostics, or remove it."
+          fi
+          if grep -qE '^\+.*console\.log\(' added.txt; then
+            note "\`console.log\` added. Fine in the example bot if it is user-facing output; remove it if it was debug scaffolding."
+          fi
+          # unwrap() in contract code panics the host. CONTRIBUTING requires an
+          # explanatory comment; flag ones that clearly have none.
+          if git diff "$base" "$HEAD_SHA" -- 'contracts/**/*.rs' | grep -E '^\+' | grep -vE '^\+\+\+' \
+             | grep -E '\.unwrap\(\)' | grep -vE '(//|SAFETY|#\[cfg\(test\)\])' > /dev/null; then
+            note "\`.unwrap()\` added in contract code. In a Soroban contract this panics the host; prefer \`ok_or(KeeperError::…)?\`, or \`expect(\"why this is unreachable\")\` with a comment. (Test code is exempt.)"
+          fi
+
+          {
+            echo "### Diff guard"
+            echo
+            if [ "$findings" -eq 0 ]; then
+              echo "Nothing flagged in the added lines."
+            else
+              echo "$findings item(s) worth a look before review:"
+              echo
+              cat notes.md
+              echo
+              echo "_Advisory — these are heuristics and may be false positives. They do not block the PR._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$findings" -gt 0 ]; then
+            echo "::warning::Diff guard flagged $findings item(s) — see the job summary."
+          fi

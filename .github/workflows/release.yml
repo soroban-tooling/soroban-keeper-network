@@ -1,0 +1,125 @@
+name: Release
+
+# Publishes a GitHub Release when a semver tag is pushed, with the optimized
+# contract WASM and its sha256 attached.
+#
+# The WASM hash is what `stellar contract install` reports on-chain, so
+# publishing it here lets anyone verify that a deployed contract corresponds to
+# a specific tagged commit of this repository.
+#
+# Usage:
+#   git tag -a v0.2.0 -m "Release v0.2.0"
+#   git push origin v0.2.0
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build a release for (e.g. v0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      # A release must not ship code that fails its own test suite.
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+      - name: Build release WASM
+        run: |
+          cargo build --locked --release \
+            --target wasm32-unknown-unknown \
+            --package keeper-registry
+
+      - name: Install wasm-opt
+        run: |
+          VERSION=version_119
+          curl -sSL "https://github.com/WebAssembly/binaryen/releases/download/${VERSION}/binaryen-${VERSION}-x86_64-linux.tar.gz" \
+            | tar -xz
+          echo "$PWD/binaryen-${VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Optimize WASM and record hashes
+        id: artifacts
+        run: |
+          mkdir -p dist
+          RAW=target/wasm32-unknown-unknown/release/keeper_registry.wasm
+          # Bulk-memory and sign-extension are emitted by the Soroban WASM
+          # target; wasm-opt refuses to validate the module without them.
+          # This must match the flags used in ci.yml so the size reported on a
+          # PR is the size that ships in the release.
+          wasm-opt -Oz --strip-debug \
+            --enable-bulk-memory --enable-sign-ext --enable-mutable-globals \
+            "$RAW" -o dist/keeper_registry.optimized.wasm
+          cp "$RAW" dist/keeper_registry.wasm
+          cd dist
+          sha256sum ./*.wasm > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          {
+            echo "sha256=$(sha256sum keeper_registry.optimized.wasm | cut -d' ' -f1)"
+            echo "size=$(stat -c%s keeper_registry.optimized.wasm)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Assemble release notes
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          SHA256: ${{ steps.artifacts.outputs.sha256 }}
+          SIZE: ${{ steps.artifacts.outputs.size }}
+        run: |
+          previous=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          {
+            echo "## Soroban Keeper Network ${TAG}"
+            echo
+            echo "### Contract artifact"
+            echo
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| File | \`keeper_registry.optimized.wasm\` |"
+            echo "| Size | ${SIZE} bytes |"
+            echo "| sha256 | \`${SHA256}\` |"
+            echo
+            echo "Verify a deployment matches this release by comparing the WASM hash"
+            echo "reported by \`stellar contract install\` against the sha256 above."
+            echo
+            echo "### Changes"
+            echo
+            if [ -n "$previous" ]; then
+              git log --no-merges --pretty='- %s' "${previous}..${TAG}"
+              echo
+              echo "**Full diff:** https://github.com/${GITHUB_REPOSITORY}/compare/${previous}...${TAG}"
+            else
+              echo "Initial tagged release."
+            fi
+            echo
+            echo "See [CHANGELOG.md](CHANGELOG.md) for the curated summary."
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file RELEASE_NOTES.md \
+            --verify-tag \
+            dist/keeper_registry.wasm \
+            dist/keeper_registry.optimized.wasm \
+            dist/SHA256SUMS.txt

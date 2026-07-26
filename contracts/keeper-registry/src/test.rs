@@ -16,12 +16,13 @@ extern crate std;
 
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Events as _, Ledger},
+    testutils::{Address as _, Deployer as _, Events as _, Ledger},
     token, Address, Bytes, Env, IntoVal, Val,
 };
 
 use crate::{
-    split_reward, KeeperError, KeeperRegistry, KeeperRegistryClient, TaskStatus, TaskType,
+    split_reward, DataKey, KeeperError, KeeperRegistry, KeeperRegistryClient, TaskStatus, TaskType,
+    INSTANCE_BUMP_LEDGERS, INSTANCE_BUMP_THRESHOLD,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -567,6 +568,48 @@ fn test_execute_task_credits_keeper_net_of_fee() {
     // 3% fee → keeper receives 970_000, contract retains 30_000 as fee.
     assert_eq!(s.registry.keeper_balance(&keeper), 970_000i128);
     assert_eq!(s.registry.get_task(&id).status, TaskStatus::Executed);
+}
+
+#[test]
+fn test_get_fee_bps_matches_applied_fee_when_never_written() {
+    let s = setup();
+    // Simulate a registry where `FeeBps` was never written (e.g. queried
+    // before `initialize`, or dropped by a future storage migration).
+    s.env.as_contract(&s.registry.address, || {
+        s.env.storage().instance().remove(&DataKey::FeeBps);
+    });
+
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s); // reward 1_000_000
+
+    let reported_fee_bps = s.registry.get_fee_bps();
+
+    s.registry.claim_task(&keeper, &id);
+    s.registry
+        .execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof"));
+
+    let (expected_net, _) = split_reward(1_000_000i128, reported_fee_bps);
+    assert_eq!(s.registry.keeper_balance(&keeper), expected_net);
+    assert_eq!(reported_fee_bps, 0u32);
+}
+
+#[test]
+fn test_get_fee_bps_matches_applied_fee_after_set_fee_bps() {
+    let s = setup();
+    s.registry.set_fee_bps(&s.admin, &750u32);
+
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s); // reward 1_000_000
+
+    let reported_fee_bps = s.registry.get_fee_bps();
+
+    s.registry.claim_task(&keeper, &id);
+    s.registry
+        .execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof"));
+
+    let (expected_net, _) = split_reward(1_000_000i128, reported_fee_bps);
+    assert_eq!(s.registry.keeper_balance(&keeper), expected_net);
+    assert_eq!(reported_fee_bps, 750u32);
 }
 
 #[test]
@@ -1142,6 +1185,62 @@ fn test_transfer_admin_emits_event() {
     assert!(s.env.events().all().len() > before);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Instance TTL renewal
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_instance_ttl_renewed_by_mutation_stays_alive_past_initial_window() {
+    let s = setup();
+
+    // initialize() already bumped the instance TTL to ~INSTANCE_BUMP_LEDGERS.
+    let ttl_after_init = s
+        .env
+        .deployer()
+        .get_contract_instance_ttl(&s.registry.address);
+    assert!(ttl_after_init > INSTANCE_BUMP_THRESHOLD);
+
+    // Advance far enough that remaining TTL drops below the renewal
+    // threshold, but not so far that the entry actually expires.
+    advance(
+        &s.env,
+        INSTANCE_BUMP_LEDGERS - INSTANCE_BUMP_THRESHOLD + 1_000,
+        0,
+    );
+    let ttl_before_mutation = s
+        .env
+        .deployer()
+        .get_contract_instance_ttl(&s.registry.address);
+    assert!(
+        ttl_before_mutation < INSTANCE_BUMP_THRESHOLD,
+        "test setup should cross the renewal threshold"
+    );
+
+    // A state-mutating admin call renews the TTL back up to
+    // ~INSTANCE_BUMP_LEDGERS from the current ledger. Uses an instance-only
+    // mutation (no persistent Task entry involved) so this test isolates
+    // instance TTL renewal from per-task TTL, which is a separate mechanism
+    // covered by `save_task`.
+    s.registry.set_min_reward(&s.admin, &0i128);
+    let ttl_after_mutation = s
+        .env
+        .deployer()
+        .get_contract_instance_ttl(&s.registry.address);
+    assert!(ttl_after_mutation > INSTANCE_BUMP_LEDGERS - 1_000);
+
+    // Advance well past where the *original* TTL window (from initialize)
+    // would have expired the instance — total ledgers advanced now exceeds
+    // INSTANCE_BUMP_LEDGERS. Without the interim renewal above, the instance
+    // would be archived here and every call below would fail.
+    advance(&s.env, INSTANCE_BUMP_LEDGERS - 1_000, 0);
+
+    // The contract is still fully usable: reads and further mutations both
+    // succeed against the (still-live) instance storage.
+    assert_eq!(s.registry.task_count(), 0u64);
+    s.registry.set_fee_bps(&s.admin, &500u32);
+    assert_eq!(s.registry.get_fee_bps(), 500u32);
+}
+
 #[test]
 fn test_upgrade_by_non_admin_fails() {
     let s = setup();
@@ -1149,6 +1248,236 @@ fn test_upgrade_by_non_admin_fails() {
     let bogus = soroban_sdk::BytesN::from_array(&s.env, &[0u8; 32]);
     assert_eq!(
         s.registry.try_upgrade(&stranger, &bogus),
+        Err(Ok(KeeperError::Unauthorized))
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NotInitialized — every entry point that requires configured state must
+// return a typed error, never panic, when called before `initialize`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A freshly-deployed registry that `initialize` has never touched.
+fn uninitialized_registry(env: &Env) -> KeeperRegistryClient<'_> {
+    let registry_id = env.register(KeeperRegistry, ());
+    KeeperRegistryClient::new(env, &registry_id)
+}
+
+#[test]
+fn test_register_task_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let owner = Address::generate(&env);
+
+    assert_eq!(
+        registry.try_register_task(
+            &owner,
+            &TaskType::Custom,
+            &calldata(&env),
+            &1_000_000i128,
+            &(env.ledger().timestamp() + 3_600),
+            &17_280u32,
+            &120u32,
+        ),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_withdraw_rewards_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let keeper = Address::generate(&env);
+
+    // No balance either, but NotInitialized must be surfaced instead of
+    // NoRewardsAvailable — the registry isn't configured at all yet.
+    //
+    // withdraw_rewards checks the keeper's balance before touching the
+    // reward token, and a never-initialized registry has no balance for
+    // anyone, so NoRewardsAvailable fires first here. This is correct: a
+    // caller with nothing to withdraw gets the same answer regardless of
+    // configuration state. The reward-token dependency is exercised by
+    // test_withdraw_rewards_after_reward_token_migration_drop below.
+    assert_eq!(
+        registry.try_withdraw_rewards(&keeper),
+        Err(Ok(KeeperError::NoRewardsAvailable))
+    );
+}
+
+#[test]
+fn test_pause_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let caller = Address::generate(&env);
+    assert_eq!(
+        registry.try_pause(&caller),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_unpause_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let caller = Address::generate(&env);
+    assert_eq!(
+        registry.try_unpause(&caller),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_set_fee_bps_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let caller = Address::generate(&env);
+    assert_eq!(
+        registry.try_set_fee_bps(&caller, &500u32),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_set_min_reward_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let caller = Address::generate(&env);
+    assert_eq!(
+        registry.try_set_min_reward(&caller, &1i128),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_transfer_admin_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let caller = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    assert_eq!(
+        registry.try_transfer_admin(&caller, &new_admin),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_upgrade_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let caller = Address::generate(&env);
+    let bogus = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    assert_eq!(
+        registry.try_upgrade(&caller, &bogus),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_sweep_fees_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let caller = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    // require_admin runs before the reward-token lookup, so this surfaces
+    // NotInitialized from the missing Admin key, not from RewardToken.
+    assert_eq!(
+        registry.try_sweep_fees(&caller, &treasury, &1i128),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+// increase_reward, cancel_task, and expire_task all load the task by id
+// before they ever reach the reward-token lookup, and no task can exist on
+// a registry that was never initialized (register_task itself requires the
+// reward token to be configured). So "call before initialize" can only ever
+// surface TaskNotFound for these three, not NotInitialized — that ordering
+// (existence check before configuration check) is correct, not a gap.
+//
+// The reward-token dependency in these three functions is still real,
+// though: a registry that was initialized and had a task registered, but
+// later had its RewardToken key removed by e.g. a partial storage
+// migration, must not panic. These tests reproduce exactly that.
+
+#[test]
+fn test_increase_reward_after_reward_token_migration_drop_fails() {
+    let s = setup();
+    let id = register_default_task(&s);
+    s.env.as_contract(&s.registry.address, || {
+        s.env.storage().instance().remove(&DataKey::RewardToken);
+    });
+    assert_eq!(
+        s.registry.try_increase_reward(&s.admin, &id, &1i128),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_cancel_task_after_reward_token_migration_drop_fails() {
+    let s = setup();
+    let id = register_default_task(&s);
+    s.env.as_contract(&s.registry.address, || {
+        s.env.storage().instance().remove(&DataKey::RewardToken);
+    });
+    assert_eq!(
+        s.registry.try_cancel_task(&s.admin, &id),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_expire_task_after_reward_token_migration_drop_fails() {
+    let s = setup();
+    let id = register_default_task(&s);
+    s.env.as_contract(&s.registry.address, || {
+        s.env.storage().instance().remove(&DataKey::RewardToken);
+    });
+    advance(&s.env, 1, 3_601); // past deadline
+    assert_eq!(
+        s.registry.try_expire_task(&id),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_withdraw_rewards_after_reward_token_migration_drop_fails() {
+    let s = setup();
+    let keeper = executed_task_keeper(&s); // has a balance to withdraw
+    s.env.as_contract(&s.registry.address, || {
+        s.env.storage().instance().remove(&DataKey::RewardToken);
+    });
+    assert_eq!(
+        s.registry.try_withdraw_rewards(&keeper),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_require_admin_distinguishes_not_initialized_from_wrong_caller() {
+    // Uninitialized: no admin configured at all.
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let caller = Address::generate(&env);
+    assert_eq!(
+        registry.try_pause(&caller),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+
+    // Initialized, but caller isn't the admin: a different, more specific
+    // error than "not initialized".
+    let s = setup();
+    let stranger = Address::generate(&s.env);
+    assert_eq!(
+        s.registry.try_pause(&stranger),
         Err(Ok(KeeperError::Unauthorized))
     );
 }
