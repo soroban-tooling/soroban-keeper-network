@@ -1,0 +1,76 @@
+[package]
+name = "keeper-registry-fuzz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Tells `cargo fuzz` this crate (at a non-standard `fuzz/` path directly
+# under the repo root, rather than `<crate>/fuzz/`) is itself the fuzz
+# manifest — without this, `cargo fuzz` refuses to recognize it at all,
+# which meant this crate could never actually be driven by `cargo fuzz
+# run`/`build` before now.
+[package.metadata]
+cargo-fuzz = true
+
+# This crate is NOT part of the workspace to avoid including libfuzzer-sys
+# in normal builds. Only fuzz targets should depend on it. The empty
+# [workspace] table below is what actually opts it out — without it, Cargo
+# treats any crate under the repo root as an implicit workspace member and
+# refuses to build standalone (this was previously missing, so `cargo
+# check`/`cargo fuzz` could not run against this crate at all).
+[workspace]
+
+[features]
+# Enable arbitrary data generation for all fuzz targets.
+# `dep:` is required here because Cargo 1.60+ no longer implicitly links a
+# feature to a same-named optional dependency (the old implicit-feature
+# behavior was removed to make "which deps does this feature turn on"
+# unambiguous) — omitting `dep:` is what made this manifest fail to parse.
+arbitrary = ["dep:arbitrary"]
+
+[dependencies]
+keeper-registry = { path = "../contracts/keeper-registry" }
+soroban-sdk = { version = "22.0.1", features = ["testutils"] }
+libfuzzer-sys = { version = "0.4", optional = true }
+arbitrary = { version = "1", features = ["derive"], optional = true }
+
+[build-dependencies]
+soroban-sdk = { version = "22.0.1" }
+
+[profile.release]
+# Fuzzing needs all optimizations disabled for better crash detection
+opt-level = 0
+debug = true
+overflow-checks = true
+debug-assertions = true
+codegen-units = 1
+panic = "abort"  # Critical for fuzzing - we want to detect all panics
+lto = false
+
+[profile.dev]
+opt-level = 0
+debug = true
+overflow-checks = true
+debug-assertions = true
+codegen-units = 1
+
+[[bin]]
+name = "register_task"
+path = "fuzz_targets/register_task.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "smoke"
+path = "fuzz_targets/smoke.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "execute_task"
+path = "fuzz_targets/execute_task.rs"
+test = false
+doc = false
+bench = false

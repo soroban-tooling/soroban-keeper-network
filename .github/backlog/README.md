@@ -52,8 +52,8 @@ earlier work actually produced.
 | Wave | Issues | Theme | Status |
 |------|--------|-------|--------|
 | 1 | 0001–0050 | Correctness, spec alignment, and test gaps in the shipped MVP; keeper-bot fixes; contributor tooling | **Published** |
-| 2 | 0051–0150 | Execution verifier, batch operations, gas work, fuzzing and invariant testing | Partially published (0051–0100) |
-| 3 | 0151–0300 | TypeScript SDK, Rust SDK, event indexer, keeper bot v2 | Planned |
+| 2 | 0051–0150 | Execution verifier, batch operations, gas work, fuzzing and invariant testing | **Published** |
+| 3 | 0151–0300 | TypeScript SDK, Rust SDK, event indexer, keeper bot v2 | Partially published (0151–0200) |
 | 4 | 0301–0450 | Staking, slashing, reputation, treasury, governance | Planned |
 | 5 | 0451–0600 | Dashboard, CLI, observability, audit readiness, docs and ecosystem examples | Planned |
 
@@ -62,22 +62,33 @@ are not written yet. Waves are written one at a time, deliberately: later
 issues depend on decisions earlier work settles, and writing them too early
 risks specifying against the wrong assumptions.
 
-Wave 2 issues 0051–0100 (all of E03 Fuzzing & Invariant Testing, all of E04
-On-chain Execution Verifier, and the first four of E05 Batch Operations & Gas)
-are now published. Issues 0101–0150 (the rest of E05) are still planned.
+Wave 2 is now fully published: E03 Fuzzing & Invariant Testing (20 issues),
+E04 On-chain Execution Verifier (26 issues), and all 22 of E05 Batch
+Operations & Gas, plus additional depth issues in E03/E04 grounded in the
+wave-1 surface that landed after the epics were first drafted (calldata
+bounding, the TTL-vs-deadline fix, `NotInitialized`, instance-TTL renewal,
+and the lock-lapse `cancel_task` extension). Each epic closes with its own
+retrospective (issues 0118, 0141, 0142) summarizing what shipped versus what
+was studied and explicitly deferred.
 
-**A caveat specific to this wave.** Several wave-1 PRs were still open and
-unmerged when 0051–0100 were written (see the CEI-ordering and instance-TTL
-work in issues 0002/0003/0015). Where a wave-2 issue references a wave-1
-function name, constant, or discriminant number, treat it as provisional —
-confirm against `main` at pickup time rather than trusting the issue text
-verbatim. This is the exact risk the "write one wave at a time" rule above
-exists to avoid; it was accepted here on the reasoning that E03/E04/E05 are
-additive surface (new modules, new optional fields) rather than edits to the
-contested code, so the risk of drift is lower than for a wave that touched
-`execute_task`'s or `cancel_task`'s existing bodies directly. If an issue
-turns out to specify against something that changed, correct the issue file
-in the same PR that picks it up rather than silently working around it.
+Wave 3 issues 0151–0200 (the first 45 of E12 TypeScript SDK, plus the first 5
+of E13 Rust SDK) are now published. The remaining ~193 issues in wave 3 (the
+rest of E13, all of E14 Event Indexer, and all of E15's wave-3 remainder for
+Keeper Bot v2) are still planned — issue 0195 flags an explicit open question
+for whoever drafts E14: whether the indexer should depend on the TypeScript
+SDK's event decoders directly or fork them.
+
+**A caveat carried forward from wave 2.** Several wave-1 PRs were still open
+and unmerged when 0051–0100 were originally written; by the time wave 2 was
+completed (0101–0150) and wave 3 begun, most of that surface had landed
+on `main` (issues 0119–0123, 0130 explicitly reground against it). Wave 3's
+TypeScript SDK issues make a similar bet: several method issues (0154, 0168,
+0169) are written against contract features (the verifier field, batch
+registration) that are themselves still backlog items in this same wave-2
+range, not yet implemented. Those issues say so explicitly and should be
+deferred by whoever picks them up until their contract-side dependency has
+actually shipped — check `main`, not just the issue's `depends_on` field,
+since a dependency can be listed but not yet merged.
 
 ---
 

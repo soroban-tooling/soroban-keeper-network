@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — task parameter validation
+
+- `register_task` now rejects `lock_ledgers` outside `[MIN_LOCK_LEDGERS,
+  MAX_LOCK_LEDGERS]` and `ttl_ledgers` below `MIN_TTL_LEDGERS`, returning the
+  new `InvalidTaskParams` error. Previously a `lock_ledgers` of `0` let any
+  keeper instantly re-claim a task from another keeper, an oversized
+  `lock_ledgers` let one unresponsive keeper hold a task hostage until the
+  deadline, and a `ttl_ledgers` of `0` risked stranding escrowed funds.
+
 ### Added — calldata size bound (VERSION bumped to 2)
 
 - `register_task` now rejects `calldata` larger than `MAX_CALLDATA_LEN`

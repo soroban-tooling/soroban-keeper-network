@@ -82,14 +82,16 @@ rustup target list --installed | grep wasm32
 cd examples/keeper-bot && npm install && cd ../..
 
 # Run tests (should all pass on a clean checkout)
-cargo test --all --features testutils
+cargo test --workspace --locked
 
 # Build WASM
-cargo build --release --target wasm32-unknown-unknown --package keeper-registry
+cargo build --locked --release --target wasm32-unknown-unknown --package keeper-registry
 
-# Check formatting and lints (must be clean before PR)
-cargo fmt --all -- --check
-cargo clippy --all --all-targets --all-features -- -D warnings
+# Run all required CI checks locally
+make ci
+
+# Optionally run stricter checks (includes clippy)
+make check
 ```
 
 ---
@@ -178,9 +180,8 @@ git checkout -b feature/your-feature-name
 Before opening a PR:
 
 - [ ] Branch is based on `main`
-- [ ] `cargo fmt --all` passes (no formatting diff)
-- [ ] `cargo clippy --all --all-targets --all-features -- -D warnings` passes
-- [ ] All existing tests pass: `cargo test --all --features testutils`
+- [ ] `make ci` passes (format check, tests, WASM build)
+- [ ] `make check` passes (ci + clippy) — or explain why clippy warnings are acceptable
 - [ ] New code has corresponding test coverage
 - [ ] No `TODO`, `FIXME`, or `unwrap()` added without a comment explaining why
 - [ ] No sensitive data (keys, credentials) in any file
@@ -308,6 +309,35 @@ cargo watch -x "test --all --features testutils"
 - Use `Env::default()` + `env.mock_all_auths()` for simplicity in unit tests.
 - Use real auth flows when testing auth-specific paths.
 
+### Fuzzing & crash-to-regression convention
+
+A crash found by the fuzz harness (`fuzz/fuzz_targets/`) and merely "fixed"
+is a bug that can silently come back — a future refactor can reintroduce
+the same shape of mistake, and the fuzzer might not rediscover it for a
+long time since it searches randomly rather than systematically. **Every
+crash the fuzzer finds must become a permanent, checked-in regression**,
+not just a patched line of contract code:
+
+1. Minimize the crashing input (`cargo fuzz tmin <target> <path-to-crash>`)
+   and commit it under `fuzz/corpus/<target>/regressions/`, so the fuzzer's
+   own corpus keeps re-testing it on every future run.
+2. Add a corresponding `#[test]` in `contracts/keeper-registry/src/test.rs`
+   that reproduces the exact scenario **in human-readable form** — the
+   actual sequence of contract calls that triggered the crash, not "replay
+   these fuzzer bytes." A raw fuzzer input replay is not reviewable by a
+   human and doesn't explain *why* the input was dangerous.
+3. If the crash revealed a gap in one of the money invariants (`I-1`
+   through `I-7` in `docs/ARCHITECTURE.md`), consider whether it should
+   also become a case in the corresponding property test rather than only
+   a one-off regression.
+
+Any PR that fixes a bug found by fuzzing must include both the minimized
+corpus entry and the human-readable regression test in the same commit as
+the fix — see the PR template's checkbox for this.
+
+See [`docs/FUZZING.md`](docs/FUZZING.md) for how to run an existing fuzz
+target, add a new one, and use the shared `invariants` module.
+
 ---
 
 ## PR Template & Review Process
@@ -352,6 +382,8 @@ Closes #<!-- issue number -->
 4. Address all review comments. Mark conversations resolved after addressing.
 5. Maintainer squash-merges the PR with a conventional commit message.
 6. Delete the feature branch after merge.
+
+**Note on Dependabot PRs**: Automated dependency update PRs from Dependabot follow the same review process as all other pull requests. Maintainers will review the changelog, check for breaking changes, and verify CI passes before merging.
 
 ### Review Turnaround
 

@@ -10,7 +10,10 @@ keywords = ["soroban", "stellar", "keeper", "automation", "defi"]
 categories = ["cryptography::cryptocurrencies"]
 
 [lib]
-crate-type = ["cdylib"]
+# cdylib for the on-chain WASM build; rlib so the fuzz crate (and any other
+# Rust-side consumer) can `use keeper_registry::*` as a normal library
+# dependency instead of only linking the compiled WASM.
+crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
@@ -21,6 +24,14 @@ soroban-sdk = { version = "22.0.1" }
 
 [dev-dependencies]
 soroban-sdk = { version = "22.0.1", features = ["testutils"] }
+proptest = "1"
+
+# `cfg(fuzzing)` is set automatically by cargo-fuzz/libfuzzer-sys, not
+# declared anywhere in this workspace's own Cargo.toml — the check-cfg lint
+# introduced in recent rustc otherwise (harmlessly) warns that it doesn't
+# recognize the name.
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ["cfg(fuzzing)"] }
 
 # Note: release profile is defined once at the workspace root Cargo.toml.
 # Profiles in non-root packages are ignored by Cargo, so it is not repeated here.

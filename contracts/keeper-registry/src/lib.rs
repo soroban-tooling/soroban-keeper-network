@@ -147,7 +147,33 @@ pub enum KeeperError {
     // than reused so the two branches don't collide on the same discriminant.
     /// `calldata` exceeds [`MAX_CALLDATA_LEN`].
     CalldataTooLarge = 17,
+    /// `lock_ledgers` or `ttl_ledgers` passed to `register_task` fell outside
+    /// their allowed bounds.
+    InvalidTaskParams = 18,
+    /// Arithmetic operation would overflow or underflow.
+    ArithmeticOverflow = 19,
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Task parameter bounds
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Stellar closes a ledger roughly every 5 seconds. A lock window shorter than
+/// this gives the claiming keeper no realistic chance to build and submit its
+/// `execute_task` transaction before another keeper can reclaim the task out
+/// from under it.
+const MIN_LOCK_LEDGERS: u32 = 12; // ~1 minute
+
+/// A lock window longer than this lets a single unresponsive keeper hold a
+/// task hostage for the better part of a day, with no possibility of
+/// takeover until `expire_task` becomes callable at the deadline.
+const MAX_LOCK_LEDGERS: u32 = 17_280; // ~1 day
+
+/// Persistent storage entries need enough runway to survive from
+/// registration through claim and execution without lapsing mid-flight.
+/// Below this, the TTL extension is not worth writing and risks the entry
+/// (and its escrowed reward) becoming inaccessible before a keeper can act.
+const MIN_TTL_LEDGERS: u32 = 1_000; // ~83 minutes
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Events — emitted for off-chain keeper bots to consume
@@ -232,6 +258,27 @@ pub fn emit_deadline_extended(e: &Env, task_id: u64, new_deadline: u64) {
     );
 }
 
+pub fn emit_min_reward_updated(e: &Env, old_min: i128, new_min: i128) {
+    e.events().publish(
+        (symbol_short!("minrwd"), symbol_short!("admin")),
+        (old_min, new_min),
+    );
+}
+
+pub fn emit_fees_swept(e: &Env, treasury: &Address, amount: i128, remaining: i128) {
+    e.events().publish(
+        (symbol_short!("sweep"), symbol_short!("admin")),
+        (treasury.clone(), amount, remaining),
+    );
+}
+
+pub fn emit_initialized(e: &Env, admin: &Address, reward_token: &Address, fee_bps: u32) {
+    e.events().publish(
+        (symbol_short!("init"), symbol_short!("admin")),
+        (admin.clone(), reward_token.clone(), fee_bps),
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TTL constants
 // ─────────────────────────────────────────────────────────────────────────────
@@ -311,7 +358,9 @@ fn next_task_id(e: &Env) -> u64 {
         .instance()
         .get(&DataKey::TaskCounter)
         .unwrap_or(0u64);
-    let next = id.checked_add(1).expect("task id overflow");
+    // Unreachable: exhausting u64 task ids requires ~1.8e19 registrations, far
+    // beyond any plausible lifetime of this contract.
+    let next = id.checked_add(1).expect("task id counter exhausted");
     e.storage().instance().set(&DataKey::TaskCounter, &next);
     next
 }
@@ -360,13 +409,20 @@ fn fee_bps(e: &Env) -> u32 {
 }
 
 /// Returns (keeper_net, protocol_fee).
-fn split_reward(reward: i128, fee_bps: u32) -> (i128, i128) {
+///
+/// `pub` (not crate-private) so the `invariants` module and fuzz targets in
+/// the separate `keeper-registry-fuzz` crate can call the exact same
+/// arithmetic the contract itself uses, rather than reimplementing the
+/// formula and risking the two drifting apart.
+pub fn split_reward(reward: i128, fee_bps: u32) -> (i128, i128) {
     let fee = reward
         .checked_mul(fee_bps as i128)
-        .expect("overflow")
-        .checked_div(10_000)
-        .expect("div zero");
-    (reward.checked_sub(fee).expect("underflow"), fee)
+        .ok_or(KeeperError::ArithmeticOverflow)?
+        / 10_000; // Divisor is a non-zero literal, cannot fail
+    let net = reward
+        .checked_sub(fee)
+        .ok_or(KeeperError::ArithmeticOverflow)?;
+    Ok((net, fee))
 }
 
 /// Adds `amount` to a keeper's withdrawable balance in Persistent storage.
@@ -378,24 +434,25 @@ fn split_reward(reward: i128, fee_bps: u32) -> (i128, i128) {
 /// zero-out/write), but deliberately *not* on `keeper_balance` reads — see
 /// the doc comment there for why a keeper that never returns can still see
 /// its balance entry archive.
-fn credit_keeper(e: &Env, keeper: &Address, amount: i128) {
+fn credit_keeper(e: &Env, keeper: &Address, amount: i128) -> Result<(), KeeperError> {
     let key = DataKey::KeeperReward(keeper.clone());
     let current: i128 = e.storage().persistent().get(&key).unwrap_or(0);
     let updated = current
         .checked_add(amount)
-        .expect("keeper balance overflow");
+        .ok_or(KeeperError::ArithmeticOverflow)?;
     e.storage().persistent().set(&key, &updated);
     e.storage().persistent().extend_ttl(
         &key,
         KEEPER_BALANCE_BUMP_THRESHOLD,
         KEEPER_BALANCE_BUMP_LEDGERS,
     );
+    Ok(())
 }
 
 /// Adds `amount` to the swept-able protocol fee accumulator (instance storage).
-fn accrue_fee(e: &Env, amount: i128) {
+fn accrue_fee(e: &Env, amount: i128) -> Result<(), KeeperError> {
     if amount == 0 {
-        return;
+        return Ok(());
     }
     let current: i128 = e
         .storage()
@@ -404,8 +461,9 @@ fn accrue_fee(e: &Env, amount: i128) {
         .unwrap_or(0);
     let updated = current
         .checked_add(amount)
-        .expect("fee accumulator overflow");
+        .ok_or(KeeperError::ArithmeticOverflow)?;
     e.storage().instance().set(&DataKey::FeesAccrued, &updated);
+    Ok(())
 }
 
 /// True once a claimed task's exclusive lock window has elapsed, meaning any
@@ -493,6 +551,7 @@ impl KeeperRegistry {
         e.storage().instance().set(&DataKey::TaskCounter, &0u64);
         bump_instance(&e);
 
+        emit_initialized(&e, &admin, &reward_token, fee_bps);
         log!(&e, "KeeperRegistry initialized by {}", admin);
         Ok(())
     }
@@ -510,8 +569,10 @@ impl KeeperRegistry {
     //                  CalldataTooLarge otherwise
     //   reward       — XLM stroops escrowed as bounty
     //   deadline     — unix timestamp after which the task expires
-    //   ttl_ledgers  — how long to keep the storage entry alive
-    //   lock_ledgers — ledgers the claimer holds exclusive rights
+    //   ttl_ledgers  — how long to keep the storage entry alive; must be at
+    //                  least `MIN_TTL_LEDGERS`
+    //   lock_ledgers — ledgers the claimer holds exclusive rights; must be in
+    //                  `[MIN_LOCK_LEDGERS, MAX_LOCK_LEDGERS]`
     //
     // Returns the new task_id.
 
@@ -543,6 +604,12 @@ impl KeeperRegistry {
         }
         if calldata.len() > MAX_CALLDATA_LEN {
             return Err(KeeperError::CalldataTooLarge);
+        }
+        if !(MIN_LOCK_LEDGERS..=MAX_LOCK_LEDGERS).contains(&lock_ledgers) {
+            return Err(KeeperError::InvalidTaskParams);
+        }
+        if ttl_ledgers < MIN_TTL_LEDGERS {
+            return Err(KeeperError::InvalidTaskParams);
         }
 
         bump_instance(&e);
@@ -724,9 +791,9 @@ impl KeeperRegistry {
         }
 
         bump_instance(&e);
-        let (keeper_net, fee) = split_reward(task.reward, fee_bps(&e));
-        credit_keeper(&e, &keeper, keeper_net);
-        accrue_fee(&e, fee);
+        let (keeper_net, fee) = split_reward(task.reward, fee_bps(&e))?;
+        credit_keeper(&e, &keeper, keeper_net)?;
+        accrue_fee(&e, fee)?;
 
         task.status = TaskStatus::Executed;
         save_task(&e, task_id, &task);
@@ -745,10 +812,10 @@ impl KeeperRegistry {
 
     // ── cancel_task ──────────────────────────────────────────────────────────
     //
-    // The owner reclaims a task that no keeper has picked up yet. Only Pending
-    // tasks can be cancelled — once a keeper has claimed one, the owner must
-    // wait for execution or for the deadline to pass (expire_task), so a keeper
-    // that has started work can't have the reward pulled out from under it.
+    // The owner reclaims a task. Pending tasks can be cancelled immediately.
+    // Claimed tasks can also be cancelled by the owner once the claimer's lock
+    // period has expired (`lock_expired(&e, &task) == true`), so a keeper that
+    // has started work has exclusive time to execute before escrow can be pulled.
 
     pub fn cancel_task(e: Env, owner: Address, task_id: u64) -> Result<(), KeeperError> {
         owner.require_auth();
@@ -757,23 +824,31 @@ impl KeeperRegistry {
         if task.owner != owner {
             return Err(KeeperError::NotTaskOwner);
         }
-        if task.status != TaskStatus::Pending {
-            return Err(KeeperError::InvalidTaskStatus);
+        match task.status {
+            TaskStatus::Pending => {}
+            TaskStatus::Claimed => {
+                if !lock_expired(&e, &task) {
+                    return Err(KeeperError::LockPeriodActive);
+                }
+            }
+            _ => return Err(KeeperError::InvalidTaskStatus),
         }
 
         bump_instance(&e);
-        // Refund the escrow, then mark cancelled (CEI: state after transfer is
-        // safe here because status guards prevent re-entry into a fresh cancel).
-        reward_token(&e)?.transfer(&e.current_contract_address(), &owner, &task.reward);
+        // Effects before interaction: a re-entrant cancel must find the task
+        // already Cancelled and be rejected by the status guard above.
+        let refund = task.reward;
         task.status = TaskStatus::Cancelled;
         save_task(&e, task_id, &task);
+
+        reward_token(&e)?.transfer(&e.current_contract_address(), &owner, &refund);
 
         emit_task_cancelled(&e, task_id, &owner);
         log!(
             &e,
             "Task {} cancelled, {} refunded to {}",
             task_id,
-            task.reward,
+            refund,
             owner
         );
         Ok(())
@@ -843,9 +918,38 @@ impl KeeperRegistry {
 
     // ── pause / unpause ───────────────────────────────────────────────────────
     //
-    // Admin emergency circuit breaker. While paused, register_task/claim_task/
-    // execute_task are blocked, but expire_task and withdraw_rewards remain open
-    // so funds can always be recovered even during an incident.
+    // Admin emergency circuit breaker. The rule of thumb: anything that opens
+    // new exposure (new escrow, new claims, new execution payouts) is blocked;
+    // anything that only lets value flow back out to whoever already owns it
+    // stays open, so an incident response can never itself become a fund
+    // freeze. Read-only views are never gated.
+    //
+    // Verified against `require_not_paused(&e)?` (or its absence) at the top
+    // of each function, current as of the pause-policy-matrix test suite in
+    // `test.rs` (`test_pause_policy_matrix_entry_point_by_entry_point` et al.)
+    // — that test is the source of truth if this table and the code ever
+    // drift apart again.
+    //
+    // | Entry point       | While paused | Why                                   |
+    // |--------------------|-------------|----------------------------------------|
+    // | `register_task`    | BLOCKED     | opens new escrow exposure              |
+    // | `claim_task`       | BLOCKED     | opens new keeper exposure              |
+    // | `execute_task`     | BLOCKED     | pays out new rewards                   |
+    // | `increase_reward`  | BLOCKED     | opens new escrow exposure              |
+    // | `extend_deadline`  | NOT gated   | **known bug**, tracked separately — see|
+    // |                    | (allowed)   | TODO next to the test below. Should    |
+    // |                    |             | arguably be blocked (it doesn't touch  |
+    // |                    |             | funds either way, but was likely meant |
+    // |                    |             | to follow register/claim/execute).     |
+    // | `cancel_task`      | allowed     | owner reclaiming pending-task escrow;  |
+    // |                    |             | liveness, not new exposure             |
+    // | `expire_task`      | allowed     | permissionless fund recovery           |
+    // | `withdraw_rewards` | allowed     | keeper pulling already-earned balance  |
+    // | read-only views    | allowed     | side-effect-free, never gated          |
+    //
+    // `set_fee_bps`/`set_min_reward`/`transfer_admin`/`upgrade`/`sweep_fees`
+    // are admin-only (`require_admin`) and were never in scope for the pause
+    // gate at all — pausing doesn't restrict what the admin itself can do.
 
     pub fn pause(e: Env, admin: Address) -> Result<(), KeeperError> {
         require_admin(&e, &admin)?;
@@ -894,7 +998,9 @@ impl KeeperRegistry {
             return Err(KeeperError::InvalidReward);
         }
         bump_instance(&e);
+        let old_min: i128 = e.storage().instance().get(&DataKey::MinReward).unwrap_or(0);
         e.storage().instance().set(&DataKey::MinReward, &min_reward);
+        emit_min_reward_updated(&e, old_min, min_reward);
         log!(&e, "Min reward set to {}", min_reward);
         Ok(())
     }
@@ -961,6 +1067,8 @@ impl KeeperRegistry {
             .set(&DataKey::FeesAccrued, &(accrued - amount));
         reward_token(&e)?.transfer(&e.current_contract_address(), &treasury, &amount);
 
+        let remaining = accrued - amount;
+        emit_fees_swept(&e, &treasury, amount, remaining);
         log!(&e, "Swept {} fees to {}", amount, treasury);
         Ok(())
     }
@@ -1065,6 +1173,9 @@ impl KeeperRegistry {
         VERSION
     }
 }
+
+#[cfg(any(test, fuzzing))]
+pub mod invariants;
 
 #[cfg(test)]
 mod test;

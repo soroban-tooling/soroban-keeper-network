@@ -235,6 +235,32 @@ function isPermanentError(err) {
 // Soroban helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+const MAX_SYMBOL_LENGTH = 9;
+
+/**
+ * Encodes a Soroban symbol as the base64 XDR string `getEvents` expects for a
+ * topic filter. Derived at runtime so the filter always matches the symbol
+ * written here, and a contract-side rename surfaces as a code change rather
+ * than a filter that silently stops matching.
+ */
+function topicSymbol(name) {
+  if (name.length > MAX_SYMBOL_LENGTH) {
+    throw new Error(
+      `Symbol "${name}" is too long; max ${MAX_SYMBOL_LENGTH} chars`
+    );
+  }
+  return nativeToScVal(name, { type: "symbol" }).toXDR("base64");
+}
+
+/**
+ * Event topic filters, derived from runtime symbol names.
+ * Cross-references:
+ *  - `taskRegistered`: `contracts/keeper-registry/src/lib.rs`, `emit_task_registered`
+ */
+const REGISTRY_EVENTS = {
+  taskRegistered: [topicSymbol("reg"), topicSymbol("task")],
+};
+
 async function simulateAndSend(server, keypair, networkPassphrase, tx) {
   const simResponse = await server.simulateTransaction(tx);
   if (SorobanRpc.Api.isSimulationError(simResponse)) {
@@ -319,16 +345,14 @@ async function readContract(server, sourcePublicKey, networkPassphrase, contract
 async function fetchPendingTasks(server, contractId, startLedger) {
   const tasks = [];
   try {
-    // Query TaskRegistered events (topic: ["reg", "task"])
+    // Query TaskRegistered events
     const response = await server.getEvents({
       startLedger,
       filters: [
         {
           type: "contract",
           contractIds: [contractId],
-          topics: [
-            ["AAAADwAAAANyZWc=", "AAAADwAAAAR0YXNr"], // "reg", "task" as base64 XDR
-          ],
+          topics: [REGISTRY_EVENTS.taskRegistered],
         },
       ],
       limit: 100,
@@ -380,13 +404,20 @@ async function executeTaskOffChain(task) {
 // Main keeper loop
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function keeperLoop(server, keypair, networkPassphrase, contractId) {
+async function keeperLoop(
+  server,
+  keypair,
+  networkPassphrase,
+  contractId,
+  emptyRounds = 0
+) {
   // A round is successful if it runs to completion without any unhandled
   // exceptions. An RPC error that cannot be resolved with retries, or any
   // other unexpected error, is a failure.
   // Note: a round that finds no tasks is a success. Losing a claim race to
   // another keeper is also a success, as this is normal competitive behaviour.
   const summary = { processed: 0, errors: [] };
+  let newEmptyRounds = emptyRounds;
 
   try {
     const nowSeconds = Math.floor(Date.now() / 1000);
@@ -395,8 +426,25 @@ async function keeperLoop(server, keypair, networkPassphrase, contractId) {
     const latestLedger = await server.getLatestLedger();
     const startLedger = Math.max(1, latestLedger.sequence - 1000);
 
-    const pendingTasks = await fetchPendingTasks(server, contractId, startLedger);
-    console.log(`  📋  Found ${pendingTasks.length} TaskRegistered events to evaluate`);
+    const pendingTasks = await fetchPendingTasks(
+      server,
+      contractId,
+      startLedger
+    );
+    console.log(
+      `  📋  Found ${pendingTasks.length} TaskRegistered events to evaluate`
+    );
+
+    if (pendingTasks.length === 0) {
+      newEmptyRounds++;
+      if (newEmptyRounds > 0 && newEmptyRounds % 30 === 0) {
+        console.warn(
+          `  ⚠️  No TaskRegistered events found for ${newEmptyRounds} consecutive rounds.`
+        );
+      }
+    } else {
+      newEmptyRounds = 0;
+    }
 
     for (const task of pendingTasks) {
       if (summary.processed >= CONFIG.maxTasksPerRound) break;
@@ -405,13 +453,22 @@ async function keeperLoop(server, keypair, networkPassphrase, contractId) {
         if (CONFIG.expireStaleTasks) {
           try {
             await withRetry(`expire_task ${task.taskId}`, () =>
-              invokeContract(server, keypair, networkPassphrase, contractId, "expire_task", [
-                nativeToScVal(task.taskId, { type: "u64" }),
-              ])
+              invokeContract(
+                server,
+                keypair,
+                networkPassphrase,
+                contractId,
+                "expire_task",
+                [nativeToScVal(task.taskId, { type: "u64" })]
+              )
             );
-            console.log(`  ♻️  Task ${task.taskId} expired — escrow refunded to owner`);
+            console.log(
+              `  ♻️  Task ${task.taskId} expired — escrow refunded to owner`
+            );
           } catch (err) {
-            console.log(`  ⏰  Task ${task.taskId} past deadline (skip: ${err.message})`);
+            console.log(
+              `  ⏰  Task ${task.taskId} past deadline (skip: ${err.message})`
+            );
           }
         } else {
           console.log(`  ⏰  Task ${task.taskId} is past deadline, skipping`);
@@ -420,28 +477,48 @@ async function keeperLoop(server, keypair, networkPassphrase, contractId) {
       }
 
       try {
-        console.log(`  📌  Attempting to claim task ${task.taskId} (reward: ${task.reward})...`);
+        console.log(
+          `  📌  Attempting to claim task ${task.taskId} (reward: ${task.reward})...`
+        );
         await withRetry(`claim_task ${task.taskId}`, () =>
-          invokeContract(server, keypair, networkPassphrase, contractId, "claim_task", [
-            nativeToScVal(keypair.publicKey(), { type: "address" }),
-            nativeToScVal(task.taskId, { type: "u64" }),
-          ])
+          invokeContract(
+            server,
+            keypair,
+            networkPassphrase,
+            contractId,
+            "claim_task",
+            [
+              nativeToScVal(keypair.publicKey(), { type: "address" }),
+              nativeToScVal(task.taskId, { type: "u64" }),
+            ]
+          )
         );
         console.log(`  ✅  Task ${task.taskId} claimed!`);
 
         const proof = await executeTaskOffChain(task);
 
         await withRetry(`execute_task ${task.taskId}`, () =>
-          invokeContract(server, keypair, networkPassphrase, contractId, "execute_task", [
-            nativeToScVal(keypair.publicKey(), { type: "address" }),
-            nativeToScVal(task.taskId, { type: "u64" }),
-            nativeToScVal(Buffer.from(proof, "hex"), { type: "bytes" }),
-          ])
+          invokeContract(
+            server,
+            keypair,
+            networkPassphrase,
+            contractId,
+            "execute_task",
+            [
+              nativeToScVal(keypair.publicKey(), { type: "address" }),
+              nativeToScVal(task.taskId, { type: "u64" }),
+              nativeToScVal(Buffer.from(proof, "hex"), { type: "bytes" }),
+            ]
+          )
         );
-        console.log(`  💰  Task ${task.taskId} executed! Proof: ${proof.slice(0, 20)}...`);
+        console.log(
+          `  💰  Task ${task.taskId} executed! Proof: ${proof.slice(0, 20)}...`
+        );
         summary.processed++;
       } catch (err) {
-        console.warn(`  ⚠️  Failed to process task ${task.taskId}: ${err.message}`);
+        console.warn(
+          `  ⚠️  Failed to process task ${task.taskId}: ${err.message}`
+        );
         summary.errors.push(err);
       }
     }
@@ -458,7 +535,11 @@ async function keeperLoop(server, keypair, networkPassphrase, contractId) {
   // worth trading away the guarantee of reading current on-chain state.
   try {
     const rawBalance = await readContract(
-      server, keypair.publicKey(), networkPassphrase, contractId, "keeper_balance",
+      server,
+      keypair.publicKey(),
+      networkPassphrase,
+      contractId,
+      "keeper_balance",
       [nativeToScVal(keypair.publicKey(), { type: "address" })]
     );
     const balance = BigInt(rawBalance || 0);
@@ -468,16 +549,21 @@ async function keeperLoop(server, keypair, networkPassphrase, contractId) {
       console.log(`  💸  Withdrawing ${balance} stroops...`);
       // withdraw_rewards mutates state, so it still goes through the
       // submitting path.
-      await invokeContract(server, keypair, networkPassphrase, contractId, "withdraw_rewards", [
-        nativeToScVal(keypair.publicKey(), { type: "address" }),
-      ]);
+      await invokeContract(
+        server,
+        keypair,
+        networkPassphrase,
+        contractId,
+        "withdraw_rewards",
+        [nativeToScVal(keypair.publicKey(), { type: "address" })]
+      );
       console.log(`  ✅  Withdrawal complete!`);
     }
   } catch (err) {
     console.warn(`  ⚠️  Balance check failed: ${err.message}`);
     summary.errors.push(err);
   }
-  return summary;
+  return { summary, emptyRounds: newEmptyRounds };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -516,7 +602,12 @@ async function main() {
   }
 
   if (CONFIG.once) {
-    const summary = await keeperLoop(server, keypair, networkPassphrase, CONFIG.registryContractId);
+    const { summary } = await keeperLoop(
+      server,
+      keypair,
+      networkPassphrase,
+      CONFIG.registryContractId
+    );
     const ok = summary.errors.length === 0;
     console.log(ok ? "✅  Round complete." : "⚠️  Round completed with errors.");
     process.exit(ok ? 0 : 1);
@@ -525,6 +616,7 @@ async function main() {
   // Graceful shutdown for daemon mode
   let shuttingDown = false;
   let roundInFlight = false;
+  let emptyRounds = 0;
   let timer = null;
 
   function requestShutdown(signal) {
@@ -544,9 +636,18 @@ async function main() {
     if (shuttingDown || roundInFlight) return;
     roundInFlight = true;
     try {
-      const summary = await keeperLoop(server, keypair, networkPassphrase, CONFIG.registryContractId);
+      const { summary, emptyRounds: newEmptyRounds } = await keeperLoop(
+        server,
+        keypair,
+        networkPassphrase,
+        CONFIG.registryContractId,
+        emptyRounds
+      );
+      emptyRounds = newEmptyRounds;
       if (summary.errors.length > 0) {
-        console.error(`❌  Keeper round finished with ${summary.errors.length} error(s)`);
+        console.error(
+          `❌  Keeper round finished with ${summary.errors.length} error(s)`
+        );
       }
     } catch (err) {
       // This is for truly unexpected errors in the loop itself
@@ -569,7 +670,23 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-main().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
-});
+// ─────────────────────────────────────────────────────────────────────────────
+// Module exports for testing
+// ─────────────────────────────────────────────────────────────────────────────
+
+module.exports = {
+  isPermanentError,
+  withRetry,
+  fetchPendingTasks,
+  validateAndLoadConfig,
+  keeperLoop,
+  sleep,
+};
+
+// Only run main() when executed directly, not when imported for testing
+if (require.main === module) {
+  main().catch((err) => {
+    console.error("Fatal error:", err);
+    process.exit(1);
+  });
+}

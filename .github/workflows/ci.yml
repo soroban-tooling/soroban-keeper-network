@@ -11,6 +11,11 @@ name: CI
 # The split is deliberate. A contributor should never be blocked by a new
 # upstream advisory or a subjective lint, but formatting, a green test suite,
 # and a contract that actually compiles to WASM are non-negotiable.
+#
+# IMPORTANT: The required CI jobs (format, test, build-wasm) must remain
+# synchronized with the `make ci` target in the Makefile. Contributors should
+# be able to reproduce all blocking CI checks locally by running `make ci`.
+# If you modify the required jobs here, update the Makefile accordingly.
 
 on:
   pull_request:
@@ -254,6 +259,9 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Run tests
+        run: npm test
+
       - name: Syntax check
         run: node --check index.js
 
@@ -268,7 +276,7 @@ jobs:
     name: CI required checks
     runs-on: ubuntu-latest
     if: always()
-    needs: [format, test, build-wasm]
+    needs: [format, test, build-wasm, bot]
     steps:
       - name: Verify required jobs succeeded
         run: |

@@ -1,0 +1,101 @@
+# Dependabot configuration for automated dependency updates
+#
+# This configuration manages three update schedules:
+#   1. Cargo dependencies (Rust workspace)
+#   2. npm dependencies (keeper bot example)
+#   3. GitHub Actions workflows
+#
+# Update policy:
+#   - Patch and minor updates are grouped into a single PR per ecosystem
+#   - Major updates create separate PRs to allow careful review
+#   - Updates run weekly (Monday) for code dependencies, monthly for CI
+#   - PR limit prevents notification spam
+#
+# All Dependabot PRs go through the same review process as contributor PRs.
+
+version: 2
+
+updates:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Rust / Cargo dependencies
+  # ───────────────────────────────────────────────────────────────────────────
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      # Group all patch and minor updates together for easier review
+      rust-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+    # Major version updates are intentionally NOT grouped. Each major update
+    # gets its own PR because:
+    #   - soroban-sdk major bumps often require storage migrations
+    #   - Breaking API changes need case-by-case evaluation
+    #   - Contract ABI compatibility must be verified per-update
+    #   - Grouping majors would make PR review intractable
+    #
+    # For soroban-sdk specifically, major updates are handled manually via
+    # the release planning process to ensure coordinated testnet deployment
+    # and migration testing.
+    ignore:
+      # Ignore soroban-sdk major updates — these are handled manually
+      # during planned upgrade windows to allow for proper testing and
+      # coordinated testnet deployment.
+      - dependency-name: "soroban-sdk"
+        update-types: ["version-update:semver-major"]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # npm dependencies (keeper bot example)
+  # ───────────────────────────────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/examples/keeper-bot"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      # Group patch and minor npm updates
+      npm-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+    # Major updates for npm deps (especially @stellar/stellar-sdk) are
+    # separated because they may introduce breaking API changes that require
+    # code updates in the keeper bot example.
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # GitHub Actions workflows
+  # ───────────────────────────────────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      # Group all GitHub Actions updates together since they rarely
+      # introduce breaking changes and are low-risk
+      github-actions:
+        patterns:
+          - "*"

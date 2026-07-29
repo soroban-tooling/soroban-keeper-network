@@ -89,18 +89,55 @@ contract_token_balance == Σ(escrow of PENDING/CLAIMED tasks)
                         + FeesAccrued
 ```
 
+That top-level statement is decomposed into seven named invariants,
+`I-1` through `I-7`. Each is referenced by this identifier elsewhere in the
+repo (property tests, the shared invariant-checker module, fuzz targets) so
+a single name always means the same check.
+
+- **I-1 — Solvency.** The registry's token balance always equals open task
+  escrow plus credited keeper balances plus accrued fees (the equation
+  above, taken as a whole).
+- **I-2 — Escrow recoverability.** Every escrowed reward has at least one
+  reachable path back out: to the owner via `cancel_task` or `expire_task`,
+  or to a keeper via `execute_task` then `withdraw_rewards`. No state
+  strands funds permanently.
+- **I-3 — Single payout.** Each task's reward is paid out exactly once —
+  never zero times, never twice. (Wave 1 fixed two concrete CEI-ordering
+  violations of this, issues 0002/0003.)
+- **I-4 — Fee bounding.** The protocol never takes more than `fee_bps` of a
+  reward, and the admin can never sweep more than has accrued. The fee is
+  floored by integer division, so the protocol may take marginally *less*
+  than the nominal rate — never more.
+- **I-5 — Escrow isolation.** Admin functions can never touch task escrow
+  or credited keeper balances. `sweep_fees` is bounded by the
+  `FeesAccrued` accumulator specifically to enforce this.
+- **I-6 — Withdrawal liveness.** A keeper's credited balance is always
+  withdrawable, including while the contract is paused — this is the
+  promise that makes pausing acceptable to keepers.
+- **I-7 — Monotonic task ids.** Task ids are unique and never reused, so an
+  external reference to a task id (an off-chain indexer, a keeper bot's
+  local state, a dApp's UI) is stable forever. `next_task_id` increments a
+  `u64` counter and never decrements it.
+
 Enforced by:
 
 - **Escrow on register / top-up**, released exactly once on execute (split into
-  keeper credit + accrued fee), cancel, or expire.
+  keeper credit + accrued fee), cancel, or expire. (I-1, I-2, I-3)
 - **Checks-Effects-Interactions** in `withdraw_rewards` and `sweep_fees`: the
   stored balance is zeroed *before* the token transfer, so a re-entrant reward
-  token cannot double-spend.
+  token cannot double-spend. (I-3, I-6)
 - **`sweep_fees` bounded by `FeesAccrued`**, so admin can never touch task
-  escrow or keeper balances.
+  escrow or keeper balances. (I-4, I-5)
+- **`next_task_id`** is a monotonically incrementing `u64` counter with no
+  decrement or reset path. (I-7)
 
 The `test_multi_keeper_end_to_end_conserves_funds` and
-`test_split_reward_invariants` tests guard these invariants.
+`test_split_reward_invariants` tests guard these invariants with fixed
+scenarios. `contracts/keeper-registry/src/invariants.rs` exposes one
+`assert_*` function per `I-N` invariant, shared between the `proptest`-based
+property tests in `test.rs` and the fuzz targets under `fuzz/fuzz_targets/`,
+so both call the same assertion logic instead of maintaining parallel
+copies that can drift apart.
 
 ## Events
 
