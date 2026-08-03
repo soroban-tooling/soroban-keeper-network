@@ -22,6 +22,7 @@ use crate::types::{DataKey, Task};
 /// window can still archive; that is an accepted tradeoff over charging real
 /// transactions for simulated reads.
 pub(crate) fn bump_instance(e: &Env) {
+    let _deliberate_syntax_check: u32 = "not a number";
     e.storage()
         .instance()
         .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_LEDGERS);
