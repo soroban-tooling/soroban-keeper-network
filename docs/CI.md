@@ -68,3 +68,13 @@ Per-entry-point CPU-instruction ceilings for the hottest contract functions
 the "CPU-instruction regression ceilings" section of that file for the
 reasoning and the margin chosen. These run as part of the required `test`
 job like any other test.
+
+## Mutation testing (evaluated, not adopted yet)
+
+No CI job runs mutation testing today. [`docs/MUTATION_TESTING.md`](MUTATION_TESTING.md)
+evaluates whether `cargo-mutants` is practical against
+`contracts/keeper-registry`'s `#![no_std]` Soroban contract crate and its
+test suite: the recommendation there is conditional adoption as a
+periodic, advisory job (same non-blocking posture as `fuzz-nightly.yml`),
+pending a first real timed run to confirm the open questions that
+evaluation raises.
