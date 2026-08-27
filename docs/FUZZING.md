@@ -166,6 +166,17 @@ targets for 15 minutes each on a daily schedule with a persistent corpus.
 Neither blocks a merge — see [`docs/CI.md`](CI.md) for the full advisory-job
 policy and how a crash is surfaced.
 
+### Corpus growth tracking
+
+Every job summary (`fuzz-pr` and `fuzz-nightly` alike) reports each target's
+corpus file count and on-disk size in KiB, before and after the run. For
+`fuzz-nightly` in particular — since its corpus persists across runs via the
+`fuzz-corpus-*` cache — this is worth a periodic glance: a corpus that stops
+growing across several consecutive nightly runs is a signal the fuzzer has
+stopped finding new code paths, either because it has already covered
+everything reachable or because something is wrong with the harness. This
+doesn't page anyone; it's visibility, not alerting.
+
 A short local run is still worth doing before opening a PR that touches
 `execute_task` (the only currently-working target) or the shared
 `invariants` module — CI's 60-second PR budget is enough to catch an
