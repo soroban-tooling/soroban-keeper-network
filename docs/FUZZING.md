@@ -179,6 +179,52 @@ cargo +nightly fuzz run execute_task -- -max_total_time=120
 property tests) *is* run in ordinary CI today, same as any other unit test —
 that part isn't optional or fuzzing-specific.
 
+## Epic E03 retrospective: invariant coverage map
+
+Epic E03 is fuzzing and property testing. This section is its closing
+summary — the coverage map issue 0142 asks for, so a contributor can see
+at a glance which invariant is backed by which test or fuzz target
+instead of cross-referencing the individual issues above.
+
+| Invariant | Property test | Fuzz target | Status |
+|---|---|---|---|
+| I-1 — Solvency | `property_i1_solvency_holds_across_random_task_outcomes` | `execute_task` (restricted to the executed task's contribution) | Covered |
+| I-2 — Escrow recoverability | `property_i2_lapsed_claim_is_always_expirable` | — | Covered by property test only |
+| I-3 — Single payout | `property_i3_single_payout_not_doubled` | — | Covered by property test only |
+| I-4 — Fee bounding | `property_i4_fee_bounded_across_arbitrary_inputs` | `execute_task` | Covered |
+| I-5 — Escrow isolation | `property_i5_sweep_fees_isolated_from_escrow_and_keeper_balances` | — | Covered by property test only |
+| I-6 — Withdrawal liveness | `property_i6_withdrawal_live_while_paused` | — | Covered by property test only |
+| I-7 — Monotonic task ids | `property_i7_task_ids_strictly_increasing` | — | Covered by property test only |
+
+All seven live in `contracts/keeper-registry/src/test/property.rs` and
+call the matching `assert_*` function in `invariants.rs`, per the "Using
+the shared invariant module" section above. `register_task` and `smoke`
+not compiling (see the target-status table) means I-2, I-3, I-5, I-6 and
+I-7 currently have no fuzz-level coverage, only property-test coverage —
+closing that gap is real, scoped follow-up work, not something this
+retrospective can claim as done.
+
+**Two invariants exist in code ahead of `docs/ARCHITECTURE.md`.** The
+property suite already has `property_i8_ttl_always_covers_deadline_or_registration_is_rejected`
+and `property_i9_instance_ttl_never_lapses_under_bounded_gap_traffic`
+(issues 0120 and 0122), but `docs/ARCHITECTURE.md`'s money-invariants list
+still only documents `I-1` through `I-7` — these two were never promoted
+to that list. This is a known gap this retrospective surfaces rather than
+silently working around: whoever picks up backlog issue 0132 (which plans
+to add a verifier-trust-boundary invariant numbered `I-8`) needs to
+renumber it to `I-10` (or docs/ARCHITECTURE.md needs its own pass to
+promote the TTL pair to `I-8`/`I-9` first), since the number is already
+in active use in the test suite. Neither has happened yet as of this
+writing.
+
+**Mutation testing (issue 0135) has not been run yet.** The exploration
+issue is still open — no mutation-testing tool has been tried against
+`contracts/keeper-registry`, and no CI job or finding exists in this
+repository to summarize. That is itself the honest status to record here:
+line/branch coverage (via `cargo-llvm-cov`, backlog 0030) tells you what
+ran, not whether the assertions would catch a mutated bug, and that
+sharper question remains unanswered pending 0135.
+
 ## What's not here yet
 
 For anyone picking up the remaining fuzzing-epic issues, in dependency

@@ -23,6 +23,8 @@
 | [Verifier design (E04)](docs/VERIFIER_DESIGN.md) | Proposed `IKeeperVerifier` interface for optional on-chain proof verification |
 | [Batch operations (E05)](docs/BATCH_OPERATIONS.md) | Proposed `batch_register_tasks` design + integration guide |
 | [Storage layout survey](docs/STORAGE_LAYOUT.md) | `Task` struct storage-cost findings and recommendations |
+| [Audit scope](docs/AUDIT_SCOPE.md) | Surfaces and primary artifacts an external auditor should review, including the verifier integration |
+| [Events for a future indexer](docs/EVENTS.md) | Verifier-related event schema (epic E14 scope), field-by-field indexer purpose |
 | [CI](docs/CI.md) | What each CI job checks and which are advisory vs. required |
 | [Deploying & running](docs/DEPLOYING.md) | Testnet deploy walkthrough and keeper-bot operator guide |
 | [Deployments](docs/DEPLOYMENTS.md) | Canonical record of on-chain addresses |
@@ -440,6 +442,11 @@ Notes:
 - `("admin", "xfer")` is the only event whose first topic is `"admin"`; every
   other admin event uses `"admin"` as its *second* topic. Filter on both topics,
   not just one.
+- `VerifierUpdated` and `TaskVerificationFailed` are epic E04 (verifier
+  integration) events; see [`docs/EVENTS.md`](docs/EVENTS.md) for their
+  full schema and indexer-relevant purpose per field, and note that
+  epic's current implementation status there before building against
+  them.
 | Event | Topics | Data |
 |-------|--------|------|
 | `TaskRegistered` | `("reg", "task")` | `(task_id, owner, reward, deadline)` |
@@ -716,7 +723,10 @@ need the daemon loop to complete a round without a real executor in place.
 | Formal audit | `keeper-registry` contract | Q4 2026 |
 | Ongoing | Automated invariant testing with `cargo-fuzz` | Continuous |
 
-Security issues should be reported per [SECURITY.md](SECURITY.md).
+Security issues should be reported per [SECURITY.md](SECURITY.md). See
+[`docs/AUDIT_SCOPE.md`](docs/AUDIT_SCOPE.md) for the per-surface scope an
+external auditor should review, including the verifier integration's
+trust boundary.
 
 ---
 
