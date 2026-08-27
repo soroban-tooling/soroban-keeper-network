@@ -1,9 +1,19 @@
 # Verifier Design (E04)
 
 This is the design document for the `IKeeperVerifier` interface — the
-decision record the other issues in E04 (0072–0096) implement against. No
-contract code changes are made by this document; it exists so the
-interface is agreed on paper before several PRs build on top of it.
+decision record the other issues in E04 (0072–0096) implement against.
+
+**Status: core slice implemented.** `Task.verifier: Option<Address>`,
+`register_task`'s `verifier` parameter, `execute_task`'s verifier call
+(via the `IKeeperVerifier`/`KeeperVerifierClient` pair in
+`contracts/keeper-registry/src/verifier.rs`), and the `update_verifier` entry
+point now exist, together with the `KeeperError::VerificationFailed` error
+and `TaskVerificationFailed` event (issue #105) and the solvency property
+extension covering verifier-attached tasks (issue #119,
+`contracts/keeper-registry/src/test/property.rs`). Not yet built: the
+reference verifiers (signature/oracle/tx-inclusion, issues 0077–0079) and the
+admin-curated allow-list (§5, issue 0092) — those remain open follow-up
+issues.
 
 ## Context
 
@@ -69,6 +79,18 @@ rejection path in `execute_task` already works, per I-3/I-5 in
 `docs/ARCHITECTURE.md`), and the keeper is free to retry (their claim
 lock is untouched) or the task can still expire/be cancelled normally by
 its other paths.
+
+**Confirmed against the actual implementation** (issue 0075's acceptance
+criteria): `execute_task` calls the verifier through
+`KeeperVerifierClient::try_verify` — the `try_` variant `#[contractclient]`
+generates, which wraps `Env::try_invoke_contract` — and treats anything other
+than `Ok(Ok(true))` (an explicit `false`, a host-side conversion error, or a
+callee panic) as rejection. `contracts/keeper-registry/src/test/verifier.rs`'s
+`test_execute_task_with_panicking_verifier_is_isolated_as_verification_failed`
+is the minimal reproducing test this issue's acceptance criteria calls for:
+it attaches a verifier whose `verify` unconditionally panics, and asserts
+`execute_task` returns `Err(VerificationFailed)` rather than the test itself
+panicking (a host trap) — which it would if the panic were not caught.
 
 This was a real design choice, not a foregone conclusion: propagating the
 panic (aborting the whole transaction) is *also* safe from a funds

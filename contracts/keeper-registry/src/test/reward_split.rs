@@ -151,7 +151,7 @@ fn test_split_reward_full_fee_rate_leaves_the_keeper_nothing() {
 #[test]
 fn test_version_is_exposed() {
     let s = setup();
-    assert_eq!(s.registry.version(), 3u32);
+    assert_eq!(s.registry.version(), 4u32);
 }
 
 #[test]

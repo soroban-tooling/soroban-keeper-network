@@ -59,6 +59,7 @@ fn test_cancel_task_rejects_reentrant_refund() {
         &deadline,
         &DEFAULT_TTL_LEDGERS,
         &120u32,
+        &None,
     );
 
     // Escrow landed on the registry, owner is down the reward.

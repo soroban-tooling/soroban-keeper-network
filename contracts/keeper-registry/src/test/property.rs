@@ -68,6 +68,90 @@ proptest! {
             .expect("I-1 solvency must hold after any mix of task outcomes");
     }
 
+    // I-1 (verifier extension) — issue #119 / backlog 0094. Extends I-1
+    // (docs/ARCHITECTURE.md: token.balance(&registry) == open escrow +
+    // keeper balances + accrued fees) — proved above against the
+    // pre-verifier contract per issue 0054 — to cover the verifier-gated
+    // execute_task path added by this epic's design doc
+    // (docs/VERIFIER_DESIGN.md). The property continues to hold across
+    // randomized sequences that mix tasks with no verifier, an
+    // always-approving verifier, and an always-rejecting verifier — the same
+    // test-only verifier contracts `test/verifier.rs` uses for issues
+    // #105/0083/0084, reused here per 0094's explicit instruction rather
+    // than duplicated. Also generalizes 0084's assertion (a verifier
+    // rejection never moves tokens) across random sequences instead of one
+    // fixed scenario.
+    #[test]
+    fn property_i1_solvency_holds_with_verifier_attached_tasks(
+        rewards in prop::collection::vec(1_i128..1_000_000, 1..6),
+        verifier_modes in prop::collection::vec(0u8..3, 1..6),
+    ) {
+        let s = setup();
+        let token = token::Client::new(&s.env, &s.token_id);
+        let keeper = Address::generate(&s.env);
+
+        let approve_id = s
+            .env
+            .register(super::verifier::always_approve_verifier::AlwaysApproveVerifier, ());
+        let reject_id = s
+            .env
+            .register(super::verifier::always_reject_verifier::AlwaysRejectVerifier, ());
+
+        let mut task_ids = std::vec::Vec::new();
+        for (reward, mode) in rewards.iter().zip(verifier_modes.iter()) {
+            let deadline = s.env.ledger().timestamp() + 3_600;
+            let verifier = match mode % 3 {
+                0 => None,
+                1 => Some(approve_id.clone()),
+                _ => Some(reject_id.clone()),
+            };
+            let id = s.registry.register_task(
+                &s.admin,
+                &TaskType::Liquidation,
+                &calldata(&s.env),
+                reward,
+                &deadline,
+                &DEFAULT_TTL_LEDGERS,
+                &120u32,
+                &verifier,
+            );
+            task_ids.push(id);
+
+            s.registry.claim_task(&keeper, &id);
+            let balance_before_attempt = token.balance(&s.registry.address);
+            let result =
+                s.registry
+                    .try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p"));
+
+            if mode % 3 == 2 {
+                // Rejecting verifier: execution must fail, and — the property
+                // this extension exists to pin — no token may have moved.
+                prop_assert_eq!(
+                    result,
+                    Err(Ok(KeeperError::VerificationFailed)),
+                    "a rejecting verifier must fail execute_task with VerificationFailed"
+                );
+                prop_assert_eq!(
+                    token.balance(&s.registry.address),
+                    balance_before_attempt,
+                    "a verifier rejection must never move tokens"
+                );
+            } else {
+                // No verifier, or an approving one: execution must succeed.
+                prop_assert!(
+                    result.is_ok(),
+                    "expected execute_task to succeed for verifier mode {}",
+                    mode % 3
+                );
+            }
+        }
+
+        let balance = token.balance(&s.registry.address);
+        assert_solvent(&s.env, &s.registry, &task_ids, &[keeper], balance).expect(
+            "I-1 solvency must hold across a mix of none/approve/reject verifier outcomes",
+        );
+    }
+
     // I-2 — Escrow recoverability: a claimed task past its deadline is
     // always expirable. Issue 0005 (ttl shorter than deadline strands
     // escrow) originally required this property to carve out the
@@ -235,6 +319,7 @@ proptest! {
             &deadline,
             &ttl_ledgers,
             &120u32,
+            &None,
         );
 
         if (ttl_ledgers as u64) < required {

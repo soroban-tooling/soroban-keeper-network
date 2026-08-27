@@ -43,12 +43,14 @@ mod events;
 mod internal;
 mod task;
 mod types;
+mod verifier;
 mod views;
 
 pub use constants::*;
 pub use errors::KeeperError;
 pub use events::*;
 pub use types::{BatchTaskParams, DataKey, Task, TaskStatus, TaskType};
+pub use verifier::{IKeeperVerifier, KeeperVerifierClient};
 
 // Re-exported for the test and fuzz harnesses, which assert on the reward
 // split directly rather than inferring it from a balance delta.

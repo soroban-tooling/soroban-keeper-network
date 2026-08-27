@@ -110,6 +110,18 @@ pub fn emit_initialized(e: &Env, admin: &Address, reward_token: &Address, fee_bp
     );
 }
 
+/// Emitted when a task's attached verifier rejects a proof (`verify` returned
+/// `false`, or the call panicked). Distinct from `TaskExecuted`: the two are
+/// mutually exclusive for a given `execute_task` call — a rejection emits
+/// this and returns `KeeperError::VerificationFailed` without crediting the
+/// keeper, transferring anything, or changing the task's status.
+pub fn emit_verification_failed(e: &Env, task_id: u64, keeper: &Address) {
+    e.events().publish(
+        (symbol_short!("verfail"), symbol_short!("task")),
+        (task_id, keeper.clone()),
+    );
+}
+
 pub fn emit_upgraded(e: &Env, admin: &Address, new_wasm_hash: &BytesN<32>) {
     e.events().publish(
         (symbol_short!("upgrade"), symbol_short!("admin")),

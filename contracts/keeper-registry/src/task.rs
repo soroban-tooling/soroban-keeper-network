@@ -8,6 +8,7 @@ use crate::errors::KeeperError;
 use crate::events::*;
 use crate::internal::*;
 use crate::types::{DataKey, Task, TaskStatus, TaskType};
+use crate::verifier::KeeperVerifierClient;
 use crate::{KeeperRegistry, KeeperRegistryArgs, KeeperRegistryClient};
 
 #[contractimpl]
@@ -29,6 +30,12 @@ impl KeeperRegistry {
     //                  least `MIN_TTL_LEDGERS`
     //   lock_ledgers — ledgers the claimer holds exclusive rights; must be in
     //                  `[MIN_LOCK_LEDGERS, MAX_LOCK_LEDGERS]`
+    //   verifier     — optional on-chain proof verifier (docs/VERIFIER_DESIGN.md).
+    //                  `None` behaves exactly as before this parameter existed;
+    //                  `Some(addr)` is stored on the task but does not change
+    //                  this function's own behavior — only `execute_task`
+    //                  consumes it. Any address is accepted (verifiers are
+    //                  permissionless).
     //
     // Returns the new task_id.
 
@@ -44,6 +51,7 @@ impl KeeperRegistry {
         deadline: u64,
         ttl_ledgers: u32,
         lock_ledgers: u32,
+        verifier: Option<Address>,
     ) -> Result<u64, KeeperError> {
         require_not_paused(&e)?;
         owner.require_auth();
@@ -77,6 +85,7 @@ impl KeeperRegistry {
             claimer: None,
             claim_ledger: None,
             lock_ledgers,
+            verifier,
         };
         save_task(&e, task_id, &task);
         emit_task_registered(&e, task_id, &owner, reward, deadline);
@@ -229,6 +238,12 @@ impl KeeperRegistry {
     // credited to an internal balance rather than transferred out here so the
     // keeper controls when it pays the withdrawal transfer cost.
     //
+    // If the task has a `verifier` attached (docs/VERIFIER_DESIGN.md), it is
+    // called before any of the above: a rejection (explicit `false` or a
+    // panic) returns `KeeperError::VerificationFailed` with the task left
+    // exactly as it was (still `Claimed`, nothing credited or transferred).
+    // With no verifier attached, proof handling is unchanged from the MVP:
+    //
     // The proof is emitted in `TaskExecuted` (not just logged) so it is
     // publicly recoverable off-chain — this MVP trusts the claimer to submit
     // it (see README's Known Design Decisions), and that trade-off only holds
@@ -260,6 +275,24 @@ impl KeeperRegistry {
         }
         if e.ledger().timestamp() >= task.deadline {
             return Err(KeeperError::DeadlinePassed);
+        }
+
+        // Verifier gate (docs/VERIFIER_DESIGN.md §1-2): `None` is the
+        // unchanged wave-1 MVP path. `Some(addr)` must approve before any
+        // state changes below — `try_verify` catches a callee panic the same
+        // way an explicit `false` is handled, so a broken or malicious
+        // verifier can only ever cause this typed rejection, never abort the
+        // transaction or brick the task (it stays `Claimed` and retryable,
+        // or falls back to `expire_task` at the deadline).
+        if let Some(verifier) = task.verifier.clone() {
+            let approved = matches!(
+                KeeperVerifierClient::new(&e, &verifier).try_verify(&task_id, &keeper, &proof),
+                Ok(Ok(true))
+            );
+            if !approved {
+                emit_verification_failed(&e, task_id, &keeper);
+                return Err(KeeperError::VerificationFailed);
+            }
         }
 
         bump_instance(&e);

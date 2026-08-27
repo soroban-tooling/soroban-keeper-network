@@ -20,7 +20,7 @@
 | [Live demo](docs/DEMO.md) | Deployed testnet contract + full on-chain transaction trace |
 | [Architecture](docs/ARCHITECTURE.md) | Components, task lifecycle, storage, money invariants, trust model |
 | [Fuzzing & property testing](docs/FUZZING.md) | Running/adding fuzz targets, the shared invariant module, crash-to-regression convention |
-| [Verifier design (E04)](docs/VERIFIER_DESIGN.md) | Proposed `IKeeperVerifier` interface for optional on-chain proof verification |
+| [Verifier design (E04)](docs/VERIFIER_DESIGN.md) | `IKeeperVerifier` interface for optional on-chain proof verification |
 | [Indexer design](docs/INDEXER_DESIGN.md) | One instance per deployment, event-shape versioning policy |
 | [Indexer deployment](docs/INDEXER_DEPLOYMENT.md) | Provisioning, backfill, and operating an indexer instance |
 | [Batch operations (E05)](docs/BATCH_OPERATIONS.md) | Proposed `batch_register_tasks` design + integration guide |
@@ -116,7 +116,7 @@ A **shared, permissionless, on-chain coordination layer** where:
 
 ### Phase 2 (Roadmap)
 
-- [ ] **On-chain execution verifier interface** — target contracts implement `IKeeperVerifier` and the registry calls them to verify execution succeeded
+- [x] **On-chain execution verifier interface** — target contracts implement `IKeeperVerifier` and `execute_task` calls them before crediting the keeper (see [docs/VERIFIER_DESIGN.md](docs/VERIFIER_DESIGN.md)); an admin-curated allowlist and the reference verifiers (signature/oracle/tx-inclusion) remain open follow-up issues
 - [x] **Batch task registration** — `batch_register_tasks` registers up to `MAX_BATCH_SIZE` tasks in one transaction under a single owner auth, with a `max_total_reward` escrow ceiling (see [docs/BATCH_OPERATIONS.md](docs/BATCH_OPERATIONS.md))
 - [ ] **EIP-like task conditions** — on-chain `checkUpkeep` callback before claiming
 - [ ] **Keeper reputation scores** — slash stake for missed executions
@@ -506,15 +506,20 @@ let task_id = registry.register_task(
     &(env.ledger().timestamp() + 3600), // deadline: 1 hour from now
     &17_280u32,                       // TTL: ~1 day
     &120u32,                          // lock: ~10 minutes
+    &None,                            // verifier: Some(addr) to require on-chain proof verification
 );
 ```
 
-**Step 3 — React to execution** (optional Phase 2 — verifier interface):
+**Step 3 — Optional on-chain proof verification** (see
+[docs/VERIFIER_DESIGN.md](docs/VERIFIER_DESIGN.md)):
 
 ```rust
-// Your contract implements this trait (Phase 2 only)
-pub trait IKeeperVerifiable {
-    fn verify_execution(env: Env, task_id: u64, proof: Bytes) -> bool;
+// Implement this trait on a contract of your choosing, then pass its
+// address as register_task's `verifier` argument (Some(addr) instead of
+// None above). execute_task calls it before crediting the keeper, and
+// rejects with KeeperError::VerificationFailed if it returns false.
+pub trait IKeeperVerifier {
+    fn verify(env: Env, task_id: u64, keeper: Address, proof: Bytes) -> bool;
 }
 ```
 

@@ -59,4 +59,13 @@ pub enum KeeperError {
     /// The sum of a batch's rewards exceeded the caller-supplied
     /// `max_total_reward` ceiling. Zero transfers occurred.
     BatchRewardCeilingExceeded = 23,
+    /// A task's attached verifier rejected the proof (`verify` returned
+    /// `false`, or the call panicked — the two are treated identically, see
+    /// `docs/VERIFIER_DESIGN.md` §2). Distinct from `InvalidTaskStatus` (the
+    /// task moved out from under the caller — don't retry the same way) and
+    /// `NotTaskClaimer` (wrong caller): this means the caller IS the current
+    /// claimer of a still-`Claimed` task, but the specific proof it submitted
+    /// was rejected, so retrying with a different proof against the same
+    /// claim is meaningful.
+    VerificationFailed = 24,
 }
