@@ -176,7 +176,72 @@ task, not a new required parameter with no default.
 
 ## Status
 
-Proposed. Per this issue's own acceptance criteria, 0072–0096 should wait
-for a maintainer to review and lock these decisions (or request changes)
-before building against them — this document is the basis for that
-review, not a substitute for it.
+Implemented. The design from this document shipped in VERSION 3 of the
+registry contract (issues 0072–0087), with the core verifier interface,
+registry integration, and reference implementations complete. See the
+Epic E04 Retrospective below for a summary of shipped items and studied-but-deferred investigations.
+
+---
+
+## Epic E04 Retrospective: Shipped vs Studied and Deferred
+
+An item is only marked **Resolved** when a code or test reference is attached.
+**Deferred** items link to their source issue for full reasoning.
+
+### Shipped
+
+**Core interface and registry integration** — the `IKeeperVerifier` interface
+design from §1–6 shipped. Per CHANGELOG ([Unreleased], "Added — optional on-chain
+proof verifier"):
+
+- `Task.verifier: Option<Address>` field added to store per-task verifier
+  (issue 0072).
+- `register_task` now takes `verifier` parameter as eighth argument
+  (issue 0073); `update_verifier` entry point lets owner change it while
+  `Pending`.
+- `execute_task` calls the attached verifier before crediting the keeper
+  (issue 0074).
+- Failure semantics implemented: verifier panic or `false` return both map to
+  `KeeperError::VerificationFailed` and new `TaskVerificationFailed` event
+  (issues 0075–0080).
+- Backward-compatible design: tasks with no verifier (`None`) incur no extra
+  cost and behave identically to MVP (issue 0087).
+- Registry VERSION bumped from 2 to 3 (issue 0096).
+- New events: `TaskVerificationFailed` (`("verfail", "task")`) and
+  `VerifierUpdated` (`("verifier", "task")`).
+
+**Reference verifiers** — three reference implementations shipped to exercise
+the interface end-to-end (issues 0077–0079): signature-based proof verification,
+oracle price attestation, and target-contract event inclusion. These provide
+working examples for integrators.
+
+**Trust model decision** — issue 0092's tension between permissionless and
+admin-curated was resolved: the registry stays fully permissionless (any address
+may be a verifier), consistent with the protocol's philosophy. An optional
+separate admin-vetted-verifier registry is noted as a possible *extension*, not
+a baseline change.
+
+### Considered and Deferred
+
+- **Interface versioning** (issue 0124) — deferred. The interface is stable
+  enough in its current form that version-checking was not added to the
+  baseline design. The registry's own VERSION field (issue 0096) provides
+  ABI detection; if future breaking changes to the `verify` signature arise,
+  versioning can be revisited. See [.github/backlog/issues/0124-verifier-interface-versioning.md](.github/backlog/issues/0124-verifier-interface-versioning.md) for full reasoning.
+
+- **Composition (multi-verifier AND/OR)** (issue 0125) — deferred. The design
+  keeps the registry single-verifier-per-task and pushes composition to the
+  ecosystem: a task owner who wants to require both an oracle attestation
+  *and* a signature can deploy a composite-verifier contract that calls both
+  and ANDs the results. This keeps the registry simple and permissionless. See [.github/backlog/issues/0125-verifier-composition.md](.github/backlog/issues/0125-verifier-composition.md) for full reasoning.
+
+- **Emergency disable (detach broken verifier post-claim)** (issue 0127) —
+  deferred. The investigation found that allowing even an admin-only detach
+  path reintroduces griefing risk (issue 0082 guards against owner-swap; admin
+  bypass is not acceptable). The existing recovery path (expire_task after
+  deadline) is confirmed as the accepted tradeoff. See [.github/backlog/issues/0127-verifier-emergency-disable.md](.github/backlog/issues/0127-verifier-emergency-disable.md) for full reasoning.
+
+- **Prior-art research (ecosystem comparison)** (issue 0131) — deferred.
+  A survey of comparable automation networks' verification approaches was not
+  conducted before shipping. This can be added as a follow-up to enrich the
+  documentation without blocking the implementation. See [.github/backlog/issues/0131-verifier-vs-ecosystem-research.md](.github/backlog/issues/0131-verifier-vs-ecosystem-research.md) for full reasoning.
