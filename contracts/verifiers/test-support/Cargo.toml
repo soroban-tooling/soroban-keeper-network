@@ -1,0 +1,26 @@
+[package]
+name = "keeper-registry-test-support"
+version = "0.1.0"
+edition = "2021"
+authors = ["Soroban Keeper Network Contributors"]
+description = "Minimal test harness for third-party verifier authors testing against the Keeper Registry"
+license = "Apache-2.0"
+repository = "https://github.com/soroban-tooling/soroban-keeper-network"
+keywords = ["soroban", "stellar", "keeper", "verifier", "testing"]
+categories = ["development-tools::testing"]
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = []
+testutils = ["soroban-sdk/testutils"]
+
+[dependencies]
+keeper-registry = { path = "../../keeper-registry", features = ["testutils"] }
+soroban-sdk = { version = "22.0.1", features = ["testutils"] }
+soroban-token-sdk = { version = "22.0.1" }
+
+[dev-dependencies]
+# For self-tests only
+
