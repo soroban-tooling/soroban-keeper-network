@@ -13,6 +13,7 @@ mod claim;
 mod common;
 mod events;
 mod expire;
+mod fee_accrual;
 mod integration;
 mod not_initialized;
 mod perf;
