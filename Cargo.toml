@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "contracts/keeper-registry",
     "indexer",
+    "sdk/rust",
 ]
 
 [workspace.dependencies]
