@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — indexer service scaffold (E14)
+
+- New workspace member `indexer/` (`keeper-indexer`): the runnable, empty
+  service issue 0219 asks for — prove the plumbing from
+  `docs/INDEXER_DESIGN.md` before any event-specific logic. It validates
+  configuration with the keeper bot's `requireEnv` discipline (every failure
+  names the variable and the reason; `DATABASE_URL` is never echoed),
+  connects Postgres and runs the (currently empty) sqlx migration set,
+  health-checks the RPC, then polls `getEvents` for the configured contract
+  with full cursor pagination and logs each raw event unparsed. The schema
+  arrives with 0220–0222; idempotent per-event ingestion with 0230.
+
 ### Added — bounded batch task reads (#25)
 
 - New read-only views `get_tasks(ids)` and `get_tasks_range(from, count)` let
