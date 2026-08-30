@@ -86,17 +86,22 @@ async fn main() {
 /// same code path. In the scaffold the "apply" step is a log line.
 async fn run_loop(config: &Config, rpc: &RpcClient) {
     let mut cursor: Option<String> = None;
+    // Fallback resume point for RPC generations whose responses omit the
+    // paging cursor: advanced past every exchange, so the loop can never
+    // re-request the same window round after round (the keeper bot's 0032
+    // bug, which this loop exists not to inherit).
+    let mut next_start = config.start_ledger;
     let mut shutdown = std::pin::pin!(tokio::signal::ctrl_c());
 
     loop {
         let start = match &cursor {
             // First request of the run: a ledger. Every later request: the
             // returned cursor — the RPC treats the two as mutually exclusive.
-            None => Start::Ledger(config.start_ledger),
+            None => Start::Ledger(next_start),
             Some(c) => Start::Cursor(c),
         };
 
-        match rpc.get_events(&config.contract_id, start, PAGE_LIMIT).await {
+        let sleep_ms = match rpc.get_events(&config.contract_id, start, PAGE_LIMIT).await {
             Ok(page) => {
                 for ev in &page.events {
                     // Observation only — the scaffold's whole job. Topics and
@@ -111,23 +116,36 @@ async fn run_loop(config: &Config, rpc: &RpcClient) {
                     );
                 }
                 let caught_up = page.events.len() < PAGE_LIMIT as usize;
+                // Never lose our place. Prefer the RPC's cursor; without
+                // one, the last event's id doubles as a paging token; an
+                // empty cursorless page still advances the ledger fallback
+                // past everything this exchange covered — otherwise a full
+                // page would be re-requested forever and an empty one
+                // rescanned every round.
                 if let Some(next) = page.cursor {
                     cursor = Some(next);
+                } else if let Some(last) = page.events.last() {
+                    cursor = Some(last.id.clone());
+                } else {
+                    next_start = next_start.max(page.latest_ledger.saturating_add(1));
                 }
                 if caught_up {
                     log::debug!("caught up through ledger {}", page.latest_ledger);
+                    config.poll_interval_ms
                 } else {
-                    // More pages waiting: keep paging before sleeping.
-                    continue;
+                    // More pages waiting: no sleep, but still an await point
+                    // below — a multi-hour backfill must not be un-killable.
+                    0
                 }
             }
             Err(e) => {
                 log::error!("getEvents failed: {e} — retrying next round");
+                config.poll_interval_ms
             }
-        }
+        };
 
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(config.poll_interval_ms)) => {}
+            _ = tokio::time::sleep(Duration::from_millis(sleep_ms)) => {}
             _ = &mut shutdown => {
                 log::info!("shutdown requested, exiting");
                 return;

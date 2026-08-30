@@ -61,7 +61,12 @@ pub struct EventsPage {
 impl RpcClient {
     pub fn new(url: &str) -> Self {
         RpcClient {
-            http: reqwest::Client::new(),
+            // A hung request must fail, not park the whole ingest loop (and
+            // with it the health endpoint's picture of the world) forever.
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("static client config"),
             url: url.to_string(),
         }
     }
