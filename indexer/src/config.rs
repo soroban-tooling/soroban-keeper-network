@@ -81,6 +81,20 @@ fn is_contract_id(s: &str) -> bool {
             .all(|b| b.is_ascii_uppercase() || (b'2'..=b'7').contains(&b))
 }
 
+/// Just the database URL, validated — for `--migrate-only`, which needs no
+/// RPC configuration. Same redaction contract as the full config.
+pub fn database_url_from_env() -> Result<String, ConfigError> {
+    let database_url = require("DATABASE_URL", true)?;
+    if !database_url.starts_with("postgres://") && !database_url.starts_with("postgresql://") {
+        return Err(ConfigError {
+            name: "DATABASE_URL",
+            value: None, // secret-bearing: never echoed
+            reason: "must be a postgres:// connection string".into(),
+        });
+    }
+    Ok(database_url)
+}
+
 impl Config {
     /// Read and validate every variable, reporting the FIRST failure with a
     /// message specific enough to fix without reading source code.
@@ -109,14 +123,7 @@ impl Config {
             });
         }
 
-        let database_url = require("DATABASE_URL", true)?;
-        if !database_url.starts_with("postgres://") && !database_url.starts_with("postgresql://") {
-            return Err(ConfigError {
-                name: "DATABASE_URL",
-                value: None, // secret-bearing: never echoed
-                reason: "must be a postgres:// connection string".into(),
-            });
-        }
+        let database_url = database_url_from_env()?;
 
         let start_ledger = match require("INDEXER_START_LEDGER", false)?.parse::<u32>() {
             Ok(n) if n >= 1 => n,

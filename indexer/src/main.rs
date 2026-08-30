@@ -23,6 +23,14 @@ const PAGE_LIMIT: u32 = 100;
 async fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
+    // `--migrate-only`: bring the database to the current schema and exit —
+    // the one deploy-pipeline command from migrations/README.md. Only
+    // DATABASE_URL is needed, so a migration job carries no RPC config.
+    if std::env::args().any(|a| a == "--migrate-only") {
+        migrate_only().await;
+        return;
+    }
+
     let config = match Config::from_env() {
         Ok(c) => c,
         Err(e) => {
@@ -93,6 +101,43 @@ async fn main() {
     }
 
     run_loop(&config, &rpc, &tracker).await;
+}
+
+/// Validate DATABASE_URL, apply pending migrations, report, exit.
+async fn migrate_only() {
+    let database_url = match keeper_indexer::config::database_url_from_env() {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    let pool = match PgPoolOptions::new()
+        .max_connections(2)
+        .acquire_timeout(Duration::from_secs(10))
+        .connect(&database_url)
+        .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Invalid DATABASE_URL — could not connect: {e}");
+            std::process::exit(1);
+        }
+    };
+    let migrations = concat!(env!("CARGO_MANIFEST_DIR"), "/migrations");
+    match sqlx::migrate::Migrator::new(std::path::Path::new(migrations)).await {
+        Ok(migrator) => match migrator.run(&pool).await {
+            Ok(()) => log::info!("migrations current"),
+            Err(e) => {
+                eprintln!("migrations failed: {e}");
+                std::process::exit(1);
+            }
+        },
+        Err(e) => {
+            eprintln!("could not load migrations directory: {e}");
+            std::process::exit(1);
+        }
+    }
 }
 
 /// The single ingest loop from the design: backfill and steady state are the
