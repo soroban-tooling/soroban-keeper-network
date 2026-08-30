@@ -1,0 +1,12 @@
+[package]
+name = "soroban-keeper-sdk"
+version = "0.1.0"
+edition = "2021"
+description = "Rust client SDK for interacting with the Soroban Keeper Network protocol."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+soroban-sdk = { workspace = true }
+thiserror = { workspace = true }
+anyhow = "1.0"
+keeper-registry = { path = "../contracts/keeper-registry" }
