@@ -15,6 +15,7 @@
 //! - [`state`] -- folds mirroring the contract's own views.
 //! - [`backfill`] -- the ledger walk shared by catch-up and steady state.
 
+pub mod api;
 pub mod backfill;
 pub mod config;
 pub mod events;
