@@ -28,6 +28,9 @@ node_modules/
 npm-debug.log*
 yarn-error.log*
 
+# TypeScript package build output (packages/*/dist)
+packages/*/dist/
+
 # Editor / OS
 .DS_Store
 .idea/
