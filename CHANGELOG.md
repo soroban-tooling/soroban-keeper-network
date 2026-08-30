@@ -6,6 +6,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — ingestion lag as a monitorable metric (E14)
+
+- The indexer now measures how far behind the chain it is — latest network
+  ledger minus latest fully ingested ledger, in ledgers, updated on every
+  ingestion cycle — and serves it from a `/health` endpoint
+  (`INDEXER_HEALTH_ADDR`, default `127.0.0.1:8990`) with an explicit
+  healthy/unhealthy verdict against `INDEXER_MAX_LAG_LEDGERS` (default
+  120): HTTP 200 inside the threshold, 503 past it, and 503 before the
+  first successful cycle since unknown must not read as healthy. On cycles
+  whose event fetch fails, the tip is still refreshed best-effort so a
+  stalled loop shows growing lag rather than a frozen one; counters are
+  monotonic so a lagging RPC replica cannot fake a recovery. Tests
+  simulate the stalled loop and pin the growth and the threshold flip.
+  The endpoint is one hand-written response on purpose — 0225's REST work
+  picks the web stack and absorbs the route; E18 can re-export the same
+  tracker in whatever metrics format it standardizes.
+
+### Added — idempotent ingestion under duplicate delivery (E14)
+
+- The indexer's apply path (`indexer/src/ingest`) now guarantees that
+  redelivered events change nothing: the raw `events` row is keyed by the
+  RPC's TOID-derived event id (ledger, transaction application order,
+  operation index, event index — deterministic, so identical across the
+  backfill and steady-state paths, which are the same loop), inserted with
+  `on conflict do nothing`, and derived effects apply in the same
+  transaction only when that insert actually inserted. Migration
+  `0001_events_and_cursor.sql` adds `events`, `ingest_cursor`, and the
+  design's `tasks`/`keepers` projections; 0220–0222 extend the derived
+  match arms against the same gate and inherit idempotency for free.
+  Postgres-backed tests (gated on the test database URL, skipped cleanly
+  without it) feed each lifecycle event through twice and assert stored
+  state — raw counts, task status, keeper balances — equals feeding it
+  once, and that two events in one ledger are not conflated.
+
+### Added — indexer service scaffold (E14)
+
+- New workspace member `indexer/` (`keeper-indexer`): the runnable, empty
+  service issue 0219 asks for — prove the plumbing from
+  `docs/INDEXER_DESIGN.md` before any event-specific logic. It validates
+  configuration with the keeper bot's `requireEnv` discipline (every failure
+  names the variable and the reason; `DATABASE_URL` is never echoed),
+  connects Postgres and runs the (currently empty) sqlx migration set,
+  health-checks the RPC, then polls `getEvents` for the configured contract
+  with full cursor pagination and logs each raw event unparsed. The schema
+  arrives with 0220–0222; idempotent per-event ingestion with 0230.
+
 ### Added — bounded batch task reads (#25)
 
 - New read-only views `get_tasks(ids)` and `get_tasks_range(from, count)` let
