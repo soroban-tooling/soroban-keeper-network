@@ -2,12 +2,18 @@
 # Run `make help` for the list.
 #
 # IMPORTANT: The `ci` target must remain synchronized with the required CI jobs
-# defined in .github/workflows/ci.yml (format, test, build-wasm). If CI workflow
-# changes, update this Makefile accordingly, and vice versa.
+# defined in .github/workflows/ci.yml (format, test, build-wasm, indexer). If CI
+# workflow changes, update this Makefile accordingly, and vice versa.
 
 WASM := target/wasm32-unknown-unknown/release/keeper_registry.wasm
 
-.PHONY: help build test fmt fmt-check lint wasm optimize clean bot ci check
+# Where the indexer's database-backed tests look for a Postgres. Unset by
+# default: without it those tests skip themselves, so `make ci` stays green on
+# a machine with no database. Override to run them for real, e.g.
+#   make indexer INDEXER_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/indexer_test
+INDEXER_TEST_DATABASE_URL ?=
+
+.PHONY: help build test fmt fmt-check lint wasm optimize clean bot indexer ci check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -37,9 +43,15 @@ optimize: wasm ## Build and optimize the WASM for deployment
 bot: ## Run the example keeper bot
 	cd examples/keeper-bot && npm start
 
+indexer: ## Format-check, build and test the indexer (matches CI)
+	cargo fmt --package keeper-indexer -- --check
+	cargo build --package keeper-indexer --locked
+	INDEXER_TEST_DATABASE_URL=$(INDEXER_TEST_DATABASE_URL) \
+		cargo test --package keeper-indexer --locked
+
 clean: ## Remove build artifacts
 	cargo clean
 
-ci: fmt-check test wasm ## Run all required CI checks locally (blocking checks only)
+ci: fmt-check test wasm indexer ## Run all required CI checks locally (blocking checks only)
 
 check: ci lint ## Run all checks contributors should run before opening a PR
