@@ -354,9 +354,13 @@ mod tests {
                 .expect("insert");
         }
 
-        router(ApiState {
-            ingestor: Ingestor::new(store),
-        })
+        router(
+            ApiState {
+                ingestor: Ingestor::new(store),
+            },
+            1_000,
+            1_000,
+        )
     }
 
     async fn get_json(app: &axum::Router, uri: &str) -> (StatusCode, serde_json::Value) {

@@ -1,0 +1,14 @@
+[package]
+name = "keeper-sdk"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Rust client SDK for the Soroban keeper registry contract"
+publish = false
+
+[dependencies]
+rand = "0.8"
+thiserror = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "time"] }

@@ -16,7 +16,6 @@
 //! `docs/INDEXER_DEPLOYMENT.md` for running one.
 
 pub mod event;
-pub mod ingest;
 pub mod numeric;
 
 use tokio_postgres::Client;

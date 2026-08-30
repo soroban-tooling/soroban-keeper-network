@@ -22,9 +22,13 @@ const SUBSCRIBERS: usize = 50;
 async fn start_server() -> (String, Ingestor) {
     let store = Store::connect("sqlite::memory:").await.expect("store");
     let ingestor = Ingestor::new(store);
-    let app = router(ApiState {
-        ingestor: ingestor.clone(),
-    });
+    let app = router(
+        ApiState {
+            ingestor: ingestor.clone(),
+        },
+        10_000,
+        10_000,
+    );
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local addr");
