@@ -236,6 +236,14 @@ async fn derived_views_survive_duplicates_across_a_full_lifecycle() {
 
     let state = snapshot(&pool).await;
     assert_eq!(state.raw_events, 4, "four distinct events, not eight");
+    // Task-scoped raw rows carry the indexed task_id; the keeper-scoped
+    // withdrawal does not.
+    let by_task = sqlx::query("select count(*) as n from events where task_id = 9")
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get::<i64, _>("n");
+    assert_eq!(by_task, 3, "register/claim/execute indexed by task id");
     assert_eq!(
         state.tasks,
         vec![(9, "executed".into(), "500".into(), Some(keeper()))]

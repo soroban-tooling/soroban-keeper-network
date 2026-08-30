@@ -18,10 +18,15 @@ create table if not exists events (
     closed_at   timestamptz not null,
     contract_id text not null,
     type        text not null,
+    -- The task a task-scoped event concerns; null for admin/keeper-scoped
+    -- events. Extracted from the payload so "events by task id" — the task
+    -- detail page's history query — is an index hit, not a jsonb scan.
+    task_id     bigint,
     payload     jsonb not null
 );
 
 create index if not exists events_type_ledger on events (type, ledger);
+create index if not exists events_task_id on events (task_id) where task_id is not null;
 
 -- Derived: current task state (0220 owns fleshing this out for every
 -- feeding event; the columns are exactly the design's).
