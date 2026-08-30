@@ -1,0 +1,45 @@
+{
+  "name": "@soroban-keeper-network/sdk",
+  "version": "0.1.0",
+  "description": "Typed TypeScript client for the Soroban Keeper Network keeper-registry contract",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && npm run build:cjs && npm run build:esm",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:esm": "tsc -p tsconfig.esm.json && echo '{\"type\":\"module\"}' > dist/esm/package.json",
+    "test": "npm run build && node --test test/*.cjs test/*.mjs",
+    "docs": "typedoc",
+    "docs:check": "typedoc --treatWarningsAsErrors --emit none"
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "keeper",
+    "automation",
+    "sdk"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@stellar/stellar-sdk": "^16.2.0"
+  },
+  "devDependencies": {
+    "typedoc": "^0.28.20",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

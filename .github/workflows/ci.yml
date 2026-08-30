@@ -267,6 +267,82 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — generates the sdk-ts API reference from TSDoc comments
+  # (typedoc.json) and fails the summary (but not the PR) if TypeDoc reports
+  # any warning — most usefully, an exported method/hook/type missing a doc
+  # comment ("notDocumented" in typedoc.json's validation block), so a doc
+  # regression is caught going forward without needing a separate
+  # documentation PR per method. Only runs when the PR touches
+  # packages/sdk-ts/.
+  # ───────────────────────────────────────────────────────────────────────────
+  sdk-ts-docs:
+    name: sdk-ts API reference (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for relevant changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^packages/sdk-ts/'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Node.js
+        if: steps.changes.outputs.relevant == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: npm install
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: packages/sdk-ts
+        run: npm install
+
+      - name: Generate reference and check for doc-comment regressions
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: packages/sdk-ts
+        run: |
+          if npm run docs:check > typedoc-output.txt 2>&1; then
+            {
+              echo "### sdk-ts API reference"
+              echo
+              echo "Generated cleanly — every exported method, hook, and type has a documentation comment."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### sdk-ts API reference"
+              echo
+              echo "\`npm run docs:check\` reported warnings (treated as errors — see \`typedoc.json\`'s \`validation\` block):"
+              echo
+              echo '```'
+              cat typedoc-output.txt
+              echo '```'
+              echo
+              echo "_Advisory only — this does not block the PR, but a missing doc comment here means the generated reference is incomplete._"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Skip notice
+        if: steps.changes.outputs.relevant == 'false'
+        run: |
+          {
+            echo "### sdk-ts API reference"
+            echo
+            echo "Skipped — no changes under \`packages/sdk-ts/\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────────
   # ADVISORY — time-boxed fuzz run. Every registered target (fuzz/fuzz_targets/)
   # gets a short, fixed-budget run so regressions are caught continuously
   # instead of only when a contributor remembers to fuzz locally. Only runs
