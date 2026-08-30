@@ -43,20 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Boundary tests pin the behaviour at `reward = 1`, the first reward yielding a
   non-zero fee, `fee_bps = 0`, and `fee_bps = 10_000`. No behaviour change.
 
-### Added — optional on-chain proof verifier (VERSION bumped to 3)
-
-- `register_task` now takes a required eighth parameter,
-  `verifier: Option<Address>`. `None` behaves exactly as before this change;
-  `Some(addr)` attaches an `IKeeperVerifier`-implementing contract that
-  `execute_task` calls before crediting the keeper, rejecting with the new
-  `VerificationFailed` error (and a `TaskVerificationFailed` event) if it
-  returns `false`. This is a breaking ABI change — every existing
-  `register_task` call site must add the new argument.
-- New `update_verifier` entry point lets the task owner change or clear a
-  task's verifier while it is still `Pending`.
-- New events: `TaskVerificationFailed` (`("verfail", "task")`) and
-  `VerifierUpdated` (`("verifier", "task")`).
-- `VERSION` bumped from 2 to 3.
 ### Added — batch task registration (VERSION bumped to 3)
 
 Epic E05's batch-registration slice. Full design rationale and integrator

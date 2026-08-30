@@ -406,9 +406,9 @@ only — the `Event` names are documentation labels, not on-chain values.
 
 Every event publishes exactly two topic symbols. Both are `symbol_short!`
 literals, which Soroban limits to **9 characters**; that is why several topics
-are abbreviated (`wdraw`, not `withdraw`; `verfail`, not `verifailed`; `minrwd`,
-not `min_reward`). The abbreviations are part of the on-chain interface and
-cannot be "corrected" without breaking existing consumers.
+are abbreviated (`wdraw`, not `withdraw`; `minrwd`, not `min_reward`). The
+abbreviations are part of the on-chain interface and cannot be "corrected"
+without breaking existing consumers.
 
 | Event | Emitted by | Topics | Data (in order, with type) |
 |-------|-----------|--------|----------------------------|
@@ -416,9 +416,7 @@ cannot be "corrected" without breaking existing consumers.
 | `TaskRegistered` | `register_task` | `("reg", "task")` | `(task_id: u64, owner: Address, reward: i128, deadline: u64)` |
 | `RewardIncreased` | `increase_reward` | `("topup", "task")` | `(task_id: u64, new_reward: i128)` — the new **total** reward, not the delta |
 | `DeadlineExtended` | `extend_deadline` | `("extend", "task")` | `(task_id: u64, new_deadline: u64)` |
-| `VerifierUpdated` | `update_verifier` | `("verifier", "task")` | `(task_id: u64, verifier: Option<Address>)` — `None` clears the verifier |
 | `TaskClaimed` | `claim_task` | `("claim", "task")` | `(task_id: u64, keeper: Address, ledger_seq: u32)` |
-| `TaskVerificationFailed` | `execute_task` | `("verfail", "task")` | `(task_id: u64, keeper: Address)` |
 | `TaskExecuted` | `execute_task` | `("exec", "task")` | `(task_id: u64, keeper: Address, net_reward: i128, proof: Bytes)` |
 | `TaskCancelled` | `cancel_task` | `("cancel", "task")` | `(task_id: u64, owner: Address)` |
 | `TaskExpired` | `expire_task` | `("exp", "task")` | `(task_id: u64,)` |
@@ -434,9 +432,6 @@ Notes:
 
 - `net_reward` in `TaskExecuted` is the keeper's share **after** the protocol
   fee, not the task's gross reward.
-- `TaskVerificationFailed` and `TaskExecuted` are both emitted from
-  `execute_task` and are mutually exclusive for a given call: a rejected proof
-  emits the former and returns an error, so no `TaskExecuted` follows.
 - `("admin", "xfer")` is the only event whose first topic is `"admin"`; every
   other admin event uses `"admin"` as its *second* topic. Filter on both topics,
   not just one.
