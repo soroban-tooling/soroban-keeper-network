@@ -134,7 +134,8 @@ instead of silent.
 | Operators (0231) | lag + verdict | `GET /health` |
 
 Queries the schema must serve cheaply, therefore indexed: task by id;
-tasks by (status, deadline); tasks by owner; events by task id; events by
+tasks by (status, deadline); tasks by owner; events by task id (the
+`events.task_id` column exists for exactly this); events by
 (type, ledger); keeper aggregates by keeper address. Anything not listed
 here (full-text, arbitrary joins) is explicitly not a goal.
 
@@ -162,6 +163,7 @@ that do not exist in code; this schema follows the code).
 | `closed_at` | `timestamptz not null` | ledger close time |
 | `contract_id` | `text not null` | one contract today; keyed for honesty |
 | `type` | `text not null` | one of the fifteen names below |
+| `task_id` | `bigint null` | the task a task-scoped event concerns, extracted from the payload; null for admin/keeper-scoped events. Indexed (partial, where not null) so the task detail page's "events for this task" query — a first-class need in §5 — is an index hit, not a jsonb scan |
 | `payload` | `jsonb not null` | decoded fields, exactly as listed below |
 
 Event names, topic pairs, and payload fields (verbatim from `events.rs`):
