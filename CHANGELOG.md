@@ -6,6 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documented — event indexer design (E14)
+
+- `docs/INDEXER_DESIGN.md` opens epic E14: the decision record issues 0219
+  onward implement against. Decides polling `getEvents` with a persisted,
+  transactional cursor and full pagination (fixing the two scan bugs the
+  keeper bot documents, 0032 and 0038, rather than inheriting them);
+  PostgreSQL via `sqlx` from a new Rust workspace member; no reorg
+  machinery (SCP finality — RPC misbehaviour is absorbed by keyed,
+  replayable ingestion instead); backfill as the same loop from
+  `INDEXER_START_LEDGER`; a read-only REST surface derived from the three
+  named consumers; and the exact schema — a raw `events` table keyed by the
+  RPC's TOID-derived event id as the idempotency boundary, with `tasks`,
+  `keepers`, and `admin_state` as rebuildable projections. Covers all
+  fifteen events from `events.rs` by name with their exact payload fields
+  (the README's event table currently also lists two verifier events that
+  do not exist in code; the schema follows the code).
+
 ### Added — bounded batch task reads (#25)
 
 - New read-only views `get_tasks(ids)` and `get_tasks_range(from, count)` let
