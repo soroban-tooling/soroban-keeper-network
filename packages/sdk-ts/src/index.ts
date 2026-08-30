@@ -9,6 +9,12 @@ export type { NetworkName, NetworkPreset } from "./network.js";
 export { withRetry } from "./retry.js";
 export type { RetryOptions } from "./retry.js";
 export {
+  KeeperErrorCode,
+  decodeKeeperError,
+  isKeeperError,
+} from "./errors.js";
+export type { DecodedKeeperError } from "./errors.js";
+export {
   SDK_VERSION,
   COMPATIBLE_CONTRACT_VERSIONS,
   checkContractCompatibility,
