@@ -1,0 +1,20 @@
+[package]
+name = "keeper-indexer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Event indexer for the keeper-registry contract (epic E14, docs/INDEXER_DESIGN.md)"
+
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "postgres",
+    "migrate",
+] }
+log = "0.4"
+env_logger = "0.11"
