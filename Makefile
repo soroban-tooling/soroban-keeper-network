@@ -2,8 +2,11 @@
 # Run `make help` for the list.
 #
 # IMPORTANT: The `ci` target must remain synchronized with the required CI jobs
-# defined in .github/workflows/ci.yml (format, test, build-wasm, indexer). If CI
-# workflow changes, update this Makefile accordingly, and vice versa.
+# defined in .github/workflows/ci.yml (format, test, build-wasm, sdk-ts, bot,
+# indexer — this comment previously listed only the first three, already out
+# of sync with `bot` having been required in CI before this file was touched;
+# `sdk-ts`, `indexer`, and that pre-existing gap are all reflected here now).
+# If CI workflow changes, update this Makefile accordingly, and vice versa.
 
 WASM := target/wasm32-unknown-unknown/release/keeper_registry.wasm
 
@@ -13,7 +16,7 @@ WASM := target/wasm32-unknown-unknown/release/keeper_registry.wasm
 #   make indexer INDEXER_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/indexer_test
 INDEXER_TEST_DATABASE_URL ?=
 
-.PHONY: help build test fmt fmt-check lint wasm optimize clean bot indexer ci check
+.PHONY: help build test fmt fmt-check lint wasm optimize clean bot bot-test sdk-ts indexer ci check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -49,9 +52,15 @@ indexer: ## Format-check, build and test the indexer (matches CI)
 	INDEXER_TEST_DATABASE_URL=$(INDEXER_TEST_DATABASE_URL) \
 		cargo test --package keeper-indexer --locked
 
+sdk-ts: ## Build and test the TypeScript SDK (matches CI)
+	cd packages/sdk-ts && npm install --no-audit --no-fund && npm run build && npm test && npm run lint
+
+bot-test: sdk-ts ## Build the SDK then run the keeper bot's tests (matches CI) — bot depends on sdk-ts's dist/ output
+	cd examples/keeper-bot && npm install --no-audit --no-fund && npm test && npm run lint
+
 clean: ## Remove build artifacts
 	cargo clean
 
-ci: fmt-check test wasm indexer ## Run all required CI checks locally (blocking checks only)
+ci: fmt-check test wasm sdk-ts bot-test indexer ## Run all required CI checks locally (blocking checks only)
 
 check: ci lint ## Run all checks contributors should run before opening a PR
