@@ -13,7 +13,9 @@
 //! - [`ingest`] -- the single raw-event-to-stored-row path.
 //! - [`store`] -- persistence and cursor-paged reads.
 //! - [`state`] -- folds mirroring the contract's own views.
+//! - [`backfill`] -- the ledger walk shared by catch-up and steady state.
 
+pub mod backfill;
 pub mod config;
 pub mod events;
 pub mod ingest;
@@ -21,6 +23,7 @@ pub mod rpc;
 pub mod state;
 pub mod store;
 
+pub use backfill::Backfiller;
 pub use config::Config;
 pub use events::{EventPayload, EventType, IndexedEvent};
 pub use ingest::Ingestor;
