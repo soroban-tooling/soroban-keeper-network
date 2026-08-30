@@ -11,6 +11,7 @@
 
 pub mod rest;
 pub mod types;
+pub mod websocket;
 
 use axum::Router;
 use utoipa::OpenApi;
@@ -64,7 +65,10 @@ pub struct ApiDoc;
 
 /// Build the API router.
 pub fn router(state: ApiState) -> Router {
-    Router::new().nest("/v1", rest::routes()).with_state(state)
+    Router::new()
+        .nest("/v1", rest::routes())
+        .route("/v1/stream", axum::routing::get(websocket::subscribe))
+        .with_state(state)
 }
 
 /// Render the OpenAPI document as YAML.
