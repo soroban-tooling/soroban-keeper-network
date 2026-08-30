@@ -82,7 +82,13 @@ impl Config {
     /// message specific enough to fix without reading source code.
     pub fn from_env() -> Result<Config, ConfigError> {
         let rpc_url = require("INDEXER_RPC_URL", false)?;
-        if !rpc_url.starts_with("https://") && !rpc_url.starts_with("http://localhost") {
+        // Plain http is a local-dev convenience only, and the check is on the
+        // HOST, not a prefix — "http://localhost.evil.example" is not local.
+        let local_http = ["http://localhost:", "http://127.0.0.1:", "http://[::1]:"]
+            .iter()
+            .any(|p| rpc_url.starts_with(p))
+            || rpc_url == "http://localhost";
+        if !rpc_url.starts_with("https://") && !local_http {
             return Err(ConfigError {
                 name: "INDEXER_RPC_URL",
                 value: Some(rpc_url),
