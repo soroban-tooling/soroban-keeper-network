@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — call context on every Rust SDK error (E13)
+
+- `CallError` wraps the SDK's `SdkError` with the failing method's name and
+  a rendered argument list, built by each client method through an
+  `ErrorContext` builder — so a caller's own error log is self-explanatory
+  without separately logging the call site. Secret hygiene is structural:
+  `ErrorContext::secret` takes only the argument's NAME, so a signing
+  keypair or seed is never passed, never stored, and cannot appear in any
+  formatting of the error; the secret argument stays visible as
+  present-but-redacted. Tests pin the method-and-arguments contract and,
+  specifically, that a signing seed's bytes appear nowhere in Display or
+  Debug output.
+
 ### Added — bounded batch task reads (#25)
 
 - New read-only views `get_tasks(ids)` and `get_tasks_range(from, count)` let
