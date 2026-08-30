@@ -36,7 +36,10 @@ pub enum IndexerError {
 ///
 /// They are embedded rather than read from disk so a deployed binary carries
 /// its own schema and cannot drift from the source tree it was built out of.
-pub const SCHEMA_FILES: &[(&str, &str)] = &[("keepers", include_str!("schema/keepers.sql"))];
+pub const SCHEMA_FILES: &[(&str, &str)] = &[
+    ("keepers", include_str!("schema/keepers.sql")),
+    ("admin", include_str!("schema/admin.sql")),
+];
 
 /// Create every table, index and view this crate reads.
 ///
@@ -56,6 +59,7 @@ pub async fn apply_schema(client: &Client) -> Result<(), IndexerError> {
 pub async fn ingest_all(client: &Client, events: &[event::Event]) -> Result<(), IndexerError> {
     for event in events {
         ingest::keepers::ingest_event(client, event).await?;
+        ingest::admin::ingest_event(client, event).await?;
     }
     Ok(())
 }
