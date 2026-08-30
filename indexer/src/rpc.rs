@@ -1,6 +1,5 @@
 //! Minimal Soroban JSON-RPC client — just the methods the ingest loop
-//! needs (`getHealth`, `getEvents`; the lag work in 0231 adds
-//! `getLatestLedger`), speaking JSON-RPC 2.0
+//! needs (`getHealth`, `getLatestLedger`, `getEvents`), speaking JSON-RPC 2.0
 //! over HTTP directly rather than pulling in a full SDK: the indexer never
 //! builds or signs a transaction, and the response shapes it reads are small
 //! and stable.
@@ -103,6 +102,17 @@ impl RpcClient {
             Some("healthy") => Ok(()),
             other => Err(RpcError::Rpc(format!("unhealthy endpoint: {other:?}"))),
         }
+    }
+
+    /// The network's current latest ledger sequence — the far side of the
+    /// lag metric (0231).
+    pub async fn get_latest_ledger(&self) -> Result<u32, RpcError> {
+        let result = self.call("getLatestLedger", json!({})).await?;
+        result
+            .get("sequence")
+            .and_then(Value::as_u64)
+            .map(|n| n as u32)
+            .ok_or_else(|| RpcError::Shape("getLatestLedger: missing sequence".into()))
     }
 
     /// One page of events for `contract_id`. `start` is used on the first
