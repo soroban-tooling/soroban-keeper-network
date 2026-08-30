@@ -520,6 +520,21 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ───────────────────────────────────────────────────────────────────────────
+  # REQUIRED — Rust SDK crate check & test (Issue #343)
+  # ───────────────────────────────────────────────────────────────────────────
+  rust-sdk:
+    name: Rust SDK (required)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust SDK tests
+        run: cargo test --package soroban-keeper-sdk --locked
+
+  # ───────────────────────────────────────────────────────────────────────────
   # Aggregate gate. Branch protection should require only this single check;
   # it passes when all REQUIRED jobs pass and ignores advisory outcomes.
   # ───────────────────────────────────────────────────────────────────────────
@@ -527,12 +542,12 @@ jobs:
     name: CI required checks
     runs-on: ubuntu-latest
     if: always()
-    needs: [format, test, build-wasm, bot, indexer]
+    needs: [format, test, build-wasm, bot, indexer, rust-sdk]
     steps:
       - name: Verify required jobs succeeded
         run: |
           results='${{ join(needs.*.result, ' ') }}'
-          echo "Required job results (format, test, build-wasm, bot, indexer): $results"
+          echo "Required job results (format, test, build-wasm, bot, indexer, rust-sdk): $results"
           for r in $results; do
             if [ "$r" != "success" ]; then
               echo "::error::A required CI job did not succeed."
@@ -540,3 +555,4 @@ jobs:
             fi
           done
           echo "All required checks passed."
+

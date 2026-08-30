@@ -12,13 +12,15 @@ without blocking your PR.
 | `build-wasm` | Required | The contract must actually compile to the `wasm32-unknown-unknown` target it deploys to. |
 | `bot` | Required | The example keeper bot (`examples/keeper-bot`) must lint, syntax-check, and pass its own test suite. |
 | `indexer` | Required | The indexer service (`indexer/`) must format, build, and pass its test suite, including the database-backed tests. See [The indexer job](#the-indexer-job). |
+| `rust-sdk` | Required | The Rust SDK crate (`rust-sdk/`) must compile and pass all unit and integration tests. |
 | `clippy` | Advisory (`continue-on-error: true`) | Lints are useful but subjective enough that a maintainer should decide case-by-case, not have every PR blocked by a new upstream lint. |
 | `audit` | Advisory (`continue-on-error: true`) | A new upstream dependency CVE should notify maintainers, not fail every open PR the moment it's published. |
 | `wasm-size` | Advisory (`continue-on-error: true`) | Reports binary size for visibility; see below. |
 
 `ci-required` is the single check branch protection should require — it
-passes only when `format`, `test`, `build-wasm`, `bot`, and `indexer` all
+passes only when `format`, `test`, `build-wasm`, `bot`, `indexer`, and `rust-sdk` all
 succeed, and ignores the advisory jobs' outcomes entirely.
+
 
 Run every required check locally before opening a PR:
 

@@ -4,16 +4,6 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Off-chain event indexer for the keeper registry contract"
-
-[dependencies]
-tokio = { workspace = true }
-tokio-postgres = { workspace = true }
-thiserror = { workspace = true }
-
-[dev-dependencies]
-tokio = { workspace = true }
-description = "Event indexer for the Soroban keeper registry contract"
-license = "Apache-2.0"
 publish = false
 
 [dependencies]
@@ -32,6 +22,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 ] }
 thiserror = "2.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-postgres = { workspace = true }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
