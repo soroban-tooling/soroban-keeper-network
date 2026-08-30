@@ -28,7 +28,7 @@
 pub mod error;
 pub mod network;
 
-pub use error::SdkError;
+pub use error::{CallError, ErrorContext, SdkError};
 pub use network::Network;
 
 /// Placeholder for the contract client this crate will eventually provide —
