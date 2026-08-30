@@ -21,6 +21,8 @@
 | [Architecture](docs/ARCHITECTURE.md) | Components, task lifecycle, storage, money invariants, trust model |
 | [Fuzzing & property testing](docs/FUZZING.md) | Running/adding fuzz targets, the shared invariant module, crash-to-regression convention |
 | [Verifier design (E04)](docs/VERIFIER_DESIGN.md) | Proposed `IKeeperVerifier` interface for optional on-chain proof verification |
+| [Indexer design](docs/INDEXER_DESIGN.md) | One instance per deployment, event-shape versioning policy |
+| [Indexer deployment](docs/INDEXER_DEPLOYMENT.md) | Provisioning, backfill, and operating an indexer instance |
 | [Batch operations (E05)](docs/BATCH_OPERATIONS.md) | Proposed `batch_register_tasks` design + integration guide |
 | [Storage layout survey](docs/STORAGE_LAYOUT.md) | `Task` struct storage-cost findings and recommendations |
 | [CI](docs/CI.md) | What each CI job checks and which are advisory vs. required |
