@@ -25,6 +25,10 @@ pub struct Config {
     pub start_ledger: u32,
     /// Sleep between poll rounds once caught up, in milliseconds.
     pub poll_interval_ms: u64,
+    /// Lag (in ledgers) past which /health reports unhealthy.
+    pub max_lag_ledgers: u32,
+    /// Address the health endpoint binds.
+    pub health_addr: std::net::SocketAddr,
 }
 
 /// A single named, specific configuration failure.
@@ -149,12 +153,49 @@ impl Config {
             },
         };
 
+        let max_lag_ledgers = match optional("INDEXER_MAX_LAG_LEDGERS") {
+            None => 120, // ~10 minutes at ~5s/ledger
+            Some(raw) => match raw.parse::<u32>() {
+                Ok(n) if n >= 1 => n,
+                Ok(_) => {
+                    return Err(ConfigError {
+                        name: "INDEXER_MAX_LAG_LEDGERS",
+                        value: Some(raw),
+                        reason: "must be at least 1 (ledgers)".into(),
+                    })
+                }
+                Err(e) => {
+                    return Err(ConfigError {
+                        name: "INDEXER_MAX_LAG_LEDGERS",
+                        value: Some(raw),
+                        reason: format!("must be an integer number of ledgers ({e})"),
+                    })
+                }
+            },
+        };
+
+        let health_addr = match optional("INDEXER_HEALTH_ADDR") {
+            None => "127.0.0.1:8990".parse().expect("static default addr"),
+            Some(raw) => match raw.parse() {
+                Ok(a) => a,
+                Err(e) => {
+                    return Err(ConfigError {
+                        name: "INDEXER_HEALTH_ADDR",
+                        value: Some(raw),
+                        reason: format!("must be a host:port socket address ({e})"),
+                    })
+                }
+            },
+        };
+
         Ok(Config {
             rpc_url,
             contract_id,
             database_url,
             start_ledger,
             poll_interval_ms,
+            max_lag_ledgers,
+            health_addr,
         })
     }
 }
@@ -176,6 +217,8 @@ mod tests {
             "DATABASE_URL",
             "INDEXER_START_LEDGER",
             "INDEXER_POLL_INTERVAL_MS",
+            "INDEXER_MAX_LAG_LEDGERS",
+            "INDEXER_HEALTH_ADDR",
         ];
         for k in ALL {
             std::env::remove_var(k);

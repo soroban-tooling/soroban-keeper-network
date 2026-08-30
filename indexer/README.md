@@ -33,6 +33,8 @@ to boot rather than crashing on first use.
 | `DATABASE_URL` | yes | Postgres connection string (never echoed in errors) |
 | `INDEXER_START_LEDGER` | yes | First ledger to scan — the contract's deployment ledger |
 | `INDEXER_POLL_INTERVAL_MS` | no | Sleep between rounds once caught up (default 10000, min 1000) |
+| `INDEXER_MAX_LAG_LEDGERS` | no | Lag past which `/health` reports unhealthy (default 120, ~10 min) |
+| `INDEXER_HEALTH_ADDR` | no | Bind address for the health endpoint (default `127.0.0.1:8990`) |
 
 ## The loop
 
@@ -49,3 +51,13 @@ because it stores nothing yet.
 `cargo test -p keeper-indexer` — config validation (including the
 secret-redaction contract) and RPC response decoding. Nothing here needs a
 database or network.
+
+## Health
+
+`GET /health` on `INDEXER_HEALTH_ADDR` reports ingestion lag in ledgers —
+the gap between the network's current latest ledger and the latest ledger
+fully ingested, updated every cycle — plus an explicit verdict:
+HTTP 200 with `"healthy": true` inside the threshold, 503 past it (or
+before the first successful cycle, since "unknown" must not read as
+healthy). A stalled loop shows growing lag even while its event fetch is
+failing: the tip is refreshed best-effort on error cycles.

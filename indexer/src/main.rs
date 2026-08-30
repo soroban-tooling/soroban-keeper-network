@@ -10,8 +10,10 @@
 //! 0220–0222; per-event ingestion with 0230's idempotency gate on top.
 
 use keeper_indexer::config::Config;
+use keeper_indexer::health::{serve, LagTracker};
 use keeper_indexer::rpc::{RpcClient, Start};
 use sqlx::postgres::PgPoolOptions;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Page size for getEvents. The RPC caps pages; a short page means caught up.
@@ -76,12 +78,26 @@ async fn main() {
         config.start_ledger
     );
 
-    run_loop(&config, &rpc).await;
+    let tracker = LagTracker::new();
+    {
+        let tracker = Arc::clone(&tracker);
+        let addr = config.health_addr;
+        let max_lag = config.max_lag_ledgers;
+        tokio::spawn(async move {
+            if let Err(e) = serve(addr, tracker, max_lag).await {
+                // The service can ingest without its probe, but an operator
+                // relying on /health must hear that it is gone.
+                log::error!("health endpoint failed: {e}");
+            }
+        });
+    }
+
+    run_loop(&config, &rpc, &tracker).await;
 }
 
 /// The single ingest loop from the design: backfill and steady state are the
 /// same code path. In the scaffold the "apply" step is a log line.
-async fn run_loop(config: &Config, rpc: &RpcClient) {
+async fn run_loop(config: &Config, rpc: &RpcClient, tracker: &LagTracker) {
     let mut cursor: Option<String> = None;
     // Fallback resume point for RPC generations whose responses omit the
     // paging cursor: advanced past every exchange, so the loop can never
@@ -91,11 +107,11 @@ async fn run_loop(config: &Config, rpc: &RpcClient) {
     let mut shutdown = std::pin::pin!(tokio::signal::ctrl_c());
 
     loop {
-        let start = match &cursor {
+        let (start, via_cursor, started_from) = match &cursor {
             // First request of the run: a ledger. Every later request: the
             // returned cursor — the RPC treats the two as mutually exclusive.
-            None => Start::Ledger(next_start),
-            Some(c) => Start::Cursor(c),
+            None => (Start::Ledger(next_start), false, next_start),
+            Some(c) => (Start::Cursor(c), true, 0),
         };
 
         let sleep_ms = match rpc.get_events(&config.contract_id, start, PAGE_LIMIT).await {
@@ -113,12 +129,27 @@ async fn run_loop(config: &Config, rpc: &RpcClient) {
                     );
                 }
                 let caught_up = page.events.len() < PAGE_LIMIT as usize;
-                // Never lose our place. Prefer the RPC's cursor; without
-                // one, the last event's id doubles as a paging token; an
-                // empty cursorless page still advances the ledger fallback
-                // past everything this exchange covered — otherwise a full
-                // page would be re-requested forever and an empty one
-                // rescanned every round.
+                // Lag bookkeeping, updated on every ingestion cycle. The tip
+                // comes from this exchange. "Fully ingested" is claimed
+                // conservatively: a page that CARRIED events proves we are
+                // reading real history (mid-backfill, the last event on the
+                // page; caught up, the tip), and an EMPTY page counts only
+                // when it was cursor-reached — continuity from a previous
+                // page proves the silence is genuine quiet. An empty page
+                // from a bare start ledger proves nothing: past the RPC's
+                // retention window getEvents returns exactly this error-free
+                // emptiness, and marking the tip ingested there would report
+                // a truncated backfill as lag-0 healthy.
+                tracker.observe_latest(page.latest_ledger);
+                match page.events.last() {
+                    Some(last) if !caught_up => tracker.observe_ingested(last.ledger),
+                    Some(_) => tracker.observe_ingested(page.latest_ledger),
+                    None if via_cursor => tracker.observe_ingested(page.latest_ledger),
+                    None => log::warn!(
+                        "empty page from bare start ledger {started_from} (tip {}) — either                          nothing has ever happened here, or the start is outside the RPC's                          retention window; not marking these ledgers ingested",
+                        page.latest_ledger
+                    ),
+                }
                 if let Some(next) = page.cursor {
                     cursor = Some(next);
                 } else if let Some(last) = page.events.last() {
@@ -137,6 +168,13 @@ async fn run_loop(config: &Config, rpc: &RpcClient) {
             }
             Err(e) => {
                 log::error!("getEvents failed: {e} — retrying next round");
+                // Keep the tip honest even while the event path is down: a
+                // stalled loop must show GROWING lag, not a frozen one. Best
+                // effort — if the whole endpoint is out this fails too, and
+                // the tip simply stops advancing at its last known value.
+                if let Ok(tip) = rpc.get_latest_ledger().await {
+                    tracker.observe_latest(tip);
+                }
                 config.poll_interval_ms
             }
         };

@@ -6,6 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — ingestion lag as a monitorable metric (E14)
+
+- The indexer now measures how far behind the chain it is — latest network
+  ledger minus latest fully ingested ledger, in ledgers, updated on every
+  ingestion cycle — and serves it from a `/health` endpoint
+  (`INDEXER_HEALTH_ADDR`, default `127.0.0.1:8990`) with an explicit
+  healthy/unhealthy verdict against `INDEXER_MAX_LAG_LEDGERS` (default
+  120): HTTP 200 inside the threshold, 503 past it, and 503 before the
+  first successful cycle since unknown must not read as healthy. On cycles
+  whose event fetch fails, the tip is still refreshed best-effort so a
+  stalled loop shows growing lag rather than a frozen one; counters are
+  monotonic so a lagging RPC replica cannot fake a recovery. Tests
+  simulate the stalled loop and pin the growth and the threshold flip.
+  The endpoint is one hand-written response on purpose — 0225's REST work
+  picks the web stack and absorbs the route; E18 can re-export the same
+  tracker in whatever metrics format it standardizes.
+
 ### Added — idempotent ingestion under duplicate delivery (E14)
 
 - The indexer's apply path (`indexer/src/ingest`) now guarantees that
