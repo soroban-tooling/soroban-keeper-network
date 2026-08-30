@@ -1,0 +1,92 @@
+name: Publish sdk-ts
+
+# Publishes packages/sdk-ts (@soroban-keeper-network/sdk) to npm.
+#
+# Deliberately a separate tag namespace from the contract's own vX.Y.Z
+# releases (see CONTRIBUTING.md's release checklist and release.yml) — the
+# SDK versions independently of the contract, so a contract release tag
+# must never trigger an npm publish, and vice versa.
+#
+# Usage:
+#   cd packages/sdk-ts
+#   npm version 0.2.0   # bumps package.json, commit + tag it yourself as:
+#   git tag -a sdk-ts-v0.2.0 -m "sdk-ts v0.2.0"
+#   git push origin sdk-ts-v0.2.0
+
+on:
+  push:
+    tags: ["sdk-ts-v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing sdk-ts-v* tag to publish (e.g. sdk-ts-v0.2.0)"
+        required: true
+
+permissions:
+  contents: read
+  # Required by `npm publish --provenance` below, which attests the
+  # published package back to this exact workflow run and commit — id-token
+  # is scoped to nothing else in this job.
+  id-token: write
+
+defaults:
+  run:
+    working-directory: packages/sdk-ts
+
+jobs:
+  publish:
+    name: Test, build, and publish to npm
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      # The tag names the version being published — this is the one place
+      # a mismatch between the tag and package.json would otherwise slip
+      # through silently and publish the wrong version number.
+      - name: Verify the tag matches package.json's version
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          expected="sdk-ts-v$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$expected" ]; then
+            echo "::error::tag '$TAG' does not match package.json version (expected '$expected')"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # Publish must never skip the tests an advisory CI job might — the
+      # full unit suite is a hard gate here, not a courtesy check.
+      - name: Run tests
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      # A smoke-level integration check: type-check the Node.js signing
+      # example against the just-built dist/, not against source — this is
+      # the closest thing this package has to "does the published API
+      # actually work for a real consumer", since the example imports
+      # @soroban-keeper-network/sdk the same way an external project would.
+      - name: Smoke test — example type-checks against the built SDK
+        working-directory: packages/sdk-ts/examples/node-signing
+        run: |
+          npm install --no-audit --no-fund
+          npx tsc --noEmit
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.SDK_TS_NPM_TOKEN }}
+        run: npm publish --access public --provenance
