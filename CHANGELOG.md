@@ -6,6 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — one-command schema migrations (E14)
+
+- Schema changes are now a versioned, recorded, reviewable operation
+  instead of a hand-edit against whatever databases exist: sqlx's migrator
+  (already wired at service startup) gains a `--migrate-only` mode that
+  validates `DATABASE_URL` (nothing else — a deploy pipeline carries no
+  RPC config), applies pending migrations, and exits, and
+  `indexer/migrations/README.md` documents the discipline — forward-only,
+  numbered files, checksummed applied-record, PR review like any code.
+  Postgres-backed tests prove the acceptance directly: a fresh database
+  reaches current schema with one command (and a re-run is a no-op), an
+  existing database with live rows migrates forward without data loss,
+  and editing an already-applied migration fails loudly on checksum.
+
 ### Added — ingestion lag as a monitorable metric (E14)
 
 - The indexer now measures how far behind the chain it is — latest network

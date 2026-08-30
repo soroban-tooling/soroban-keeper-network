@@ -61,3 +61,15 @@ HTTP 200 with `"healthy": true` inside the threshold, 503 past it (or
 before the first successful cycle, since "unknown" must not read as
 healthy). A stalled loop shows growing lag even while its event fetch is
 failing: the tip is refreshed best-effort on error cycles.
+
+## Migrations
+
+Schema changes are versioned `.sql` files in `migrations/`, applied in
+order with an applied-record — see [`migrations/README.md`](migrations/README.md).
+One command brings any database, fresh or live, to the current schema:
+
+```sh
+DATABASE_URL=postgres://… cargo run -p keeper-indexer -- --migrate-only
+```
+
+The service also applies pending migrations on every normal startup.
