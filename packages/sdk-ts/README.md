@@ -42,6 +42,34 @@ See [VERSIONING.md](./VERSIONING.md) for how this package's releases relate
 to the contract's `VERSION`, and [CHANGELOG.md](./CHANGELOG.md) for release
 notes.
 
+## Network presets
+
+`network: "testnet"` (recommended default — used throughout this README
+and `examples/keeper-bot`) resolves internally to a verified `NetworkPreset`
+(`rpcUrl` + `networkPassphrase`) via `NETWORK_PRESETS`. `"futurenet"` and
+`"mainnet"` are the other two built-in presets. For a custom or private
+network, pass a fully explicit preset instead of a name:
+
+```ts
+import { KeeperRegistryClient, type NetworkPreset } from "@soroban-keeper-network/sdk";
+
+const localnet: NetworkPreset = {
+  rpcUrl: "http://localhost:8000/soroban/rpc",
+  networkPassphrase: "Standalone Network ; February 2017",
+};
+
+const client = new KeeperRegistryClient({
+  contractId: "C...",
+  network: localnet,
+  keypair,
+});
+```
+
+`NETWORK_NAMES` (the list of built-in preset names) and `isNetworkName()`
+(a type guard for validating user-supplied network input, e.g. from an env
+var or CLI flag) are also exported — see `src/network.ts` for the full
+`NetworkPreset`/`NetworkName` types.
+
 ## Scope
 
 This is a scaffold, not a full generated client: `invoke`/`read` are the
