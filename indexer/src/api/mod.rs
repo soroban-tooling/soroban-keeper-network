@@ -44,6 +44,7 @@ pub struct ApiState {
         rest::tasks_by_keeper,
         rest::admin_config,
         rest::event_feed,
+        rest::keeper_leaderboard,
     ),
     components(schemas(
         crate::events::EventType,
@@ -53,6 +54,9 @@ pub struct ApiState {
         crate::state::TaskStatus,
         crate::state::KeeperSummary,
         crate::state::AdminConfig,
+        crate::queries::leaderboard::Leaderboard,
+        crate::queries::leaderboard::LeaderboardEntry,
+        crate::queries::leaderboard::RankBy,
         types::ApiError,
         types::EventFeedResponse,
         types::HealthResponse,
@@ -95,6 +99,7 @@ mod tests {
             "/keepers/{keeper}/tasks",
             "/admin/config",
             "/events",
+            "/leaderboard",
         ] {
             assert!(
                 paths.contains(&expected),

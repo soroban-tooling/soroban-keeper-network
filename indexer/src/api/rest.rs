@@ -16,6 +16,7 @@ use super::types::{
 };
 use super::ApiState;
 use crate::events::EventType;
+use crate::queries::leaderboard::{leaderboard, Leaderboard, RankBy};
 
 /// Default events per page when the caller does not say.
 const DEFAULT_PAGE_SIZE: u32 = 50;
@@ -30,6 +31,7 @@ pub fn routes() -> Router<ApiState> {
         .route("/owners/{owner}/tasks", get(tasks_by_owner))
         .route("/keepers/{keeper}/tasks", get(tasks_by_keeper))
         .route("/admin/config", get(admin_config))
+        .route("/leaderboard", get(keeper_leaderboard))
         .route("/events", get(event_feed))
 }
 
@@ -179,6 +181,69 @@ pub async fn admin_config(
         .await
         .map_err(internal)?;
     Ok(Json(config))
+}
+
+/// Default entries returned by the leaderboard.
+const DEFAULT_LEADERBOARD_SIZE: u32 = 25;
+/// Largest leaderboard a caller may request.
+const MAX_LEADERBOARD_SIZE: u32 = 200;
+
+/// Query parameters for the leaderboard.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct LeaderboardQuery {
+    /// `executions` (default) or `reward`.
+    pub rank_by: Option<String>,
+    /// Only count executions at or after this Unix timestamp; omit for all time.
+    pub since: Option<i64>,
+    /// Entries to return, capped at 200.
+    pub limit: Option<u32>,
+}
+
+/// Keepers ranked by executions or by total net reward.
+///
+/// Ties are broken deterministically: by the other metric, then by keeper
+/// address ascending. See `queries::leaderboard` for the full rule.
+#[utoipa::path(
+    get,
+    path = "/leaderboard",
+    tag = "indexer",
+    params(
+        ("rank_by" = Option<String>, Query, description = "executions (default) or reward"),
+        ("since" = Option<i64>, Query, description = "Unix timestamp; omit for all time"),
+        ("limit" = Option<u32>, Query, description = "Entries to return (default 25, max 200)")
+    ),
+    responses(
+        (status = 200, description = "Ranked keepers", body = Leaderboard),
+        (status = 400, description = "Unknown ranking metric", body = ApiError)
+    )
+)]
+pub async fn keeper_leaderboard(
+    State(state): State<ApiState>,
+    Query(query): Query<LeaderboardQuery>,
+) -> Result<Json<Leaderboard>, Failure> {
+    let rank_by = match query.rank_by.as_deref() {
+        None => RankBy::Executions,
+        Some(name) => RankBy::parse(name).ok_or_else(|| {
+            Failure(
+                StatusCode::BAD_REQUEST,
+                ApiError::new(
+                    "unknown_rank_by",
+                    format!("no such ranking metric: {name}; expected executions or reward"),
+                ),
+            )
+        })?,
+    };
+
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_LEADERBOARD_SIZE)
+        .clamp(1, MAX_LEADERBOARD_SIZE);
+
+    let board = leaderboard(state.ingestor.store(), rank_by, query.since, limit)
+        .await
+        .map_err(internal)?;
+
+    Ok(Json(board))
 }
 
 /// Query parameters for the event feed.
@@ -433,6 +498,43 @@ mod tests {
         // events exist" to a client with a typo in its filter.
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["error"], "unknown_event_type");
+    }
+
+    #[tokio::test]
+    async fn the_leaderboard_is_served_and_ranks_by_executions_by_default() {
+        let app = app_with_events().await;
+        let (status, body) = get_json(&app, "/v1/leaderboard").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["rank_by"], "executions");
+        let entries = body["entries"].as_array().expect("entries");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["keeper"], "GKEEPER");
+        assert_eq!(entries[0]["rank"], 1);
+        assert_eq!(entries[0]["total_reward"], "990");
+    }
+
+    #[tokio::test]
+    async fn the_leaderboard_accepts_a_window_and_a_reward_ranking() {
+        let app = app_with_events().await;
+
+        let (status, body) = get_json(&app, "/v1/leaderboard?rank_by=reward").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["rank_by"], "reward");
+
+        // The fixture's execution closes at 500, so a later window excludes it.
+        let (_, body) = get_json(&app, "/v1/leaderboard?since=100000").await;
+        assert!(body["entries"].as_array().expect("entries").is_empty());
+        assert_eq!(body["since"], 100000);
+    }
+
+    #[tokio::test]
+    async fn an_unknown_ranking_metric_is_rejected() {
+        let app = app_with_events().await;
+        let (status, body) = get_json(&app, "/v1/leaderboard?rank_by=popularity").await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "unknown_rank_by");
     }
 
     #[tokio::test]
