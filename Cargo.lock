@@ -1303,6 +1303,7 @@ dependencies = [
 name = "keeper-registry-sdk"
 version = "0.1.0"
 dependencies = [
+ "keeper-registry",
  "soroban-client",
  "soroban-sdk",
 ]

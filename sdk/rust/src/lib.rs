@@ -4,13 +4,16 @@
 //! integrations and native (non-WASM-host) tooling that want typed access to
 //! `keeper-registry` without going through the TypeScript SDK's JS runtime.
 //!
-//! This crate is currently a SCAFFOLD only — no contract-specific methods
-//! yet. It exists to:
+//! This crate is currently a SCAFFOLD — no contract method wrappers yet
+//! (that's future work in this epic, issue #269 onward). It exists to:
 //!   - land in the workspace as a native (non-wasm32) crate, verified by CI
 //!     alongside the existing `Tests (required)` job;
 //!   - pin the RPC client dependency (see "RPC client choice" in this
 //!     crate's README.md) so later work building out the actual client
 //!     methods doesn't have to re-litigate that choice;
+//!   - establish the error strategy (see [`error::SdkError`] and
+//!     `DESIGN.md`) every future method in this crate will return, decided
+//!     up front so method-wrapper PRs don't each need to re-litigate it;
 //!   - establish the module layout future PRs (client methods, typed event
 //!     decoders, etc. — mirroring the TypeScript SDK's shape) will fill in.
 //!
@@ -22,8 +25,10 @@
 //! assert_eq!(net.rpc_url(), "https://soroban-testnet.stellar.org");
 //! ```
 
+pub mod error;
 pub mod network;
 
+pub use error::SdkError;
 pub use network::Network;
 
 /// Placeholder for the contract client this crate will eventually provide —
