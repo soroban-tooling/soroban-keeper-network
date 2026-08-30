@@ -9,11 +9,8 @@
 //! raw event observed — no parsing, no storing. The schema arrives with
 //! 0220–0222; per-event ingestion with 0230's idempotency gate on top.
 
-mod config;
-mod rpc;
-
-use config::Config;
-use rpc::{RpcClient, Start};
+use keeper_indexer::config::Config;
+use keeper_indexer::rpc::{RpcClient, Start};
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 
