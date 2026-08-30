@@ -46,7 +46,7 @@ require("dotenv").config();
 
 const {
   Keypair,
-  SorobanRpc,
+  rpc,
   TransactionBuilder,
   Networks,
   BASE_FEE,
