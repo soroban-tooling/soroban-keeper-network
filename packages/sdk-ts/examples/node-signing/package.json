@@ -1,0 +1,19 @@
+{
+  "name": "@soroban-keeper-network/example-node-signing",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Node.js secret-key signing example for the Soroban Keeper Network SDK",
+  "type": "module",
+  "scripts": {
+    "start": "tsx claim-task.ts"
+  },
+  "dependencies": {
+    "@soroban-keeper-network/sdk": "file:../..",
+    "@stellar/stellar-sdk": "^16.2.0",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2"
+  }
+}

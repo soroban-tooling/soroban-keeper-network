@@ -393,6 +393,13 @@ the fix — see the PR template's checkbox for this.
 See [`docs/FUZZING.md`](docs/FUZZING.md) for how to run an existing fuzz
 target, add a new one, and use the shared `invariants` module.
 
+**"How do I know if my change broke an invariant?"** Start with
+[`docs/FUZZING.md`'s "Epic E03 retrospective: invariant coverage
+map"](docs/FUZZING.md#epic-e03-retrospective-invariant-coverage-map) — it
+lists every numbered invariant alongside the property test and/or fuzz
+target that actually exercises it, so you can find (or add to) the
+relevant coverage instead of re-deriving it from scratch.
+
 ---
 
 ## PR Template & Review Process

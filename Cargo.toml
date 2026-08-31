@@ -2,10 +2,19 @@
 resolver = "2"
 members = [
     "contracts/keeper-registry",
+    "indexer",
+    "rust-sdk",
+    "rust-sdk/examples/calling-contract",
+    "sdk/rust",
 ]
 
 [workspace.dependencies]
 soroban-sdk = { version = "22.0.1", features = ["testutils"] }
+# The indexer is an off-chain service, so these never reach the contract WASM
+# (`build-wasm` builds `--package keeper-registry`, not the workspace).
+tokio = { version = "1", features = ["rt", "macros"] }
+tokio-postgres = "0.7"
+thiserror = "2"
 
 [profile.release]
 opt-level = "z"
