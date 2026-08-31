@@ -7,6 +7,11 @@
 //! methods — see [`client::KeeperRegistryClient`] (the generic `invoke`/
 //! `read` building blocks, mirroring the TypeScript SDK's own design) and
 //! [`methods`] (the six task-lifecycle methods built on top of them).
+//! Issues #266/#269 added [`keeper_error::KeeperSdkError`] (see
+//! `DESIGN.md`'s "Error strategy" section) — a `Contract`/`Network`/`Decode`
+//! superset error type distinct from [`methods::SdkError`], which already
+//! occupied the `SdkError` name by the time this landed; see
+//! [`keeper_error`]'s module docs for how the two relate.
 //!
 //! # Example
 //! ```
@@ -17,10 +22,12 @@
 //! ```
 
 pub mod client;
+pub mod keeper_error;
 pub mod methods;
 pub mod network;
 
 pub use client::{ClientError, KeeperRegistryClient};
+pub use keeper_error::KeeperSdkError;
 pub use network::Network;
 
 #[cfg(test)]

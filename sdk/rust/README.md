@@ -15,6 +15,12 @@ own function signatures. Argument/return encoding is verified directly
 against `stellar-xdr` 27.0.0's `ScVal` enum rather than assumed — see
 `methods.rs`'s own doc comment for the specifics.
 
+Issues #266/#269 separately settled this crate's async-vs-sync and
+contract/network error-handling design — see [`DESIGN.md`](DESIGN.md) and
+[`src/keeper_error.rs`](src/keeper_error.rs)'s `KeeperSdkError` (distinct
+from [`methods::SdkError`](src/methods.rs), which wraps `ClientError`; see
+either type's doc comment for how they relate).
+
 ```rust,no_run
 use keeper_registry_sdk::{KeeperRegistryClient, Network};
 use keeper_registry_sdk::methods::TaskType;

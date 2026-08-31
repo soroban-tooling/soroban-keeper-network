@@ -393,6 +393,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "calling-contract"
+version = "0.1.0"
+dependencies = [
+ "keeper-registry",
+ "soroban-keeper-sdk",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.67"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1727,6 +1736,7 @@ dependencies = [
 name = "keeper-registry-sdk"
 version = "0.1.0"
 dependencies = [
+ "keeper-registry",
  "serde_json",
  "soroban-client",
  "soroban-sdk",
@@ -3031,6 +3041,14 @@ dependencies = [
  "serde_json",
  "stellar-xdr 22.1.0",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "soroban-keeper-sdk"
+version = "0.1.0"
+dependencies = [
+ "keeper-registry",
+ "soroban-sdk",
 ]
 
 [[package]]

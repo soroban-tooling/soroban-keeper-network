@@ -20,6 +20,12 @@ categories = ["cryptography::cryptocurrencies"]
 # etc.) match exactly what the contract emits — no separate version to drift.
 soroban-sdk = { workspace = true }
 
+# The contract's own error enum, reused directly in this crate's
+# KeeperSdkError (see src/keeper_error.rs and DESIGN.md's "error strategy"
+# section) rather than redefining the same failure reasons under a
+# different name.
+keeper-registry = { path = "../../contracts/keeper-registry" }
+
 # RPC client survey (#265 acceptance criterion — see README.md "RPC client
 # choice" for the full writeup): soroban-client (crates.io) / rs-soroban-client
 # (its GitHub repo) is the closest thing to a standard, actively maintained
