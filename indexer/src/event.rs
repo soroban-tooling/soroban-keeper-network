@@ -48,6 +48,23 @@ pub struct EventTopic {
 /// understand.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EventPayload {
+    // ── task lifecycle (issue #348) ──────────────────────────────────────────
+    /// `(reg, task)` — `(task_id, owner, reward, deadline)`
+    TaskRegistered {
+        task_id: i64,
+        owner: String,
+        reward: i128,
+        deadline: u64,
+    },
+    /// `(exp, task)` — `(task_id,)`
+    TaskExpired { task_id: i64 },
+    /// `(cancel, task)` — `(task_id, owner)`
+    TaskCancelled { task_id: i64, owner: String },
+    /// `(topup, task)` — `(task_id, new_reward)`
+    RewardIncreased { task_id: i64, new_reward: i128 },
+    /// `(extend, task)` — `(task_id, new_deadline)`
+    DeadlineExtended { task_id: i64, new_deadline: u64 },
+
     // ── keeper-facing (issue #349) ───────────────────────────────────────────
     /// `(claim, task)` — `(task_id, keeper, claim_ledger)`
     TaskClaimed {
@@ -104,6 +121,11 @@ impl EventPayload {
     /// The topic pair the contract emits this payload under.
     pub fn topic(&self) -> EventTopic {
         let (verb, noun) = match self {
+            Self::TaskRegistered { .. } => ("reg", "task"),
+            Self::TaskExpired { .. } => ("exp", "task"),
+            Self::TaskCancelled { .. } => ("cancel", "task"),
+            Self::RewardIncreased { .. } => ("topup", "task"),
+            Self::DeadlineExtended { .. } => ("extend", "task"),
             Self::TaskClaimed { .. } => ("claim", "task"),
             Self::TaskExecuted { .. } => ("exec", "task"),
             Self::RewardsWithdrawn { .. } => ("wdraw", "reward"),

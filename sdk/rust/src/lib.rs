@@ -13,6 +13,18 @@
 //!     methods doesn't have to re-litigate that choice;
 //!   - establish the module layout future PRs (client methods, typed event
 //!     decoders, etc. — mirroring the TypeScript SDK's shape) will fill in.
+//! Opened as a scaffold by epic E13 (#265): a Rust-native client for
+//! contract-to-contract integrations and native (non-WASM-host) tooling that
+//! want typed access to `keeper-registry` without going through the
+//! TypeScript SDK's JS runtime. Issue #268 filled in the first real client
+//! methods — see [`client::KeeperRegistryClient`] (the generic `invoke`/
+//! `read` building blocks, mirroring the TypeScript SDK's own design) and
+//! [`methods`] (the six task-lifecycle methods built on top of them).
+//! Issues #266/#269 added [`keeper_error::KeeperSdkError`] (see
+//! `DESIGN.md`'s "Error strategy" section) — a `Contract`/`Network`/`Decode`
+//! superset error type distinct from [`methods::SdkError`], which already
+//! occupied the `SdkError` name by the time this landed; see
+//! [`keeper_error`]'s module docs for how the two relate.
 //!
 //! # Example
 //! ```
@@ -65,6 +77,34 @@ mod test {
             "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4"
         );
         assert_eq!(client.network, Network::Testnet);
+pub mod client;
+pub mod keeper_error;
+pub mod methods;
+pub mod network;
+
+pub use client::{ClientError, KeeperRegistryClient};
+pub use keeper_error::KeeperSdkError;
+pub use network::Network;
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_client::keypair::{Keypair, KeypairBehavior};
+
+    #[test]
+    fn constructs_a_client_without_any_network_access() {
+        let keypair = Keypair::random().unwrap();
+        let client = KeeperRegistryClient::new(
+            "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+            Network::Testnet,
+            keypair,
+        )
+        .unwrap();
+        assert_eq!(
+            client.contract_id(),
+            "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4"
+        );
+        assert_eq!(*client.network(), Network::Testnet);
     }
 
     #[test]
@@ -76,5 +116,16 @@ mod test {
             Network::Futurenet,
         );
         assert_eq!(from_owned.contract_id, from_borrowed.contract_id);
+        let keypair = Keypair::random().unwrap();
+        let owned = String::from("CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4");
+        let from_owned =
+            KeeperRegistryClient::new(owned, Network::Futurenet, keypair.clone()).unwrap();
+        let from_borrowed = KeeperRegistryClient::new(
+            "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+            Network::Futurenet,
+            keypair,
+        )
+        .unwrap();
+        assert_eq!(from_owned.contract_id(), from_borrowed.contract_id());
     }
 }
