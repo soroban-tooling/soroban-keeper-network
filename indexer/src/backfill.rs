@@ -10,7 +10,8 @@ use anyhow::{Context, Result};
 use std::time::Duration;
 
 use crate::ingest::{IngestOutcome, Ingestor};
-use crate::rpc::EventSource;
+use crate::reorg::{LedgerDiscrepancyError, Observation, ReorgDetector};
+use crate::rpc::{EventSource, RawEvent};
 use crate::store::Checkpoint;
 
 /// Drives ingestion over a ledger range.
@@ -19,6 +20,7 @@ pub struct Backfiller<S: EventSource> {
     ingestor: Ingestor,
     contract_id: String,
     page_size: u32,
+    detector: ReorgDetector,
 }
 
 /// What a completed backfill did.
@@ -52,12 +54,40 @@ impl<S: EventSource> Backfiller<S> {
         contract_id: impl Into<String>,
         page_size: u32,
     ) -> Self {
+        let detector = ReorgDetector::new(ingestor.store().pool().clone());
         Self {
             source,
             ingestor,
             contract_id: contract_id.into(),
             page_size: page_size.max(1),
+            detector,
         }
+    }
+
+    /// Fingerprint every ledger this page covers, and stop if one of them now
+    /// reads differently than it did before.
+    ///
+    /// Runs *before* the page is ingested, so a contradicted ledger's events
+    /// are never applied on top of the ones already stored for it. That is what
+    /// keeps the database from ever holding a mix of two views of one ledger:
+    /// it is not that a mix is repaired afterwards, it is that one is never
+    /// created.
+    ///
+    /// See [`crate::reorg`] for why the policy is detect-and-alert rather than
+    /// auto-reconcile.
+    async fn check_page(&self, events: &[RawEvent]) -> Result<()> {
+        let mut ledgers: Vec<u32> = events.iter().map(|event| event.ledger).collect();
+        ledgers.sort_unstable();
+        ledgers.dedup();
+
+        for ledger in ledgers {
+            if let Observation::Discrepant(discrepancy) =
+                self.detector.observe(ledger, events).await?
+            {
+                return Err(LedgerDiscrepancyError(discrepancy).into());
+            }
+        }
+        Ok(())
     }
 
     /// The ledger the next walk should start from.
@@ -98,6 +128,8 @@ impl<S: EventSource> Backfiller<S> {
                 .get_events(&self.contract_id, next, self.page_size)
                 .await
                 .with_context(|| format!("fetching events from ledger {next}"))?;
+
+            self.check_page(&page.events).await?;
 
             let outcome = self.ingestor.ingest_batch(&page.events).await?;
             report.absorb(outcome);
@@ -393,6 +425,139 @@ mod tests {
             .expect("query")
             .expect("checkpoint");
         assert!(checkpoint.backfill_complete);
+    }
+
+    /// A source that reports a ledger one way, then another way on the next
+    /// poll -- the acceptance criterion's "mock RPC source that changes its
+    /// answer between two polls", with no real reorg needed.
+    fn contradicted_history() -> Vec<RawEvent> {
+        let mut events = history();
+        // Same ledger, same transaction, different payload: the owner address
+        // the source reported for the registration has changed.
+        for event in &mut events {
+            if event.tx_hash == "tx-reg" {
+                event.values[1] = RawValue::Address("GIMPOSTER".into());
+            }
+        }
+        events
+    }
+
+    /// Rewind the checkpoint so the next walk re-reads a range it already
+    /// ingested.
+    ///
+    /// This is how a ledger actually gets read twice in production: an operator
+    /// rewinding to re-scan a range, or a crash between ingesting a page and
+    /// checkpointing it. Both re-enter the same walk, which is where the
+    /// detector sits.
+    async fn rewind_to(backfiller: &Backfiller<FixtureSource>, ledger: u32) {
+        backfiller
+            .ingestor
+            .store()
+            .save_checkpoint(Checkpoint {
+                last_ledger: ledger,
+                backfill_complete: false,
+            })
+            .await
+            .expect("rewind");
+    }
+
+    #[tokio::test]
+    async fn a_source_that_contradicts_itself_halts_ingestion() {
+        let backfiller = backfiller(FixtureSource::new(history(), 320), 100).await;
+        backfiller.run_to_tip(100).await.expect("first pass");
+
+        // Re-scan the same ledgers with the source now telling a different
+        // story about the registration in ledger 101.
+        let contradicting = FixtureSource::new(contradicted_history(), 320);
+        let resumed = Backfiller::new(contradicting, backfiller.ingestor.clone(), "CCONTRACT", 100);
+        rewind_to(&resumed, 99).await;
+
+        let error = resumed
+            .run_to_tip(100)
+            .await
+            .expect_err("a contradicted ledger must stop the walk");
+        let message = format!("{error:#}");
+
+        assert!(message.contains("reported inconsistently"), "{message}");
+        assert!(
+            message.contains("deterministic finality"),
+            "the alert must say why this is an RPC-node problem rather than a reorg: {message}"
+        );
+        assert!(
+            message.contains("no stored event was modified"),
+            "the alert must say the database was left alone: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_contradiction_leaves_the_stored_view_untouched() {
+        // The acceptance asks that the database never hold a mix of old and new
+        // data for one ledger. It never does, because the contradicted page is
+        // refused before ingestion rather than repaired afterwards.
+        let backfiller = backfiller(FixtureSource::new(history(), 320), 100).await;
+        backfiller.run_to_tip(100).await.expect("first pass");
+
+        let before = backfiller
+            .ingestor
+            .store()
+            .task_history(1)
+            .await
+            .expect("before");
+        let owner_before = backfiller
+            .ingestor
+            .store()
+            .task_state(1)
+            .await
+            .expect("query")
+            .expect("task")
+            .owner;
+
+        let contradicting = FixtureSource::new(contradicted_history(), 320);
+        let resumed = Backfiller::new(contradicting, backfiller.ingestor.clone(), "CCONTRACT", 100);
+        rewind_to(&resumed, 99).await;
+        resumed.run_to_tip(100).await.expect_err("halts");
+
+        let after = resumed
+            .ingestor
+            .store()
+            .task_history(1)
+            .await
+            .expect("after");
+        let owner_after = resumed
+            .ingestor
+            .store()
+            .task_state(1)
+            .await
+            .expect("query")
+            .expect("task")
+            .owner;
+
+        assert_eq!(before.len(), after.len(), "no event was added or removed");
+        assert_eq!(
+            owner_before, owner_after,
+            "the contradicted value did not land"
+        );
+        assert_ne!(
+            owner_after, "GIMPOSTER",
+            "the second view must not have been applied"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rewound_rescan_of_an_unchanged_source_is_not_a_discrepancy() {
+        // Re-reading a ledger is the ordinary case -- a rewind, a crash between
+        // ingest and checkpoint, an overlapping page. It must not look like a
+        // discrepancy, or the detector would fire on every normal restart.
+        let backfiller = backfiller(FixtureSource::new(history(), 320), 100).await;
+        backfiller.run_to_tip(100).await.expect("first pass");
+
+        let same = FixtureSource::new(history(), 320);
+        let resumed = Backfiller::new(same, backfiller.ingestor.clone(), "CCONTRACT", 100);
+        rewind_to(&resumed, 99).await;
+
+        let report = resumed.run_to_tip(100).await.expect("replay must succeed");
+        assert_eq!(report.stored, 0, "nothing new stored");
+        assert!(report.duplicates > 0, "the range really was re-read");
     }
 
     #[tokio::test]

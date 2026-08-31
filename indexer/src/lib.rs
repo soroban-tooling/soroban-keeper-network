@@ -80,6 +80,7 @@ pub async fn ingest_all(client: &Client, events: &[event::Event]) -> Result<(), 
 //! - [`state`] -- folds mirroring the contract's own views.
 //! - [`backfill`] -- the ledger walk shared by catch-up and steady state.
 //! - [`queries`] -- aggregate folds the API exposes, such as the leaderboard.
+//! - [`reorg`] -- detecting a ledger the source later reports differently.
 
 pub mod api;
 pub mod backfill;
@@ -87,6 +88,7 @@ pub mod config;
 pub mod events;
 pub mod ingest;
 pub mod queries;
+pub mod reorg;
 pub mod rpc;
 pub mod state;
 pub mod store;
