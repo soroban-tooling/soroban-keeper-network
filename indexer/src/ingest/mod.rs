@@ -8,6 +8,7 @@
 
 pub mod admin;
 pub mod keepers;
+pub mod tasks;
 //! Per-event parsing and ingestion.
 //!
 //! This is the single path from a raw RPC event to a stored row. Backfill and

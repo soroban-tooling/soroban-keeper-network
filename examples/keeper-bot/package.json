@@ -19,6 +19,7 @@
   ],
   "license": "Apache-2.0",
   "dependencies": {
+    "@soroban-keeper-network/sdk": "file:../../packages/sdk-ts",
     "@stellar/stellar-sdk": "^16.2.0",
     "dotenv": "^17.4.2"
   },
