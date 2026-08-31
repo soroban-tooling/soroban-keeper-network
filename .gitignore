@@ -29,6 +29,7 @@ npm-debug.log*
 yarn-error.log*
 
 # TypeScript build output
+# TypeScript package build output (packages/*/dist)
 packages/*/dist/
 
 # Editor / OS

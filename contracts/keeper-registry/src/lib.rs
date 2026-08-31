@@ -58,5 +58,10 @@ pub struct KeeperRegistry;
 #[cfg(any(test, fuzzing))]
 pub mod invariants;
 
+// Shared reentrant-token mock for the CEI regression tests (`test/cancel.rs`,
+// `test/expire.rs`) and the `reentrancy` fuzz target — see its module doc.
+#[cfg(any(test, fuzzing))]
+pub mod mocks;
+
 #[cfg(test)]
 mod test;
