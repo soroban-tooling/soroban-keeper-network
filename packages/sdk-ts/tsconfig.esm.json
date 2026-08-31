@@ -6,5 +6,8 @@
     "moduleResolution": "Node16",
     "outDir": "dist/esm",
     "rootDir": "src"
+  "compilerOptions": {
+    "module": "ES2020",
+    "outDir": "dist/esm"
   }
 }
