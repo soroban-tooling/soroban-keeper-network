@@ -144,6 +144,17 @@ a single name always means the same check.
   external reference to a task id (an off-chain indexer, a keeper bot's
   local state, a dApp's UI) is stable forever. `next_task_id` increments a
   `u64` counter and never decrements it.
+- **I-8 — Verifier trust boundary.** A task's attached verifier (if any) can
+  only return a boolean (or fail) from `execute_task`'s perspective; by
+  construction, it has no capability to transfer tokens, credit keeper
+  balances, or mutate any `Task` field. When a verifier is present, the
+  call is invoked via `Env::try_invoke_contract` with immutable parameters
+  (`task_id`, `keeper`, `proof`) **before any state mutation** occurs
+  (`credit_keeper`, `accrue_fee`, task status update); the verifier's
+  return value only gates an if-branch that permits the remainder of
+  execution to proceed. If the verifier returns `false` or panics, the
+  execution fails with no state changes; if it returns `true`, execution
+  proceeds normally with crediting. (Per issue 0074.)
 
 Enforced by:
 
@@ -156,6 +167,11 @@ Enforced by:
   escrow or keeper balances. (I-4, I-5)
 - **`next_task_id`** is a monotonically incrementing `u64` counter with no
   decrement or reset path. (I-7)
+- **Verifier call precedes state mutation** in `execute_task`: the verifier
+  is invoked via `try_invoke_contract` with immutable proof before any
+  crediting or status update. The call's return value only gates an
+  if-branch; a failing or panicking verifier prevents state changes but does
+  not revert the whole transaction. (I-8)
 
 The `test_multi_keeper_end_to_end_conserves_funds` and
 `test_split_reward_invariants` tests guard these invariants with fixed

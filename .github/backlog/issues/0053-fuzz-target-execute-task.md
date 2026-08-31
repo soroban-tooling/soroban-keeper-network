@@ -24,7 +24,7 @@ Fuzz `fee_bps` too, by driving it through `set_fee_bps` before execution, within
 ## Acceptance criteria
 
 - [ ] Target asserts the exact-conservation property above on every successful execution, not just "it didn't crash."
-- [ ] `proof` length is fuzzed both below and above `MAX_PROOF_LEN` (see issue 61 in wave 1) to exercise the boundary.
+- [ ] `proof` length is fuzzed both below and above `MAX_PROOF_LEN` (see issue 0004 in wave 1) to exercise the boundary.
 - [ ] 10+ minutes of local fuzzing with no crash or conservation-property failure.
 - [ ] Any crash's minimized input is committed to `fuzz/corpus/execute_task/`.
 

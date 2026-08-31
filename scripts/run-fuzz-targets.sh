@@ -35,15 +35,19 @@ cd "$REPO_ROOT"
 {
   echo "### $HEADING"
   echo
-  echo "| Target | Status | Runs (approx.) | Corpus files | Crash artifact |"
-  echo "|---|---|---|---|---|"
+  echo "| Target | Status | Runs (approx.) | Corpus (files, before → after) | Corpus (KiB, before → after) | Crash artifact |"
+  echo "|---|---|---|---|---|---|"
 } >>"$SUMMARY"
 
 for target_path in fuzz/fuzz_targets/*.rs; do
   target="$(basename "$target_path" .rs)"
   corpus_dir="fuzz/corpus/$target"
   before=0
-  [ -d "$corpus_dir" ] && before=$(find "$corpus_dir" -type f | wc -l | tr -d ' ')
+  before_kib=0
+  if [ -d "$corpus_dir" ]; then
+    before=$(find "$corpus_dir" -type f | wc -l | tr -d ' ')
+    before_kib=$(du -sk "$corpus_dir" 2>/dev/null | cut -f1)
+  fi
 
   echo "Running $target for ${SECONDS_PER_TARGET}s "
   log_file="$(mktemp)"
@@ -52,7 +56,13 @@ for target_path in fuzz/fuzz_targets/*.rs; do
   cat "$log_file"
 
   after=0
-  [ -d "$corpus_dir" ] && after=$(find "$corpus_dir" -type f | wc -l | tr -d ' ')
+  after_kib=0
+  if [ -d "$corpus_dir" ]; then
+    after=$(find "$corpus_dir" -type f | wc -l | tr -d ' ')
+    after_kib=$(du -sk "$corpus_dir" 2>/dev/null | cut -f1)
+  fi
+  corpus_files_cell="$before → $after"
+  corpus_kib_cell="$before_kib → $after_kib"
 
   runs="$(grep -oE '^#[0-9]+' "$log_file" | tail -1 | tr -d '#')"
   runs="${runs:-n/a}"
@@ -70,7 +80,7 @@ for target_path in fuzz/fuzz_targets/*.rs; do
     decoded="$(cargo +nightly fuzz fmt "$target" "$minimized" 2>&1)"
 
     {
-      echo "| \`$target\` | crash found | $runs | $before $after | \`$minimized\` |"
+      echo "| \`$target\` | crash found | $runs | $corpus_files_cell | $corpus_kib_cell | \`$minimized\` |"
     } >>"$SUMMARY"
     {
       echo
@@ -84,9 +94,9 @@ for target_path in fuzz/fuzz_targets/*.rs; do
     } >>"$SUMMARY"
     rm -f "${log_file}.tmin"
   elif [ "$exit_code" -ne 0 ]; then
-    echo "| \`$target\` | build/run failed (pre-existing — see docs/FUZZING.md) | - | $before $after | - |" >>"$SUMMARY"
+    echo "| \`$target\` | build/run failed (pre-existing — see docs/FUZZING.md) | - | $corpus_files_cell | $corpus_kib_cell | - |" >>"$SUMMARY"
   else
-    echo "| \`$target\` | ran clean | $runs | $before $after | none |" >>"$SUMMARY"
+    echo "| \`$target\` | ran clean | $runs | $corpus_files_cell | $corpus_kib_cell | none |" >>"$SUMMARY"
   fi
 
   rm -f "$log_file"
