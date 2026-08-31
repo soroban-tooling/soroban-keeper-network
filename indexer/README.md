@@ -11,6 +11,11 @@ that event history on read, never kept as separate mutable rows. A derived
 view therefore cannot drift from the events that produced it, and replaying
 the same events always yields the same state.
 
+One process tracks one registry contract id on one network; a future
+contract `VERSION` that changes event shapes is a coordinated indexer
+release, not a live `version()` dispatch. Both decisions, and what happens
+to already-ingested rows, are in [`docs/INDEXER_DESIGN.md`](../docs/INDEXER_DESIGN.md).
+
 Ingestion polls the RPC's `getEvents`, the mechanism the keeper-bot already
 uses. Backfill and steady-state polling share one parsing path
 (`ingest::Ingestor::ingest_batch`); the only difference between them is the
@@ -28,7 +33,7 @@ problems at once and exits, rather than failing later inside the ingest loop.
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
 | `INDEXER_RPC_URL` | yes | — | Soroban RPC endpoint to poll |
-| `INDEXER_CONTRACT_ID` | yes | — | Registry contract id to filter on |
+| `INDEXER_CONTRACT_ID` | yes | — | Single registry contract id to filter on (one instance per deployment) |
 | `INDEXER_DATABASE_URL` | yes | — | sqlx connection string, e.g. `sqlite://indexer.db` |
 | `INDEXER_START_LEDGER` | yes | — | Ledger to backfill from on a fresh database |
 | `INDEXER_BIND_ADDRESS` | no | `127.0.0.1:8080` | API bind address |

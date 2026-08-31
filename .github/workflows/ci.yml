@@ -273,6 +273,80 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — generates the sdk-ts API reference from TSDoc comments
+  # (typedoc.json) and fails the summary (but not the PR) if TypeDoc reports
+  # any warning — most usefully, an exported method/hook/type missing a doc
+  # comment ("notDocumented" in typedoc.json's validation block), so a doc
+  # regression is caught going forward without needing a separate
+  # documentation PR per method. Only runs when the PR touches
+  # packages/sdk-ts/.
+  # ───────────────────────────────────────────────────────────────────────────
+  sdk-ts-docs:
+    name: sdk-ts API reference (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for relevant changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^packages/sdk-ts/'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Node.js
+        if: steps.changes.outputs.relevant == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: npm install
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: packages/sdk-ts
+        run: npm install
+
+      - name: Generate reference and check for doc-comment regressions
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: packages/sdk-ts
+        run: |
+          if npm run docs:check > typedoc-output.txt 2>&1; then
+            {
+              echo "### sdk-ts API reference"
+              echo
+              echo "Generated cleanly — every exported method, hook, and type has a documentation comment."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### sdk-ts API reference"
+              echo
+              echo "\`npm run docs:check\` reported warnings (treated as errors — see \`typedoc.json\`'s \`validation\` block):"
+              echo
+              echo '```'
+              cat typedoc-output.txt
+              echo '```'
+              echo
+              echo "_Advisory only — this does not block the PR, but a missing doc comment here means the generated reference is incomplete._"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Skip notice
+        if: steps.changes.outputs.relevant == 'false'
+        run: |
+          {
+            echo "### sdk-ts API reference"
+            echo
+            echo "Skipped — no changes under \`packages/sdk-ts/\`."
+          } >> "$GITHUB_STEP_SUMMARY"
   # ADVISORY — report the SDK's minified+gzipped bundle size, mirroring
   # wasm-size's baseline-and-delta pattern for the frontend analogue of that
   # concern (issue 0262 in the SDK epic).
@@ -487,6 +561,41 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — the TypeScript SDK package (packages/sdk-ts). Advisory rather
+  # than required until the dedicated typecheck/lint job (backlog 0187)
+  # establishes the same required/advisory split this repo already has on
+  # the Rust side, and until the epic's remaining PRs (client class, view
+  # methods, etc. — see the sdk-ts PRs open at the time this job was added)
+  # converge on one canonical package.json/build setup this job can depend
+  # on without conflict.
+  # ───────────────────────────────────────────────────────────────────────────
+  sdk-ts:
+    name: SDK (TypeScript) (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: packages/sdk-ts
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Build (ESM + CJS + declarations)
+        run: npm run build
+
+      - name: Test (smoke + unit)
+        run: npm test
 
   # ───────────────────────────────────────────────────────────────────────────
   # REQUIRED — the indexer service. Format, build and test, with a real

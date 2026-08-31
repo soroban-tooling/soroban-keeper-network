@@ -44,6 +44,16 @@
 
 require("dotenv").config();
 
+const {
+  Keypair,
+  rpc,
+  TransactionBuilder,
+  Networks,
+  BASE_FEE,
+  nativeToScVal,
+  scValToNative,
+  Contract,
+} = require("@stellar/stellar-sdk");
 const { Keypair, nativeToScVal, scValToNative } = require("@stellar/stellar-sdk");
 
 // ─────────────────────────────────────────────────────────────────────────────

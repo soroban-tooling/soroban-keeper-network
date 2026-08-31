@@ -83,11 +83,11 @@ guidance: [docs/BATCH_OPERATIONS.md](docs/BATCH_OPERATIONS.md).
   combines large payloads *and* many entries can exhaust the transaction budget
   below the 50-entry cap; size against your own payloads, not just the count.
 - **New error variants** (these are the ABI change `VERSION` exists to signal):
-  - `BatchTooLarge` (20) — more than `MAX_BATCH_SIZE` entries.
-  - `EmptyBatch` (21) — empty `tasks` vector; rejected rather than treated as a
+  - `BatchTooLarge` (21) — more than `MAX_BATCH_SIZE` entries.
+  - `EmptyBatch` (22) — empty `tasks` vector; rejected rather than treated as a
     silent no-op, so a caller whose off-chain filter produced nothing finds out
     instead of paying for a transaction that registered nothing.
-  - `BatchRewardCeilingExceeded` (22) — the batch's reward sum exceeded
+  - `BatchRewardCeilingExceeded` (23) — the batch's reward sum exceeded
     `max_total_reward`.
 - A new public entry point plus three new error variants change the contract's
   ABI — `VERSION` bumped from 2 to 3.

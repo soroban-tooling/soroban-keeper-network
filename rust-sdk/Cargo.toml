@@ -1,0 +1,12 @@
+[package]
+name = "soroban-keeper-sdk"
+version = "0.1.0"
+edition = "2021"
+description = "Rust SDK for interacting with the Soroban Keeper Network contract"
+
+[dependencies]
+soroban-sdk = { workspace = true }
+keeper-registry = { path = "../contracts/keeper-registry" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
