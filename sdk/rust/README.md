@@ -5,11 +5,49 @@ contract, for contract-to-contract integrations and native (non-WASM-host)
 tooling that want typed access without going through the TypeScript SDK's
 JS runtime.
 
-**This crate is a scaffold.** It has no contract-specific methods yet — see
-`src/lib.rs`'s module doc comment for what it does establish (workspace
-membership, the RPC client dependency, the module layout) versus what's
-still to come (the actual client methods, mirroring the TypeScript SDK's
-shape as that epic lands).
+Issue #268 filled in the first real client methods: [`KeeperRegistryClient`](src/client.rs)
+(the generic `invoke`/`read` building blocks — simulate → sign → send →
+poll for state-changing calls, simulate-only for reads) and the six
+task-lifecycle methods built on top of them in [`methods.rs`](src/methods.rs)
+(`register_task`, `claim_task`, `execute_task`, `cancel_task`,
+`expire_task`, `withdraw_rewards`), mirroring `contracts/keeper-registry/src/task.rs`'s
+own function signatures. Argument/return encoding is verified directly
+against `stellar-xdr` 27.0.0's `ScVal` enum rather than assumed — see
+`methods.rs`'s own doc comment for the specifics.
+
+```rust,no_run
+use keeper_registry_sdk::{KeeperRegistryClient, Network};
+use keeper_registry_sdk::methods::TaskType;
+use soroban_client::keypair::{Keypair, KeypairBehavior};
+
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+let keypair = Keypair::from_secret("SB...")?;
+let client = KeeperRegistryClient::new(
+    "CONTRACT_ID_HERE",
+    Network::Testnet,
+    keypair,
+)?;
+
+let task_id = client
+    .register_task(
+        "GOWNER...",
+        TaskType::Liquidation,
+        b"calldata",
+        1_000_000,
+        /* deadline */ 0,
+        /* ttl_ledgers */ 100,
+        /* lock_ledgers */ 10,
+    )
+    .await?;
+# Ok(())
+# }
+```
+
+Full lifecycle tests (`tests/lifecycle.rs`) run against a mocked Soroban
+RPC server rather than a live network — see that file's own doc comment
+for why, and for how to point `KeeperRegistryClient::with_rpc_url` at a
+local sandbox/quickstart node instead if a real, on-chain end-to-end test
+is ever needed.
 
 ## Build & test
 
