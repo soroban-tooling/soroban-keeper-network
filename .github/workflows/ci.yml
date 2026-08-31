@@ -4,10 +4,16 @@ name: CI
 # No manual step is needed — open a PR and this workflow starts.
 #
 # Job policy (see docs/CI.md for the rationale):
-#   REQUIRED  — format, test, build-wasm, bot, indexer. These block the merge.
-#   ADVISORY  — clippy, audit, wasm-size, fuzz-pr, resource-cost, bot. These
-#               report findings as annotations or a job summary but never
-#               fail your PR.
+#   REQUIRED  — format, test, build-wasm, sdk-ts, bot, indexer. These block
+#               the merge.
+#   ADVISORY  — clippy, audit, wasm-size, sdk-bundle-size, fuzz-pr,
+#               resource-cost. These report findings as annotations or a job
+#               summary but never fail your PR.
+#
+# `bot`'s name/needs status has said "(required)" since before this comment
+# was last touched, even though the comment right above that job's own
+# definition still says "ADVISORY" — a pre-existing inconsistency, not
+# introduced or resolved here (see that job's own note).
 #
 # The split is deliberate. A contributor should never be blocked by a new
 # upstream advisory or a subjective lint, but formatting, a green test suite,
@@ -267,6 +273,35 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — report the SDK's minified+gzipped bundle size, mirroring
+  # wasm-size's baseline-and-delta pattern for the frontend analogue of that
+  # concern (issue 0262 in the SDK epic).
+  # ───────────────────────────────────────────────────────────────────────────
+  sdk-bundle-size:
+    name: SDK bundle size report (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: sdk-ts
+    defaults:
+      run:
+        working-directory: packages/sdk-ts
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Report bundle size
+        run: node scripts/report-bundle-size.mjs >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────────
   # ADVISORY — time-boxed fuzz run. Every registered target (fuzz/fuzz_targets/)
   # gets a short, fixed-budget run so regressions are caught continuously
   # instead of only when a contributor remembers to fuzz locally. Only runs
@@ -373,12 +408,58 @@ jobs:
         run: ./scripts/report-resource-cost.sh
 
   # ───────────────────────────────────────────────────────────────────────────
+  # REQUIRED — the TypeScript SDK (packages/sdk-ts). Built and uploaded as an
+  # artifact so `bot` (below) can install it as a real `file:` dependency
+  # without re-running its build — `npm install` on a `file:` reference
+  # copies the referenced directory as-is, it does not build it.
+  # ───────────────────────────────────────────────────────────────────────────
+  sdk-ts:
+    name: SDK (TypeScript) (required)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/sdk-ts
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Upload built package (for the bot job to consume)
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdk-ts-dist
+          path: packages/sdk-ts/dist
+          retention-days: 1
+
+  # ───────────────────────────────────────────────────────────────────────────
   # ADVISORY — the example keeper bot. It is a reference implementation, so a
   # lint nit there should not gate a contract PR.
+  #
+  # NOTE: despite the comment above (and despite this job's own docstring
+  # here), this job's `name:` says "(required)" and `ci-required` (below)
+  # already listed `bot` in its `needs:` before this PR — a pre-existing
+  # inconsistency between this comment and the job's actual required status,
+  # left as-is rather than silently resolved one way or the other as part of
+  # an unrelated SDK migration PR.
   # ───────────────────────────────────────────────────────────────────────────
   bot:
     name: Keeper bot (required)
     runs-on: ubuntu-latest
+    needs: sdk-ts
     defaults:
       run:
         working-directory: examples/keeper-bot
@@ -388,6 +469,12 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "20"
+
+      - name: Download built SDK
+        uses: actions/download-artifact@v8
+        with:
+          name: sdk-ts-dist
+          path: packages/sdk-ts/dist
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
@@ -527,12 +614,12 @@ jobs:
     name: CI required checks
     runs-on: ubuntu-latest
     if: always()
-    needs: [format, test, build-wasm, bot, indexer]
+    needs: [format, test, build-wasm, sdk-ts, bot, indexer]
     steps:
       - name: Verify required jobs succeeded
         run: |
           results='${{ join(needs.*.result, ' ') }}'
-          echo "Required job results (format, test, build-wasm, bot, indexer): $results"
+          echo "Required job results (format, test, build-wasm, sdk-ts, bot, indexer): $results"
           for r in $results; do
             if [ "$r" != "success" ]; then
               echo "::error::A required CI job did not succeed."

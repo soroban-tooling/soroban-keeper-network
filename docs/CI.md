@@ -10,15 +10,17 @@ without blocking your PR.
 | `format` | Required | `cargo fmt --all -- --check` — a formatting diff is trivially fixable and shouldn't need discussion. |
 | `test` | Required | `cargo test --workspace --locked` — the test suite is the correctness bar. |
 | `build-wasm` | Required | The contract must actually compile to the `wasm32-unknown-unknown` target it deploys to. |
-| `bot` | Required | The example keeper bot (`examples/keeper-bot`) must lint, syntax-check, and pass its own test suite. |
+| `sdk-ts` | Required | The TypeScript SDK (`packages/sdk-ts`) must build, pass its own test suite, and lint clean. Uploads its built `dist/` as an artifact for `bot` to consume. |
+| `bot` | Required | The example keeper bot (`examples/keeper-bot`) must lint, syntax-check, and pass its own test suite. Depends on `sdk-ts`'s built output (the bot's `@soroban-keeper-network/sdk` dependency is a local `file:` reference, which `npm install` copies as-is rather than building). |
 | `indexer` | Required | The indexer service (`indexer/`) must format, build, and pass its test suite, including the database-backed tests. See [The indexer job](#the-indexer-job). |
 | `clippy` | Advisory (`continue-on-error: true`) | Lints are useful but subjective enough that a maintainer should decide case-by-case, not have every PR blocked by a new upstream lint. |
 | `audit` | Advisory (`continue-on-error: true`) | A new upstream dependency CVE should notify maintainers, not fail every open PR the moment it's published. |
-| `wasm-size` | Advisory (`continue-on-error: true`) | Reports binary size for visibility; see below. |
+| `wasm-size` | Advisory (`continue-on-error: true`) | Reports contract binary size for visibility; see below. |
+| `sdk-bundle-size` | Advisory (`continue-on-error: true`) | Reports the SDK's minified+gzipped bundle size for visibility — the frontend analogue of `wasm-size`; see below. |
 
 `ci-required` is the single check branch protection should require — it
-passes only when `format`, `test`, `build-wasm`, `bot`, and `indexer` all
-succeed, and ignores the advisory jobs' outcomes entirely.
+passes only when `format`, `test`, `build-wasm`, `sdk-ts`, `bot`, and
+`indexer` all succeed, and ignores the advisory jobs' outcomes entirely.
 
 Run every required check locally before opening a PR:
 
@@ -114,6 +116,28 @@ measured against your new normal, not a stale one:
 2. Replace the number in `.github/wasm-size-baseline.txt` with that figure.
 3. Mention the baseline bump in your PR description so a reviewer knows the
    size growth was deliberate, not overlooked.
+
+## SDK bundle size tracking
+
+The `sdk-bundle-size` job bundles `packages/sdk-ts`'s built `dist/index.js`
+with esbuild (minified, `@stellar/stellar-sdk` marked external — see that
+job's own script, `packages/sdk-ts/scripts/report-bundle-size.mjs`, for why
+the peer dependency is excluded), gzips the result, and reports both figures
+in the job summary — the same baseline-and-delta shape as `wasm-size`,
+against `packages/sdk-ts/bundle-size-baseline.json`. A change of **10% or
+more** relative to the baseline gets a `:warning:` line. This is advisory
+only, same as `wasm-size`.
+
+### Updating the SDK bundle-size baseline
+
+```bash
+cd packages/sdk-ts
+npm run build
+node scripts/report-bundle-size.mjs --baseline
+```
+
+Commit the updated `bundle-size-baseline.json` and mention the bump in your
+PR description.
 
 ## Resource-cost visibility
 

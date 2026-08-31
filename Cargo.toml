@@ -5,6 +5,7 @@ members = [
     "indexer",
     "rust-sdk",
     "rust-sdk/examples/calling-contract",
+    "sdk/rust",
 ]
 
 [workspace.dependencies]
