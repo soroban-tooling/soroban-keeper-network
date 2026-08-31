@@ -39,6 +39,7 @@ pub enum IndexerError {
 pub const SCHEMA_FILES: &[(&str, &str)] = &[
     ("keepers", include_str!("schema/keepers.sql")),
     ("admin", include_str!("schema/admin.sql")),
+    ("tasks", include_str!("schema/tasks.sql")),
 ];
 
 /// Create every table, index and view this crate reads.
@@ -60,6 +61,7 @@ pub async fn ingest_all(client: &Client, events: &[event::Event]) -> Result<(), 
     for event in events {
         ingest::keepers::ingest_event(client, event).await?;
         ingest::admin::ingest_event(client, event).await?;
+        ingest::tasks::ingest_event(client, event).await?;
     }
     Ok(())
 }
