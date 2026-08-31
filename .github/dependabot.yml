@@ -56,6 +56,43 @@ updates:
         update-types: ["version-update:semver-major"]
 
   # ───────────────────────────────────────────────────────────────────────────
+  # Rust / Cargo dependencies (fuzz crate)
+  # ───────────────────────────────────────────────────────────────────────────
+  - package-ecosystem: "cargo"
+    directory: "/fuzz"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      # Group all patch and minor updates together for easier review
+      fuzz-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+    # Major version updates are intentionally NOT grouped. Each major update
+    # gets its own PR because:
+    #   - soroban-sdk major bumps may require storage migrations
+    #   - Breaking API changes need case-by-case evaluation
+    #   - Fuzz target compatibility must be verified per-update
+    #
+    # For soroban-sdk specifically, major updates are handled manually via
+    # the release planning process to ensure coordinated testnet deployment.
+    ignore:
+      # Ignore soroban-sdk major updates — these are handled manually
+      # during planned upgrade windows to allow for proper testing and
+      # coordinated testnet deployment.
+      - dependency-name: "soroban-sdk"
+        update-types: ["version-update:semver-major"]
+
+  # ───────────────────────────────────────────────────────────────────────────
   # npm dependencies (keeper bot example)
   # ───────────────────────────────────────────────────────────────────────────
   - package-ecosystem: "npm"

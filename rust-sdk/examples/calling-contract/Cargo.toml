@@ -1,0 +1,16 @@
+[package]
+name = "calling-contract"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+soroban-keeper-sdk = { path = "../.." }
+keeper-registry = { path = "../../../contracts/keeper-registry" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
