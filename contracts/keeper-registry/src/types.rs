@@ -45,12 +45,19 @@ pub enum TaskType {
 /// Lifecycle state of a task. Transitions are enforced by each function.
 ///
 /// ```text
-/// PENDING ──claim──▶ CLAIMED ──execute──▶ EXECUTED
-///    │                  │
-///  cancel             expire (deadline passed)
-///    ▼                  ▼
-/// CANCELLED          EXPIRED
+/// PENDING ──claim──▶ CLAIMED ──execute+verify(pass)──▶ EXECUTED
+///    │                  │ ▲
+///  cancel             expire│ execute+verify(reject, retryable)
+///    ▼             (deadline│ (returns to CLAIMED for retry)
+/// CANCELLED          passed)│
+///                       ▼   │
+///                    EXPIRED│
+///                           └──────────────┘
 /// ```
+///
+/// Note: When a verifier rejects an execution attempt, `execute_task` may
+/// return the task to CLAIMED state (retryable failure), distinct from
+/// terminal states like CANCELLED or EXPIRED.
 #[contracttype]
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum TaskStatus {

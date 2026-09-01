@@ -62,14 +62,19 @@ are not written yet. Waves are written one at a time, deliberately: later
 issues depend on decisions earlier work settles, and writing them too early
 risks specifying against the wrong assumptions.
 
-Wave 2 is now fully published: E03 Fuzzing & Invariant Testing (20 issues),
-E04 On-chain Execution Verifier (26 issues), and all 22 of E05 Batch
-Operations & Gas, plus additional depth issues in E03/E04 grounded in the
-wave-1 surface that landed after the epics were first drafted (calldata
-bounding, the TTL-vs-deadline fix, `NotInitialized`, instance-TTL renewal,
-and the lock-lapse `cancel_task` extension). Each epic closes with its own
-retrospective (issues 0118, 0141, 0142) summarizing what shipped versus what
-was studied and explicitly deferred.
+**Wave 2 summary:** All 100 issues (0051–0150) are now published, covering
+E03 Fuzzing & Invariant Testing, E04 On-chain Execution Verifier, and E05
+Batch Operations & Gas. Each epic closes with a detailed retrospective
+documenting what shipped versus what was studied and deferred:
+[E05 retrospective (0118)](#0118),
+[E04 retrospective (0141)](#0141), and
+[E03 retrospective (0142)](#0142). These retrospectives provide the definitive
+record of design decisions made during wave 2, including the trust-model
+choice for verifiers, batch operation feasibility studies, and invariant
+testing coverage achieved. Additional depth issues grounded in wave-1 surface
+that landed after the epics were first drafted include calldata bounding,
+the TTL-vs-deadline fix, `NotInitialized` error handling, instance-TTL
+renewal, and the lock-lapse `cancel_task` extension.
 
 Wave 3 issues 0151–0200 (the first 45 of E12 TypeScript SDK, plus the first 5
 of E13 Rust SDK) are now published. The remaining ~193 issues in wave 3 (the
@@ -77,6 +82,18 @@ rest of E13, all of E14 Event Indexer, and all of E15's wave-3 remainder for
 Keeper Bot v2) are still planned — issue 0195 flags an explicit open question
 for whoever drafts E14: whether the indexer should depend on the TypeScript
 SDK's event decoders directly or fork them.
+
+**Wave 3 prerequisite check (completed at wave 2 closeout):** Epic E12
+(TypeScript SDK) was initially flagged as potentially requiring a finalized
+verifier interface from E04 to design its typed client against a stable ABI.
+Review of E04's retrospective (0141) and the shipped `IKeeperVerifier`
+interface confirms that the core interface is now stable and documented in
+`docs/VERIFIER_DESIGN.md`. The trust-model decision has been settled, and
+while some verifier implementations may continue to evolve, the registry-side
+contract interface that E12's SDK must bind against is frozen. Wave 3 SDK
+development can proceed without blocking on further E04 changes. Any
+remaining verifier-related items flagged as "deferred" in issue 0141 are
+enhancements that do not affect the public interface E12 depends on.
 
 **A caveat carried forward from wave 2.** Several wave-1 PRs were still open
 and unmerged when 0051–0100 were originally written; by the time wave 2 was

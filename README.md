@@ -21,8 +21,12 @@
 | [Architecture](docs/ARCHITECTURE.md) | Components, task lifecycle, storage, money invariants, trust model |
 | [Fuzzing & property testing](docs/FUZZING.md) | Running/adding fuzz targets, the shared invariant module, crash-to-regression convention |
 | [Verifier design (E04)](docs/VERIFIER_DESIGN.md) | Proposed `IKeeperVerifier` interface for optional on-chain proof verification |
+| [Indexer design](docs/INDEXER_DESIGN.md) | One instance per deployment, event-shape versioning policy |
+| [Indexer deployment](docs/INDEXER_DEPLOYMENT.md) | Provisioning, backfill, and operating an indexer instance |
 | [Batch operations (E05)](docs/BATCH_OPERATIONS.md) | Proposed `batch_register_tasks` design + integration guide |
 | [Storage layout survey](docs/STORAGE_LAYOUT.md) | `Task` struct storage-cost findings and recommendations |
+| [Audit scope](docs/AUDIT_SCOPE.md) | Surfaces and primary artifacts an external auditor should review, including the verifier integration |
+| [Events for a future indexer](docs/EVENTS.md) | Verifier-related event schema (epic E14 scope), field-by-field indexer purpose |
 | [CI](docs/CI.md) | What each CI job checks and which are advisory vs. required |
 | [Deploying & running](docs/DEPLOYING.md) | Testnet deploy walkthrough and keeper-bot operator guide |
 | [Deployments](docs/DEPLOYMENTS.md) | Canonical record of on-chain addresses |
@@ -406,9 +410,9 @@ only — the `Event` names are documentation labels, not on-chain values.
 
 Every event publishes exactly two topic symbols. Both are `symbol_short!`
 literals, which Soroban limits to **9 characters**; that is why several topics
-are abbreviated (`wdraw`, not `withdraw`; `verfail`, not `verifailed`; `minrwd`,
-not `min_reward`). The abbreviations are part of the on-chain interface and
-cannot be "corrected" without breaking existing consumers.
+are abbreviated (`wdraw`, not `withdraw`; `minrwd`, not `min_reward`). The
+abbreviations are part of the on-chain interface and cannot be "corrected"
+without breaking existing consumers.
 
 | Event | Emitted by | Topics | Data (in order, with type) |
 |-------|-----------|--------|----------------------------|
@@ -416,9 +420,7 @@ cannot be "corrected" without breaking existing consumers.
 | `TaskRegistered` | `register_task` | `("reg", "task")` | `(task_id: u64, owner: Address, reward: i128, deadline: u64)` |
 | `RewardIncreased` | `increase_reward` | `("topup", "task")` | `(task_id: u64, new_reward: i128)` — the new **total** reward, not the delta |
 | `DeadlineExtended` | `extend_deadline` | `("extend", "task")` | `(task_id: u64, new_deadline: u64)` |
-| `VerifierUpdated` | `update_verifier` | `("verifier", "task")` | `(task_id: u64, verifier: Option<Address>)` — `None` clears the verifier |
 | `TaskClaimed` | `claim_task` | `("claim", "task")` | `(task_id: u64, keeper: Address, ledger_seq: u32)` |
-| `TaskVerificationFailed` | `execute_task` | `("verfail", "task")` | `(task_id: u64, keeper: Address)` |
 | `TaskExecuted` | `execute_task` | `("exec", "task")` | `(task_id: u64, keeper: Address, net_reward: i128, proof: Bytes)` |
 | `TaskCancelled` | `cancel_task` | `("cancel", "task")` | `(task_id: u64, owner: Address)` |
 | `TaskExpired` | `expire_task` | `("exp", "task")` | `(task_id: u64,)` |
@@ -434,12 +436,14 @@ Notes:
 
 - `net_reward` in `TaskExecuted` is the keeper's share **after** the protocol
   fee, not the task's gross reward.
-- `TaskVerificationFailed` and `TaskExecuted` are both emitted from
-  `execute_task` and are mutually exclusive for a given call: a rejected proof
-  emits the former and returns an error, so no `TaskExecuted` follows.
 - `("admin", "xfer")` is the only event whose first topic is `"admin"`; every
   other admin event uses `"admin"` as its *second* topic. Filter on both topics,
   not just one.
+- `VerifierUpdated` and `TaskVerificationFailed` are epic E04 (verifier
+  integration) events; see [`docs/EVENTS.md`](docs/EVENTS.md) for their
+  full schema and indexer-relevant purpose per field, and note that
+  epic's current implementation status there before building against
+  them.
 | Event | Topics | Data |
 |-------|--------|------|
 | `TaskRegistered` | `("reg", "task")` | `(task_id, owner, reward, deadline)` |
@@ -716,7 +720,10 @@ need the daemon loop to complete a round without a real executor in place.
 | Formal audit | `keeper-registry` contract | Q4 2026 |
 | Ongoing | Automated invariant testing with `cargo-fuzz` | Continuous |
 
-Security issues should be reported per [SECURITY.md](SECURITY.md).
+Security issues should be reported per [SECURITY.md](SECURITY.md). See
+[`docs/AUDIT_SCOPE.md`](docs/AUDIT_SCOPE.md) for the per-surface scope an
+external auditor should review, including the verifier integration's
+trust boundary.
 
 ---
 

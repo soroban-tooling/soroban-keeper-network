@@ -9,10 +9,34 @@ its schema is laid out, and why it stores history rather than mutable current
 state, see [`INDEXER_DESIGN.md`](INDEXER_DESIGN.md) — that is the reference
 for the design, and this guide does not restate it.
 
-> **Note:** `INDEXER_DESIGN.md` is produced by issue #346, which has not
-> landed yet. Until it does, the schema's own commented SQL in
-> `indexer/src/schema/` is the reference. This guide links to the design doc
-> rather than duplicating it, so nothing here needs editing once #346 merges.
+> **Note:** ingest, storage, reorg, backfill, and API-shape decisions from
+> issue #346 still land in `INDEXER_DESIGN.md` as that issue closes. Until
+> they do, the schema's own commented SQL in `indexer/src/schema/` is the
+> reference for tables and columns. The instance model and event-versioning
+> policy are already recorded there.
+
+## One instance per deployment
+
+One indexer process tracks exactly one registry contract, on one network.
+That is a design decision ([`INDEXER_DESIGN.md` §1](INDEXER_DESIGN.md#1-one-instance-per-registry-deployment)),
+not a current limitation that configuration can work around.
+
+- **One `(network, contract id)` pair → one process, one database.** Testnet,
+  futurenet, and mainnet each get their own instance. A second mainnet
+  deployment after an upgrade or migration is a new pair, so it gets a new
+  instance too.
+- **Do not point two instances at the same database.** The schema has no
+  contract-id column and the ingest checkpoint is a single row; two writers
+  would share a cursor and mix unrelated history.
+- **The contract id is a single `C...` value**, not a list. There is no
+  supported way to pass several ids to one process.
+
+An in-place WASM `upgrade` of the *same* contract id is still one
+deployment: keep the same instance, same database, resume from the
+checkpoint. The event-versioning policy in
+[`INDEXER_DESIGN.md` §2](INDEXER_DESIGN.md#2-event-shape-changes-across-contract-version)
+covers what happens to already-ingested rows and when a breaking event-shape
+change instead means starting a new instance.
 
 ## Prerequisites
 
@@ -56,7 +80,7 @@ The indexer is configured through the environment:
 |----------|----------|---------|
 | `DATABASE_URL` | Yes | `postgresql://indexer:PASSWORD@host:5432/keeper_indexer` |
 | `RPC_URL` | Yes | The Soroban RPC endpoint to read events from. |
-| `REGISTRY_CONTRACT_ID` | Yes | The `C...` contract whose events are indexed. |
+| `REGISTRY_CONTRACT_ID` | Yes | The single `C...` contract whose events are indexed. One id, not a list; a second contract is a second instance. |
 | `START_LEDGER` | No | First ledger to backfill from. Defaults to the contract's deployment ledger. |
 
 Keep `DATABASE_URL` out of shell history and out of the process table — it
