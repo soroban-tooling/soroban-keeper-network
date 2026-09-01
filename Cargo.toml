@@ -6,7 +6,6 @@ members = [
     "rust-sdk",
 ]
 
-
 [workspace.dependencies]
 soroban-sdk = { version = "22.0.1", features = ["testutils"] }
 # The indexer is an off-chain service, so these never reach the contract WASM
@@ -28,3 +27,4 @@ lto = true
 [profile.release-with-logs]
 inherits = "release"
 debug-assertions = true
+

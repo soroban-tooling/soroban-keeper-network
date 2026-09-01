@@ -27,6 +27,12 @@ pub struct Config {
     pub poll_interval_secs: u64,
     /// Ledgers requested per `getEvents` page during backfill.
     pub backfill_page_size: u32,
+    /// Requests a single client (by API key, else by IP) may make per second
+    /// against the REST API or new WebSocket connections, sustained.
+    pub rate_limit_per_second: u32,
+    /// Extra requests a client may burst above `rate_limit_per_second`
+    /// before being throttled, refilling at that same per-second rate.
+    pub rate_limit_burst: u32,
 }
 
 /// A configuration value that is missing or unusable.
@@ -59,6 +65,13 @@ const DEFAULT_POLL_INTERVAL_SECS: u64 = 5;
 const DEFAULT_BACKFILL_PAGE_SIZE: u32 = 200;
 /// Default API bind address.
 const DEFAULT_BIND_ADDRESS: &str = "127.0.0.1:8080";
+/// Default sustained requests per second per client — generous enough for
+/// normal dashboard polling and keeper-bot usage, bounded against a single
+/// client monopolizing capacity. Tune via `INDEXER_RATE_LIMIT_PER_SECOND`
+/// once real usage is observed.
+const DEFAULT_RATE_LIMIT_PER_SECOND: u32 = 20;
+/// Default burst allowance above the sustained rate.
+const DEFAULT_RATE_LIMIT_BURST: u32 = 40;
 
 impl Config {
     /// Read and validate configuration from the process environment.
@@ -138,6 +151,24 @@ impl Config {
             problems.push("INDEXER_BACKFILL_PAGE_SIZE must be greater than zero".to_string());
         }
 
+        let rate_limit_per_second = optional_parsed(
+            &get,
+            "INDEXER_RATE_LIMIT_PER_SECOND",
+            DEFAULT_RATE_LIMIT_PER_SECOND,
+            &mut problems,
+        );
+
+        let rate_limit_burst = optional_parsed(
+            &get,
+            "INDEXER_RATE_LIMIT_BURST",
+            DEFAULT_RATE_LIMIT_BURST,
+            &mut problems,
+        );
+
+        if rate_limit_per_second == 0 {
+            problems.push("INDEXER_RATE_LIMIT_PER_SECOND must be greater than zero".to_string());
+        }
+
         if problems.is_empty() {
             Ok(Self {
                 rpc_url,
@@ -147,6 +178,8 @@ impl Config {
                 bind_address,
                 poll_interval_secs,
                 backfill_page_size,
+                rate_limit_per_second,
+                rate_limit_burst,
             })
         } else {
             Err(ConfigError { problems })
@@ -208,6 +241,8 @@ mod tests {
         assert_eq!(config.bind_address, DEFAULT_BIND_ADDRESS);
         assert_eq!(config.poll_interval_secs, DEFAULT_POLL_INTERVAL_SECS);
         assert_eq!(config.backfill_page_size, DEFAULT_BACKFILL_PAGE_SIZE);
+        assert_eq!(config.rate_limit_per_second, DEFAULT_RATE_LIMIT_PER_SECOND);
+        assert_eq!(config.rate_limit_burst, DEFAULT_RATE_LIMIT_BURST);
     }
 
     #[test]

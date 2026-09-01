@@ -81,3 +81,10 @@ path = "fuzz_targets/uninitialized_registry.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "reentrancy"
+path = "fuzz_targets/reentrancy.rs"
+test = false
+doc = false
+bench = false

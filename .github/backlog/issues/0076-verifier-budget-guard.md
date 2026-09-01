@@ -8,7 +8,7 @@ depends_on: [0074]
 
 ## Summary
 
-The cross-contract call to a task's verifier (0074) is charged against the same transaction budget as everything else `execute_task` does. An expensive or deliberately wasteful verifier could make executing a task cost far more than the keeper anticipated when it claimed the task, eating into or exceeding the profit margin the keeper-bot's profitability check (wave 1 issue 41) assumed.
+The cross-contract call to a task's verifier (0074) is charged against the same transaction budget as everything else `execute_task` does. An expensive or deliberately wasteful verifier could make executing a task cost far more than the keeper anticipated when it claimed the task, eating into or exceeding the profit margin the keeper-bot's profitability check (wave 1 issue 0035) assumed.
 
 ## Expected behaviour
 
