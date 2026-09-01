@@ -112,6 +112,8 @@ soroban-keeper-network/
 │   └── deploy.sh                 # Deployment script
 ├── examples/
 │   └── keeper-bot/               # Off-chain keeper bot (Node.js)
+├── packages/
+│   └── sdk-ts/                   # TypeScript SDK for the contract (npm package)
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                # GitHub Actions CI
@@ -178,6 +180,35 @@ Two conventions worth following, both learned the hard way:
 - **Name test helper modules after their scope** (`reentrant_token_cancel`,
   not `reentrant_token`). Two PRs that each add a generically named helper
   module will compile alone and fail once both land.
+
+---
+
+## Where Contributors Come In
+
+The MVP contract is functional and stable. The open work now focuses on three
+published epics spanning 100 issues (0051–0150):
+
+- **E03 Fuzzing & Invariant Testing** (20 issues) — property-based tests,
+  stateful model checking, and mutation testing to systematically verify the
+  money-movement invariants documented in `docs/ARCHITECTURE.md`.
+- **E04 On-chain Execution Verifier** (26 issues) — the `IKeeperVerifier`
+  interface and registry-side verification callback, allowing target protocols
+  to enforce that a keeper actually performed the promised work on-chain before
+  the registry credits the reward.
+- **E05 Batch Operations & Gas** (22 issues) — batch registration (already
+  shipped), storage layout tuning, WASM size optimization, and CPU budget work.
+
+Each epic closes with a retrospective documenting what shipped versus what was
+studied and deferred. See the **epic index** in `.github/backlog/README.md`
+for the full roadmap, including wave 3 (TypeScript SDK, Rust SDK, event
+indexer, keeper bot v2) and beyond.
+
+**Picking an issue:**
+
+1. Browse `.github/backlog/issues/` or filter by label on GitHub Issues.
+2. Look for the `good-first-issue` label if this is your first contribution.
+3. Comment on the issue to claim it before starting work.
+4. Follow the [Git Workflow](#git-workflow) and [PR Requirements](#branching--pr-rules) below.
 
 ## Git Workflow
 
@@ -392,6 +423,13 @@ the fix — see the PR template's checkbox for this.
 
 See [`docs/FUZZING.md`](docs/FUZZING.md) for how to run an existing fuzz
 target, add a new one, and use the shared `invariants` module.
+
+**"How do I know if my change broke an invariant?"** Start with
+[`docs/FUZZING.md`'s "Epic E03 retrospective: invariant coverage
+map"](docs/FUZZING.md#epic-e03-retrospective-invariant-coverage-map) — it
+lists every numbered invariant alongside the property test and/or fuzz
+target that actually exercises it, so you can find (or add to) the
+relevant coverage instead of re-deriving it from scratch.
 
 ---
 

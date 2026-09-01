@@ -1,0 +1,808 @@
+openapi: 3.1.0
+info:
+  title: Keeper Registry Indexer API
+  description: Read-only access to indexed keeper registry events and the state derived from them.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+  version: 1.0.0
+servers:
+- url: /v1
+  description: Version 1 of the API
+paths:
+  /admin/config:
+    get:
+      tags:
+      - indexer
+      summary: Current registry configuration.
+      operationId: admin_config
+      responses:
+        '200':
+          description: Current configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminConfig'
+  /events:
+    get:
+      tags:
+      - indexer
+      summary: A page of ingested events, oldest first.
+      operationId: event_feed
+      parameters:
+      - name: after
+        in: query
+        description: Cursor from a previous response
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: limit
+        in: query
+        description: Events per page (default 50, max 500)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: event_type
+        in: query
+        description: Filter by event type
+        required: false
+        schema:
+          type: string
+      - name: address
+        in: query
+        description: Filter by owner or keeper address
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: A page of events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventFeedResponse'
+        '400':
+          description: Unknown event type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /health:
+    get:
+      tags:
+      - indexer
+      summary: Service liveness and ingestion progress.
+      operationId: health
+      responses:
+        '200':
+          description: Service is running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /keepers/{keeper}/tasks:
+    get:
+      tags:
+      - indexer
+      summary: Tasks a keeper has claimed or executed.
+      operationId: tasks_by_keeper
+      parameters:
+      - name: keeper
+        in: path
+        description: Keeper address
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Tasks for the keeper
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListResponse'
+  /leaderboard:
+    get:
+      tags:
+      - indexer
+      summary: Keepers ranked by executions or by total net reward.
+      description: |-
+        Ties are broken deterministically: by the other metric, then by keeper
+        address ascending. See `queries::leaderboard` for the full rule.
+      operationId: keeper_leaderboard
+      parameters:
+      - name: rank_by
+        in: query
+        description: executions (default) or reward
+        required: false
+        schema:
+          type: string
+      - name: since
+        in: query
+        description: Unix timestamp; omit for all time
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: limit
+        in: query
+        description: Entries to return (default 25, max 200)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      responses:
+        '200':
+          description: Ranked keepers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Leaderboard'
+        '400':
+          description: Unknown ranking metric
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /owners/{owner}/tasks:
+    get:
+      tags:
+      - indexer
+      summary: Tasks registered by an owner.
+      operationId: tasks_by_owner
+      parameters:
+      - name: owner
+        in: path
+        description: Owner address
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Tasks for the owner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListResponse'
+  /tasks/{task_id}:
+    get:
+      tags:
+      - indexer
+      summary: One task, with its full observed history.
+      operationId: get_task
+      parameters:
+      - name: task_id
+        in: path
+        description: Task id
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      responses:
+        '200':
+          description: Task state and history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+        '404':
+          description: No such task has been indexed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+components:
+  schemas:
+    AdminConfig:
+      type: object
+      description: |-
+        The registry's current configuration, folded from admin event history.
+
+        Every field is `Option` because the indexer may not have ingested the event
+        that would set it: reporting `None` is honest, where a default would be a
+        value the contract never emitted.
+      required:
+      - total_fees_swept
+      properties:
+        admin:
+          type:
+          - string
+          - 'null'
+        current_wasm_hash:
+          type:
+          - string
+          - 'null'
+          description: Most recent wasm hash from an `Upgraded` event, hex-encoded.
+        fee_bps:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        min_reward:
+          type:
+          - string
+          - 'null'
+        paused:
+          type:
+          - boolean
+          - 'null'
+        reward_token:
+          type:
+          - string
+          - 'null'
+        total_fees_swept:
+          type: string
+          description: Fees swept to a treasury so far, summed across every `FeesSwept`.
+    ApiError:
+      type: object
+      description: An error returned by any endpoint.
+      required:
+      - error
+      - message
+      properties:
+        error:
+          type: string
+          description: Stable, machine-readable code. Safe to branch on.
+        message:
+          type: string
+          description: Human-readable detail. Wording may change; do not parse it.
+    EventFeedResponse:
+      type: object
+      description: A page of the event feed.
+      required:
+      - events
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/IndexedEvent'
+        next_cursor:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: |-
+            Pass as `after` to fetch the next page; absent at the end of the feed.
+
+            This is a stable cursor, not an offset: events ingested between two
+            requests shift no boundary, so a client paging through the feed sees
+            every event exactly once.
+    EventPayload:
+      oneOf:
+      - type: object
+        required:
+        - task_id
+        - owner
+        - reward
+        - deadline
+        - type
+        properties:
+          deadline:
+            type: integer
+            format: int64
+            minimum: 0
+          owner:
+            type: string
+          reward:
+            type: string
+          task_id:
+            type: integer
+            format: int64
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - task_registered
+      - type: object
+        required:
+        - task_id
+        - keeper
+        - claim_ledger
+        - type
+        properties:
+          claim_ledger:
+            type: integer
+            format: int32
+            description: Ledger sequence at claim time, as the contract reports it.
+            minimum: 0
+          keeper:
+            type: string
+          task_id:
+            type: integer
+            format: int64
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - task_claimed
+      - type: object
+        required:
+        - task_id
+        - keeper
+        - net_reward
+        - proof
+        - type
+        properties:
+          keeper:
+            type: string
+          net_reward:
+            type: string
+          proof:
+            type: string
+            description: Hex-encoded execution proof bytes.
+          task_id:
+            type: integer
+            format: int64
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - task_executed
+      - type: object
+        required:
+        - task_id
+        - type
+        properties:
+          task_id:
+            type: integer
+            format: int64
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - task_expired
+      - type: object
+        required:
+        - task_id
+        - owner
+        - type
+        properties:
+          owner:
+            type: string
+          task_id:
+            type: integer
+            format: int64
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - task_cancelled
+      - type: object
+        required:
+        - task_id
+        - new_reward
+        - type
+        properties:
+          new_reward:
+            type: string
+          task_id:
+            type: integer
+            format: int64
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - reward_increased
+      - type: object
+        required:
+        - task_id
+        - new_deadline
+        - type
+        properties:
+          new_deadline:
+            type: integer
+            format: int64
+            minimum: 0
+          task_id:
+            type: integer
+            format: int64
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - deadline_extended
+      - type: object
+        required:
+        - keeper
+        - amount
+        - type
+        properties:
+          amount:
+            type: string
+          keeper:
+            type: string
+          type:
+            type: string
+            enum:
+            - rewards_withdrawn
+      - type: object
+        required:
+        - paused
+        - type
+        properties:
+          paused:
+            type: boolean
+          type:
+            type: string
+            enum:
+            - paused
+      - type: object
+        required:
+        - old_bps
+        - new_bps
+        - type
+        properties:
+          new_bps:
+            type: integer
+            format: int32
+            minimum: 0
+          old_bps:
+            type: integer
+            format: int32
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - fee_updated
+      - type: object
+        required:
+        - old_admin
+        - new_admin
+        - type
+        properties:
+          new_admin:
+            type: string
+          old_admin:
+            type: string
+          type:
+            type: string
+            enum:
+            - admin_transferred
+      - type: object
+        required:
+        - old_min
+        - new_min
+        - type
+        properties:
+          new_min:
+            type: string
+          old_min:
+            type: string
+          type:
+            type: string
+            enum:
+            - min_reward_updated
+      - type: object
+        required:
+        - treasury
+        - amount
+        - remaining
+        - type
+        properties:
+          amount:
+            type: string
+          remaining:
+            type: string
+          treasury:
+            type: string
+          type:
+            type: string
+            enum:
+            - fees_swept
+      - type: object
+        required:
+        - admin
+        - reward_token
+        - fee_bps
+        - type
+        properties:
+          admin:
+            type: string
+          fee_bps:
+            type: integer
+            format: int32
+            minimum: 0
+          reward_token:
+            type: string
+          type:
+            type: string
+            enum:
+            - initialized
+      - type: object
+        required:
+        - admin
+        - new_wasm_hash
+        - type
+        properties:
+          admin:
+            type: string
+          new_wasm_hash:
+            type: string
+            description: Hex-encoded 32-byte wasm hash.
+          type:
+            type: string
+            enum:
+            - upgraded
+      description: |-
+        The decoded payload of one event.
+
+        Field names and order match the contract's `publish` tuple for each event.
+        `i128` values are serialised as strings: a reward in stroops can exceed
+        `Number.MAX_SAFE_INTEGER`, and a browser dashboard reading JSON would
+        silently lose precision on a bare number.
+    EventType:
+      type: string
+      description: |-
+        The discriminant of an [`EventPayload`], usable as a filter without
+        decoding the payload -- the off-chain equivalent of the contract's
+        `(verb, noun)` topic pair.
+      enum:
+      - task_registered
+      - task_claimed
+      - task_executed
+      - task_expired
+      - task_cancelled
+      - reward_increased
+      - deadline_extended
+      - rewards_withdrawn
+      - paused
+      - fee_updated
+      - admin_transferred
+      - min_reward_updated
+      - fees_swept
+      - initialized
+      - upgraded
+    HealthResponse:
+      type: object
+      description: Service liveness and how far ingestion has reached.
+      required:
+      - status
+      - backfill_complete
+      properties:
+        backfill_complete:
+          type: boolean
+          description: Whether the initial catch-up has finished.
+        last_ingested_ledger:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Highest ledger fully ingested, absent before the first checkpoint.
+          minimum: 0
+        status:
+          type: string
+    IndexedEvent:
+      type: object
+      description: |-
+        One ingested event, with the ledger context needed to order and page it.
+
+        This is the exact shape the REST event feed and the WebSocket feed both
+        emit -- issue 0226 requires a client to need only one parser for both.
+      required:
+      - cursor
+      - ledger
+      - ledger_close_time
+      - tx_hash
+      - event_index
+      - event_type
+      - payload
+      properties:
+        cursor:
+          type: integer
+          format: int64
+          description: |-
+            Monotonic ingestion sequence, and the cursor used for pagination.
+
+            Assigned by the database on insert, so it is stable: a later ingestion
+            never renumbers an existing row, which is what an offset would do.
+        event_index:
+          type: integer
+          format: int32
+          description: Index of this event within its transaction.
+          minimum: 0
+        event_type:
+          $ref: '#/components/schemas/EventType'
+        ledger:
+          type: integer
+          format: int32
+          description: Ledger this event was emitted in.
+          minimum: 0
+        ledger_close_time:
+          type: integer
+          format: int64
+          description: Close time of that ledger, as a Unix timestamp in seconds.
+        payload:
+          $ref: '#/components/schemas/EventPayload'
+        tx_hash:
+          type: string
+          description: Transaction hash, hex-encoded.
+    KeeperSummary:
+      type: object
+      description: Everything the indexer knows about one keeper address.
+      required:
+      - keeper
+      - claimed_task_ids
+      - executed_task_ids
+      - total_earned
+      - total_withdrawn
+      - credited_balance
+      properties:
+        claimed_task_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+            minimum: 0
+          description: Tasks this keeper has claimed.
+        credited_balance:
+          type: string
+          description: |-
+            Earned minus withdrawn.
+
+            This is the figure the contract's `keeper_balance` view reports once
+            the indexer is caught up. Exposed as its own field so no consumer has
+            to recompute it.
+        executed_task_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+            minimum: 0
+          description: Tasks this keeper has executed.
+        keeper:
+          type: string
+        total_earned:
+          type: string
+          description: Sum of `net_reward` across every execution.
+        total_withdrawn:
+          type: string
+          description: Sum of every `RewardsWithdrawn` amount.
+    Leaderboard:
+      type: object
+      description: A ranked leaderboard.
+      required:
+      - rank_by
+      - entries
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/LeaderboardEntry'
+        rank_by:
+          $ref: '#/components/schemas/RankBy'
+        since:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: Start of the window as a Unix timestamp, absent for all-time.
+    LeaderboardEntry:
+      type: object
+      description: One keeper's position on the leaderboard.
+      required:
+      - rank
+      - keeper
+      - executions
+      - total_reward
+      properties:
+        executions:
+          type: integer
+          format: int32
+          description: Tasks executed within the window.
+          minimum: 0
+        keeper:
+          type: string
+        rank:
+          type: integer
+          format: int32
+          description: 1-based position after ordering and tie-breaking.
+          minimum: 0
+        total_reward:
+          type: string
+          description: Net reward earned within the window.
+    RankBy:
+      type: string
+      description: Which metric to rank by.
+      enum:
+      - executions
+      - reward
+    TaskDetail:
+      type: object
+      description: A task's current state together with the events that produced it.
+      required:
+      - task
+      - history
+      properties:
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/IndexedEvent'
+          description: Every event for this task, oldest first.
+        task:
+          $ref: '#/components/schemas/TaskState'
+          description: State folded from the full history below.
+    TaskListResponse:
+      type: object
+      description: Tasks belonging to one address.
+      required:
+      - address
+      - tasks
+      properties:
+        address:
+          type: string
+          description: The address these tasks were selected by.
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskState'
+    TaskState:
+      type: object
+      description: |-
+        A task's current state, folded from its event history.
+
+        Only fields the events actually carry are present. The contract's `Task`
+        struct also holds `task_type`, `calldata`, `ttl_ledgers` and
+        `lock_ledgers`, but no event emits them, so they are not reconstructed
+        here rather than being guessed at.
+      required:
+      - task_id
+      - owner
+      - status
+      - reward
+      - deadline
+      - net_reward
+      - last_ledger
+      properties:
+        claim_ledger:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Ledger the claim was taken at.
+          minimum: 0
+        deadline:
+          type: integer
+          format: int64
+          description: 'Live deadline: the registered deadline with every `DeadlineExtended` applied.'
+          minimum: 0
+        keeper:
+          type:
+          - string
+          - 'null'
+          description: Keeper holding the claim, once claimed.
+        last_ledger:
+          type: integer
+          format: int32
+          description: Ledger of the most recent event for this task.
+          minimum: 0
+        net_reward:
+          type: string
+          description: Net reward paid on execution, once executed.
+        owner:
+          type: string
+        reward:
+          type: string
+          description: 'Live reward: the registered reward with every `RewardIncreased` folded in.'
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        task_id:
+          type: integer
+          format: int64
+          minimum: 0
+    TaskStatus:
+      type: string
+      description: Lifecycle state of a task, named to match the contract's `TaskStatus`.
+      enum:
+      - pending
+      - claimed
+      - executed
+      - cancelled
+      - expired
+tags:
+- name: indexer
+  description: Indexed registry data

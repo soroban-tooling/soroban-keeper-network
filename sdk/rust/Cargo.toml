@@ -1,0 +1,49 @@
+[package]
+name = "keeper-registry-sdk"
+version = "0.1.0"
+edition = "2021"
+authors = ["Soroban Keeper Network Contributors"]
+description = "Native Rust client for the Soroban Keeper Network's keeper-registry contract"
+license = "Apache-2.0"
+repository = "https://github.com/soroban-tooling/soroban-keeper-network"
+keywords = ["soroban", "stellar", "keeper", "sdk", "rpc"]
+categories = ["cryptography::cryptocurrencies"]
+
+# A native RPC client, not a contract — it must NOT require the
+# wasm32-unknown-unknown target (#265 acceptance criterion). It links
+# soroban-sdk for the shared XDR/host types (Address, Val, etc.) but never
+# builds to `cdylib`, so there's no `[lib] crate-type` override here — the
+# default `rlib` is correct for a library other native code depends on.
+
+[dependencies]
+# Shared with contracts/keeper-registry so XDR/host types (Address, Symbol,
+# etc.) match exactly what the contract emits — no separate version to drift.
+soroban-sdk = { workspace = true }
+
+# The contract's own error enum, reused directly in this crate's
+# KeeperSdkError (see src/keeper_error.rs and DESIGN.md's "error strategy"
+# section) rather than redefining the same failure reasons under a
+# different name.
+keeper-registry = { path = "../../contracts/keeper-registry" }
+
+# RPC client survey (#265 acceptance criterion — see README.md "RPC client
+# choice" for the full writeup): soroban-client (crates.io) / rs-soroban-client
+# (its GitHub repo) is the closest thing to a standard, actively maintained
+# Rust client for the Soroban RPC surface (simulateTransaction,
+# getLedgerEntries, sendTransaction, getTransaction, getEvents) as of this
+# writing (v0.5.9, Aug 2026) — there is no separate "official" Stellar
+# Development Foundation Rust RPC crate to prefer over it.
+soroban-client = "0.5.9"
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+# Full-lifecycle tests for the six task methods (#268's third acceptance
+# criterion) run against a mocked Soroban RPC server rather than a live
+# network, so CI doesn't depend on testnet availability or funded test
+# accounts — the same approach soroban-client's own test suite uses
+# internally (see its tests.rs `get_mocked_server` helper; not exported, so
+# this crate mounts its own mocks the same way rather than depending on it).
+wiremock = "0.6.2"
+tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread"] }
+serde_json = "1"
