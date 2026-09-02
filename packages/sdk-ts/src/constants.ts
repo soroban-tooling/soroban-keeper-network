@@ -28,3 +28,23 @@ export const SUPPORTED_CONTRACT_VERSIONS = {
 } as const;
 /** Maximum `proof` length in bytes accepted by `execute_task`. */
 export const MAX_PROOF_LEN = 256;
+
+// ── Task parameter bounds, mirrored from `constants.rs` ──────────────────────
+//
+// `register_task` validates each of these on-chain (`validate_task_params` in
+// `internal.rs`). They are named here so the client-side pre-check in
+// `methods/registerTask.ts` and any future caller share one copy, per the same
+// rule the contract follows: a value enforced in more than one place gets a
+// name in exactly one place.
+
+/** Maximum `calldata` length in bytes accepted by `register_task`. */
+export const MAX_CALLDATA_LEN = 1024;
+
+/** Smallest `lock_ledgers` a task may be registered with (~1 minute). */
+export const MIN_LOCK_LEDGERS = 12;
+
+/** Largest `lock_ledgers` a task may be registered with (~1 day). */
+export const MAX_LOCK_LEDGERS = 17_280;
+
+/** Smallest `ttl_ledgers` a task may be registered with (~83 minutes). */
+export const MIN_TTL_LEDGERS = 1_000;

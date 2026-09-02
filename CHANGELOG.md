@@ -22,6 +22,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fifteen events from `events.rs` by name with their exact payload fields
   (the README's event table currently also lists two verifier events that
   do not exist in code; the schema follows the code).
+### Added — verifier event emission (#118)
+
+- Added event emission helper functions and event specifications for task verifier lifecycle:
+  1. `emit_verifier_attached(&Env, task_id, verifier)` with topic `("vattach", "task")` and data `(task_id: u64, verifier: Address)` emitted on task registration when an optional verifier is attached, preserving the backwards-compatible 4-tuple schema of `TaskRegistered`.
+  2. `emit_verifier_updated(&Env, task_id, old_verifier, new_verifier)` with topic `("vupdate", "task")` and data `(task_id: u64, old_verifier: Option<Address>, new_verifier: Option<Address>)` matching the standard `(old, new)` before/after update pattern.
+  3. `emit_task_verification_failed(&Env, task_id, keeper)` with topic `("verfail", "task")` and data `(task_id: u64, keeper: Address)`.
+- Updated `README.md` events table and added unit tests in `test/events.rs`.
+### Documented — permissionless verifiers with advisory curated registry (#117)
+
+- Documented architectural decision in `docs/VERIFIER_DESIGN.md` addressing the tension between permissionless verifier attachment and keeper griefing protection.
+- Decided on fully permissionless verifier attachment at the core contract level (no admin allow-list gating `register_task` or `execute_task`), with an advisory on-chain admin-curated vetted verifier list for keeper bots and dApp UIs to query as a trust signal.
+- Scoped follow-up implementation issue for the advisory vetted verifier registry views and admin mutation methods.
+
+### Added — keeper-bot verifier capability and profitability checks (#116)
+
+- Keeper bot now checks tasks before claiming to ensure:
+  1. A proof-generation strategy exists for the task's attached verifier kind/contract (via `VERIFIER_STRATEGIES` or `checkVerifierSupport`), skipping unsupported verifiers rather than attempting and failing.
+  2. The task satisfies the profitability margin configured via `MIN_PROFIT_MARGIN_STROOPS`, factoring in claim fee, execute fee, and verifier resource fee (estimated or simulated via `IKeeperVerifier::verify`).
+- Tasks skipped due to unsupported verifiers or unprofitability are logged with explicit rationale so operators can differentiate between lack of tasks and unserviceable/unprofitable verifiers.
 
 ### Added — bounded batch task reads (#25)
 
@@ -59,6 +78,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   between two parameters that were previously set independently.
 - Boundary tests pin the behaviour at `reward = 1`, the first reward yielding a
   non-zero fee, `fee_bps = 0`, and `fee_bps = 10_000`. No behaviour change.
+
+### Added — optional on-chain proof verifier (VERSION bumped to 4)
+
+Epic E04's core verifier-gating slice. Full design rationale:
+[docs/VERIFIER_DESIGN.md](docs/VERIFIER_DESIGN.md).
+
+- `register_task` now takes a required eighth parameter,
+  `verifier: Option<Address>`. `None` behaves exactly as before this change;
+  `Some(addr)` attaches an `IKeeperVerifier`-implementing contract that
+  `execute_task` calls before crediting the keeper, rejecting with the new
+  `VerificationFailed` (24) error (and a `TaskVerificationFailed` event) if it
+  returns `false` or panics — a panicking verifier is caught via
+  `try_invoke_contract`/the generated client's `try_verify`, never aborting
+  the transaction, so the task stays `Claimed` and retryable (or falls back
+  to `expire_task` at the deadline) rather than being bricked. This is a
+  breaking ABI change — every existing `register_task` call site must add the
+  new argument.
+- New event: `TaskVerificationFailed` (`("verfail", "task")`).
+- `VERSION` bumped from 3 to 4.
+- Not included in this slice (tracked as separate follow-up issues): the
+  reference verifiers (signature/oracle/tx-inclusion) and an admin-curated
+  allowlist.
 
 ### Added — batch task registration (VERSION bumped to 3)
 

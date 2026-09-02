@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { SUPPORTED_CONTRACT_VERSIONS } from "../src/constants.js";
-import { CONTRACT_ID, OWNER, testClient } from "./support/client.js";
+import {
+  KeeperContractError,
+  KeeperErrorCode,
+  isKeeperError,
+} from "../src/errors.js";
+import { TaskStatus, TaskType } from "../src/types.js";
+import { CONTRACT_ID, KEEPER, OWNER, testClient } from "./support/client.js";
 
 /** A registry on which `initialize` has never run: Options are None. */
 const FRESH_REGISTRY = {
@@ -185,5 +191,151 @@ describe("client.version and the SDK compatibility check", () => {
 
     expect(compatibility.status).toBe("compatible");
     expect(compatibility.warning).toBeUndefined();
+  });
+});
+
+// -- per-task and per-keeper views --------------------------------------------
+
+/** A Pending task: no claimer, no claim ledger -- the contract's Option::None. */
+const PENDING_TASK = {
+  owner: OWNER,
+  task_type: 0,
+  calldata: new Uint8Array([1, 2, 3]),
+  reward: 5_000_000n,
+  deadline: 1_700_000_000n,
+  ttl_ledgers: 17_280,
+  status: 0,
+  claimer: undefined,
+  claim_ledger: undefined,
+  lock_ledgers: 100,
+};
+
+describe("client.getTask", () => {
+  it("remaps the contract's snake_case struct to the SDK's camelCase Task", async () => {
+    const { client, rpc } = testClient({ results: { get_task: PENDING_TASK } });
+
+    const task = await client.getTask(1);
+
+    expect(task.owner).toBe(OWNER);
+    expect(task.taskType).toBe(TaskType.Liquidation);
+    expect(task.status).toBe(TaskStatus.Pending);
+    expect(task.ttlLedgers).toBe(17_280);
+    expect(task.lockLedgers).toBe(100);
+    // No snake_case escapes the module.
+    expect(task).not.toHaveProperty("task_type");
+    expect(task).not.toHaveProperty("ttl_ledgers");
+    expect(rpc.onlyCall.method).toBe("get_task");
+    // A view: simulated, never submitted.
+    expect(rpc.submitted).toHaveLength(0);
+  });
+
+  it("keeps reward a bigint and deadline a number, per the conventions", async () => {
+    const { client } = testClient({ results: { get_task: PENDING_TASK } });
+
+    const task = await client.getTask(1);
+
+    expect(typeof task.reward).toBe("bigint");
+    expect(task.reward).toBe(5_000_000n);
+    expect(typeof task.deadline).toBe("number");
+    expect(task.deadline).toBe(1_700_000_000);
+    // One line from a Date, which is the point of keeping it a number.
+    expect(new Date(task.deadline * 1000).getUTCFullYear()).toBe(2023);
+  });
+
+  it("surfaces an absent claimer as undefined rather than a Soroban Option", async () => {
+    const { client } = testClient({ results: { get_task: PENDING_TASK } });
+
+    const task = await client.getTask(1);
+
+    expect(task.claimer).toBeUndefined();
+    expect(task.claimLedger).toBeUndefined();
+  });
+
+  it("rejects a nonexistent id as TaskNotFound instead of a nullish task", async () => {
+    const { client } = testClient({
+      simulationErrors: { get_task: "host invocation failed: Error(Contract, #4)" },
+    });
+
+    const rejection = await client.getTask(999).catch((error: unknown) => error);
+
+    expect(isKeeperError(rejection, KeeperErrorCode.TaskNotFound)).toBe(true);
+    expect((rejection as KeeperContractError).codeName).toBe("TaskNotFound");
+  });
+
+  it("accepts a bigint id as well as a number", async () => {
+    const { client, rpc } = testClient({ results: { get_task: PENDING_TASK } });
+
+    await client.getTask(7n);
+
+    expect(rpc.onlyCall.args).toEqual([7n]);
+  });
+
+  it("refuses an unsafe number id rather than addressing the wrong task", async () => {
+    const { client, rpc } = testClient({ results: { get_task: PENDING_TASK } });
+
+    await expect(client.getTask(Number.MAX_SAFE_INTEGER + 2)).rejects.toThrow(
+      /safe integer range/,
+    );
+    expect(rpc.calls).toHaveLength(0);
+  });
+});
+
+describe("client.taskCount", () => {
+  it("reports the count as a number", async () => {
+    const { client, rpc } = testClient({ results: { task_count: 42n } });
+
+    const count = await client.taskCount();
+
+    expect(count).toBe(42);
+    expect(typeof count).toBe("number");
+    expect(rpc.onlyCall.method).toBe("task_count");
+  });
+
+  it("reports zero on a registry with no tasks yet", async () => {
+    const { client } = testClient({ results: { task_count: 0n } });
+
+    await expect(client.taskCount()).resolves.toBe(0);
+  });
+});
+
+describe("client.keeperBalance", () => {
+  it("returns an i128 balance as a bigint", async () => {
+    const { client, rpc } = testClient({ results: { keeper_balance: 12_500_000n } });
+
+    const balance = await client.keeperBalance(KEEPER);
+
+    expect(balance).toBe(12_500_000n);
+    expect(typeof balance).toBe("bigint");
+    expect(rpc.onlyCall.args).toEqual([KEEPER]);
+  });
+
+  it("returns 0n for an address that has never earned anything", async () => {
+    const { client } = testClient({ results: { keeper_balance: 0n } });
+
+    await expect(client.keeperBalance(KEEPER)).resolves.toBe(0n);
+  });
+
+  it("rejects a malformed address locally", async () => {
+    const { client, rpc } = testClient();
+
+    await expect(client.keeperBalance("not-an-address")).rejects.toThrow(/must be a Stellar/);
+    expect(rpc.calls).toHaveLength(0);
+  });
+});
+
+describe("client.isClaimable", () => {
+  it("reports a claimable task as true", async () => {
+    const { client, rpc } = testClient({ results: { is_claimable: true } });
+
+    await expect(client.isClaimable(1)).resolves.toBe(true);
+    expect(rpc.onlyCall.method).toBe("is_claimable");
+  });
+
+  it("treats a nonexistent id as not claimable rather than an error", async () => {
+    // Mirrors the contract's own is_claimable, which answers false rather
+    // than raising TaskNotFound -- unlike getTask.
+    const { client } = testClient({ results: { is_claimable: false } });
+
+    await expect(client.isClaimable(999)).resolves.toBe(false);
   });
 });

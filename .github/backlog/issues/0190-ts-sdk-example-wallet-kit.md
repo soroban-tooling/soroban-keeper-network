@@ -19,6 +19,11 @@ A small example (likely paired with the React example app from issue 0185, or st
 - [ ] Actually tested against a real wallet extension in a browser, not just reasoned about from the wallet's documented API.
 - [ ] Handles and documents the user-rejects-the-signature-request case explicitly, since that is a normal, expected outcome a dApp must handle gracefully.
 
+## Implementation Note
+
+The example relies on `client.buildTransaction(methodName, params)` implemented in issue 0170 to obtain the unsigned XDR and required `signers`, passes `unsignedXdr` to Freighter / Stellar Wallet Kit's `signTransaction()` method, and sends the returned `signedXdr` to `client.submitSignedTransaction(signedXdr)`.
+
 ## Files
 
 - packages/sdk-ts/examples/wallet-signing/
+

@@ -736,3 +736,4 @@ jobs:
             fi
           done
           echo "All required checks passed."
+

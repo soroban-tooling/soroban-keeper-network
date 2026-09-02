@@ -49,14 +49,45 @@ export {
   checkContractCompatibility,
   feesAccrued,
   getFeeBps,
+  getTask,
+  isClaimable,
   isPaused,
+  keeperBalance,
   minReward,
   rewardTokenAddress,
+  taskCount,
   version,
   type CompatibilityStatus,
   type ContractCompatibility,
   type VersionOptions,
 } from "./methods/views.js";
+
+export {
+  sweepFees,
+  transferAdmin,
+  upgrade,
+  type SweepFeesParams,
+  type TransferAdminParams,
+  type UpgradeParams,
+} from "./methods/adminDualAuth.js";
+
+export {
+  keypairAuthSigner,
+  signAuthEntries,
+  type AuthEntrySigner,
+} from "./core/auth.js";
+
+export {
+  pause,
+  setFeeBps,
+  setMinReward,
+  unpause,
+  type AdminCallParams,
+  type SetFeeBpsParams,
+  type SetMinRewardParams,
+} from "./methods/admin.js";
+
+export {
   tryWithdrawRewards,
   withdrawRewards,
   type WithdrawRewardsParams,
@@ -68,6 +99,25 @@ export {
   type ExecuteTaskParams,
   type ProofInput,
 } from "./methods/executeTask.js";
+export { registerTask, type RegisterTaskParams } from "./methods/registerTask.js";
+export { increaseReward, type IncreaseRewardParams } from "./methods/increaseReward.js";
+export {
+  claimTask,
+  type ClaimTaskOutcome,
+  type ClaimTaskParams,
+} from "./methods/claimTask.js";
+export {
+  cancelTask,
+  type CancelTaskOutcome,
+  type CancelTaskParams,
+} from "./methods/cancelTask.js";
+export { expireTask, type ExpireTaskParams } from "./methods/expireTask.js";
+export {
+  MAX_CALLDATA_LEN,
+  MAX_LOCK_LEDGERS,
+  MIN_LOCK_LEDGERS,
+  MIN_TTL_LEDGERS,
+} from "./constants.js";
 // Entry point for @soroban-keeper-network/sdk.
 //
 // This package began as a scaffold (backlog 0151 / epic E12) and now

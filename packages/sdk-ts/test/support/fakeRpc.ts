@@ -12,6 +12,7 @@
 
 import {
   Account,
+  Address,
   SorobanDataBuilder,
   nativeToScVal,
   rpc,
@@ -40,6 +41,13 @@ export interface FakeRpcOptions {
   onChainFailures?: Record<string, number>;
   /** Statuses returned by `getTransaction`, in order, before the final one. */
   pendingPolls?: number;
+  /**
+   * Addresses simulation reports as needing an explicit auth-entry signature,
+   * per entry point -- what a `require_auth` on a non-source address produces.
+   */
+  authRequiredBy?: Record<string, readonly string[]>;
+  /** Ledger sequence `getLatestLedger` reports. */
+  latestLedger?: number;
 }
 
 export class FakeRpc implements RpcServerLike {
@@ -55,6 +63,14 @@ export class FakeRpc implements RpcServerLike {
       throw new Error(`expected exactly one contract call, saw ${this.calls.length}`);
     }
     return this.calls[0] as RecordedCall;
+  }
+
+  async getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse> {
+    return {
+      id: "fake",
+      protocolVersion: 22,
+      sequence: this.options.latestLedger ?? 1_000,
+    };
   }
 
   async getAccount(address: string): Promise<Account> {
@@ -81,7 +97,12 @@ export class FakeRpc implements RpcServerLike {
       events: [],
       transactionData: new SorobanDataBuilder(),
       minResourceFee: "100",
-      result: { retval: toScVal(this.resultFor(call)), auth: [] },
+      result: {
+        retval: toScVal(this.resultFor(call)),
+        auth: (this.options.authRequiredBy?.[call.method] ?? []).map((address) =>
+          addressAuthEntry(address, call.method),
+        ),
+      },
     } as unknown as rpc.Api.SimulateTransactionResponse;
   }
 
@@ -185,6 +206,36 @@ function contractErrorEvent(code: number): xdr.DiagnosticEvent {
           data: xdr.ScVal.scvVoid(),
         }),
       ),
+    }),
+  });
+}
+
+/**
+ * An unsigned auth entry with address credentials -- the shape simulation
+ * returns for an address that must authorize separately from the source
+ * account. Built from real XDR types so `authorizeEntry` signs it for real.
+ */
+function addressAuthEntry(address: string, method: string): xdr.SorobanAuthorizationEntry {
+  return new xdr.SorobanAuthorizationEntry({
+    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+      new xdr.SorobanAddressCredentials({
+        address: new Address(address).toScAddress(),
+        nonce: xdr.Int64.fromString("12345"),
+        signatureExpirationLedger: 0,
+        signature: xdr.ScVal.scvVoid(),
+      }),
+    ),
+    rootInvocation: new xdr.SorobanAuthorizedInvocation({
+      function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+        new xdr.InvokeContractArgs({
+          contractAddress: new Address(
+            "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE",
+          ).toScAddress(),
+          functionName: method,
+          args: [],
+        }),
+      ),
+      subInvocations: [],
     }),
   });
 }
