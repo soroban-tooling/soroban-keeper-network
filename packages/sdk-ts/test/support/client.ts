@@ -12,6 +12,8 @@ export const OWNER_KEYPAIR = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 1));
 export const OWNER = OWNER_KEYPAIR.publicKey();
 export const KEEPER_KEYPAIR = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 2));
 export const KEEPER = KEEPER_KEYPAIR.publicKey();
+export const ADMIN_KEYPAIR = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 3));
+export const ADMIN = ADMIN_KEYPAIR.publicKey();
 
 /** Builds a client wired to a {@link FakeRpc}, returning both. */
 export function testClient(

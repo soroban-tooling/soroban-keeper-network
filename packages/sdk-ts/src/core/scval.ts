@@ -24,6 +24,17 @@ export function addressArg(value: string, label: string): xdr.ScVal {
   return new Address(value).toScVal();
 }
 
+/**
+ * Converts an `Option<Address>` argument.
+ *
+ * Soroban encodes `None` as void and `Some(x)` as `x` itself, so an omitted
+ * optional address is a real argument that must still be passed -- dropping it
+ * would shift every later positional argument.
+ */
+export function optionalAddressArg(value: string | undefined, label: string): xdr.ScVal {
+  return value === undefined ? xdr.ScVal.scvVoid() : addressArg(value, label);
+}
+
 /** Converts a `u64` argument, rejecting negatives and lossy `number` inputs. */
 export function u64Arg(value: IntegerInput, label: string): xdr.ScVal {
   const asBigInt = toBigInt(value, label);
@@ -60,4 +71,40 @@ export function toBigInt(value: IntegerInput, label: string): bigint {
     );
   }
   return BigInt(value);
+}
+
+/**
+ * Converts a `u32` argument.
+ *
+ * `u32` stays a plain `number` per the numeric convention, so this rejects a
+ * non-integer or out-of-range value rather than letting `nativeToScVal` coerce
+ * it -- a fee in basis points that silently wrapped would be a real loss.
+ */
+export function u32Arg(value: number, label: string): xdr.ScVal {
+  if (!Number.isInteger(value)) {
+    throw new KeeperSdkError(`${label} must be an integer, got ${value}.`);
+  }
+  if (value < 0 || value > 4_294_967_295) {
+    throw new KeeperSdkError(`${label} exceeds the contract's u32 range, got ${value}.`);
+  }
+  return nativeToScVal(value, { type: "u32" });
+}
+
+/** Converts an `i128` argument, accepting a `bigint` or a safe `number`. */
+export function i128Arg(value: IntegerInput, label: string): xdr.ScVal {
+  return nativeToScVal(toBigInt(value, label), { type: "i128" });
+}
+
+/**
+ * Converts a `BytesN<32>` argument -- a contract WASM hash.
+ *
+ * The length is checked here rather than left to the encoder: a hash of the
+ * wrong length otherwise surfaces as an opaque XDR failure well away from the
+ * argument that caused it.
+ */
+export function bytesN32Arg(value: Uint8Array, label: string): xdr.ScVal {
+  if (value.length !== 32) {
+    throw new KeeperSdkError(`${label} must be exactly 32 bytes, got ${value.length}.`);
+  }
+  return xdr.ScVal.scvBytes(Buffer.from(value));
 }

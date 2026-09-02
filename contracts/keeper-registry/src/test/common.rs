@@ -91,6 +91,7 @@ pub(crate) fn register_reward_task(s: &TestSetup, reward: i128) -> u64 {
         &deadline,
         &DEFAULT_TTL_LEDGERS,
         &120u32,
+        &None,
     )
 }
 
@@ -126,6 +127,7 @@ pub(crate) fn claim_with_lock(s: &TestSetup, keeper: &Address, lock_ledgers: u32
         &deadline,
         &DEFAULT_TTL_LEDGERS,
         &lock_ledgers,
+        &None,
     );
     s.registry.claim_task(keeper, &id);
     let claim_ledger = s.registry.get_task(&id).claim_ledger.unwrap();

@@ -154,6 +154,7 @@ contracts/keeper-registry/src/
 ├── batch.rs       batch_register_tasks, get_tasks, get_tasks_range
 ├── admin.rs       initialize, pause, fees, transfer_admin, upgrade, sweep
 ├── views.rs       read-only getters
+├── verifier.rs    IKeeperVerifier interface, KeeperVerifierClient
 ├── invariants.rs  shared invariant assertions (tests and fuzz targets)
 └── test/          one module per area, mirroring the list above
 ```
@@ -170,6 +171,7 @@ contracts/keeper-registry/src/
 | adding an event | `events.rs`, and update the README event table |
 | adding a helper used by more than one entry point | `internal.rs` as `pub(crate)` |
 | adding a test fixture used by more than one test module | `test/common.rs` as `pub(crate)` |
+| changing the verifier interface or how `execute_task` calls it | `verifier.rs` + `task.rs` + `test/verifier.rs`, and `docs/VERIFIER_DESIGN.md` |
 
 Two conventions worth following, both learned the hard way:
 

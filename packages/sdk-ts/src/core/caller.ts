@@ -11,6 +11,8 @@
 
 import type { xdr } from "@stellar/stellar-sdk";
 
+import type { AuthEntrySigner } from "./auth.js";
+
 /**
  * Signs a transaction on behalf of one account.
  *
@@ -51,6 +53,17 @@ export interface ContractCaller {
     args?: xdr.ScVal[];
     source: string;
     signer?: TransactionSigner;
+  }): Promise<T>;
+  /**
+   * {@link invoke}, plus signatures for auth entries requiring an address
+   * other than the source account. Needed only by `transfer_admin`.
+   */
+  invokeMultiAuth<T>(params: {
+    method: string;
+    args?: xdr.ScVal[];
+    source: string;
+    signer?: TransactionSigner;
+    authSigners: readonly AuthEntrySigner[];
   }): Promise<T>;
   /** Reports a non-fatal diagnostic without failing the call. */
   warn(message: string): void;

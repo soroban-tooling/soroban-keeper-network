@@ -1,11 +1,19 @@
-//! Per-event parsing and ingestion.
+//! Applying decoded events to the database.
 //!
-//! This is the single path from a raw RPC event to a stored row. Backfill and
-//! steady-state polling both call [`Ingestor::ingest_batch`]; neither has a
-//! parser of its own, so the two cannot drift as the event set evolves. The
-//! only thing that differs between them is the ledger range being walked.
+//! Split by the audience each group of events serves rather than by contract
+//! module: [`keepers`] answers "what has this keeper done", [`admin`] holds the
+//! governance audit trail. Each module takes the whole event stream and ignores
+//! what it does not own, so adding a group does not require the caller to learn
+//! a new routing rule.
 
+//! [`parse`] is the single path from a raw RPC event to a stored row. Backfill
+//! and steady-state polling both call [`Ingestor::ingest_batch`]; neither has a
+//! parser of its own, so the two cannot drift as the event set evolves.
+
+pub mod admin;
+pub mod keepers;
 pub mod parse;
+pub mod tasks;
 
 
 use anyhow::Result;

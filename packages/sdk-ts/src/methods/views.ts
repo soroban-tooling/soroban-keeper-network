@@ -11,6 +11,10 @@
 
 import { SUPPORTED_CONTRACT_VERSIONS } from "../constants.js";
 import type { ContractCaller } from "../core/caller.js";
+import type { IntegerInput } from "../core/scval.js";
+import { addressArg, u64Arg } from "../core/scval.js";
+import { KeeperContractError, KeeperErrorCode } from "../errors.js";
+import { type Task, TaskStatus, TaskType } from "../types.js";
 
 /**
  * The registry's admin address, or `undefined` if `initialize` has never run.
@@ -175,82 +179,116 @@ export async function version(
  */
 function optional(value: string | null | undefined): string | undefined {
   return value === null || value === undefined ? undefined : value;
-// Read-only view methods. Scoped here to just `getTask`, the one this
-// epic's assigned issues (React `useTask`/`useTaskEvents` hooks) actually
-// need — `taskCount`/`keeperBalance`/`isClaimable` are backlog 0163's
-// remaining scope, left for that issue's own implementation.
+}
 
-import { nativeToScVal } from "@stellar/stellar-sdk";
-
-import type { ContractInvoker } from "../core/contractInvoker";
-import { type Task, TaskStatus, TaskType } from "../types";
+// -- per-task and per-keeper views --------------------------------------------
 
 /**
- * Raw shape `scValToNative` produces for the contract's `Task` struct:
- * `soroban_sdk` maps Rust struct field symbols verbatim, so this comes back
- * snake_case (confirmed against `examples/keeper-bot/index.js`'s
- * `fullTask.task_type` access — a real, working call site, not assumed) —
- * `getTask` remaps it to the camelCase {@link Task} shape the rest of this
- * SDK uses. Optional fields absent on-chain (`claimer`, `claim_ledger` for
- * a still-`Pending` task) come back `undefined` from `scValToNative`'s
- * handling of Soroban's `Option<T>`, matching this interface directly.
+ * Raw shape `scValToNative` produces for the contract's `Task` struct.
+ *
+ * `soroban_sdk` maps Rust struct field symbols verbatim, so this arrives
+ * snake_case -- confirmed against a real call site, `examples/keeper-bot/
+ * index.js`'s `fullTask.task_type`, rather than assumed. {@link getTask}
+ * remaps it to the camelCase {@link Task} the rest of this SDK uses, per
+ * CONVENTIONS.md's struct-field rule, so no snake_case escapes this module.
+ *
+ * Fields absent on-chain (`claimer` and `claim_ledger` on a still-`Pending`
+ * task) arrive `undefined` from `scValToNative`'s `Option<T>` handling.
  */
 interface RawTask {
   owner: string;
-  task_type: number;
+  // The small integer fields are `u32`/`u64` on-chain. Which JS type
+  // `scValToNative` yields for them depends on the width the contract used,
+  // so they are widened here and narrowed once, in `toTask`, rather than
+  // cast blind at each use.
+  task_type: number | bigint;
   calldata: Uint8Array;
   reward: bigint;
-  deadline: bigint;
-  ttl_ledgers: number;
-  status: number;
-  claimer: string | undefined;
-  claim_ledger: number | undefined;
-  lock_ledgers: number;
+  deadline: number | bigint;
+  ttl_ledgers: number | bigint;
+  status: number | bigint;
+  claimer: string | null | undefined;
+  claim_ledger: number | bigint | null | undefined;
+  lock_ledgers: number | bigint;
 }
 
 function toTask(raw: RawTask): Task {
   return {
     owner: raw.owner,
-    taskType: raw.task_type as TaskType,
+    taskType: Number(raw.task_type) as TaskType,
     calldata: raw.calldata,
+    // `i128`, so bigint; `deadline`/`claim_ledger` are u64/u32, so number.
+    // See CONVENTIONS.md -- a Unix-seconds deadline is nowhere near
+    // Number.MAX_SAFE_INTEGER, and every call site here compares or
+    // Date-converts it.
     reward: raw.reward,
-    // CONVENTIONS.md: `deadline` is a `number` at this SDK's boundary even
-    // though the contract stores it as `u64` — a Unix-seconds timestamp is
-    // nowhere near `Number.MAX_SAFE_INTEGER`, and `number` is what every
-    // `Date`/polling call site in this epic (`useTask`, the wallet-signing
-    // example) actually wants.
     deadline: Number(raw.deadline),
-    ttlLedgers: raw.ttl_ledgers,
-    status: raw.status as TaskStatus,
-    claimer: raw.claimer,
-    claimLedger: raw.claim_ledger,
-    lockLedgers: raw.lock_ledgers,
+    ttlLedgers: Number(raw.ttl_ledgers),
+    status: Number(raw.status) as TaskStatus,
+    // `Option::None` decodes to `null`; the SDK surfaces one absent value.
+    claimer: optional(raw.claimer),
+    claimLedger: raw.claim_ledger == null ? undefined : Number(raw.claim_ledger),
+    lockLedgers: Number(raw.lock_ledgers),
   };
 }
 
 /**
- * Fetches one task by id. Throws (via the caller's decoded-error handling —
- * see `KeeperRegistryClient.getTask`) if the id has no on-chain record.
+ * Fetches one task by id.
  *
- * Read-only view methods take a `sourcePublicKey` because Soroban simulation
- * still requires a source account to exist on-chain (see
- * `ContractInvoker.read`'s doc comment) — any funded account works, it need
- * not be a specific caller's identity.
+ * A nonexistent id rejects rather than resolving to a nullish value: the
+ * contract answers `get_task` with `TaskNotFound`, which the client's error
+ * decoding surfaces as a {@link KeeperContractError} whose `code` is
+ * `KeeperErrorCode.TaskNotFound`. That matters because a caller writing
+ * `if (!task)` against a nullish result could not tell "no such task" from
+ * "a task whose fields all happen to be falsy".
  */
-export async function getTask(
-  invoker: ContractInvoker,
-  taskId: number,
-  readOnlySourceAccount: string | undefined,
-  sourcePublicKey?: string,
-): Promise<Task> {
-  const source = sourcePublicKey ?? readOnlySourceAccount;
-  if (!source) {
-    throw new Error(
-      "getTask requires a source account for simulation. Pass one explicitly " +
-        "(getTask(taskId, sourcePublicKey)) or configure " +
-        "KeeperRegistryClientConfig.readOnlySourceAccount — see CONVENTIONS.md.",
+export async function getTask(caller: ContractCaller, taskId: IntegerInput): Promise<Task> {
+  const raw = await caller.read<RawTask | null | undefined>("get_task", [
+    u64Arg(taskId, "taskId"),
+  ]);
+
+  // A contract that answered with void rather than an error is not this
+  // contract's ABI; reporting it as a task with undefined fields would push
+  // the failure somewhere far less obvious.
+  if (raw === null || raw === undefined) {
+    throw new KeeperContractError(
+      KeeperErrorCode.TaskNotFound,
+      `get_task returned no task for id ${taskId}.`,
+      { local: true },
     );
   }
-  const raw = await invoker.read<RawTask>(source, "get_task", [nativeToScVal(taskId, { type: "u64" })]);
   return toTask(raw);
+}
+
+/**
+ * How many tasks have ever been registered.
+ *
+ * `u64`, so a plain `number` per the numeric convention -- a task counter is
+ * astronomically far from `Number.MAX_SAFE_INTEGER`.
+ */
+export async function taskCount(caller: ContractCaller): Promise<number> {
+  return Number(await caller.read<number | bigint>("task_count"));
+}
+
+/**
+ * A keeper's withdrawable reward balance, in the reward token's own units.
+ *
+ * `i128`, so `bigint`. An address that has never earned anything is `0n`
+ * rather than an error -- the contract treats an unknown keeper as a keeper
+ * with no balance.
+ */
+export async function keeperBalance(caller: ContractCaller, keeper: string): Promise<bigint> {
+  return BigInt(await caller.read<bigint | number>("keeper_balance", [addressArg(keeper, "keeper")]));
+}
+
+/**
+ * Whether a task can be claimed right now.
+ *
+ * Unlike {@link getTask}, a nonexistent id resolves to `false` rather than
+ * rejecting. That mirrors the contract's own `is_claimable`, which treats "no
+ * such task" as simply one more reason a task cannot be claimed; a predicate
+ * that threw for one of its false cases would be surprising to branch on.
+ */
+export async function isClaimable(caller: ContractCaller, taskId: IntegerInput): Promise<boolean> {
+  return Boolean(await caller.read<boolean>("is_claimable", [u64Arg(taskId, "taskId")]));
 }

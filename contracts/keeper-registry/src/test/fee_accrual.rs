@@ -10,10 +10,7 @@
 //! remains Claimed, the keeper balance is untouched, and fees_accrued is
 //! completely unchanged.
 
-use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    token, Address, Bytes, Env,
-};
+use soroban_sdk::{testutils::Address as _, Address, Bytes};
 
 use super::common::*;
 use crate::{split_reward, KeeperError, TaskStatus};
@@ -55,7 +52,10 @@ fn test_fee_accrued_on_successful_execution() {
     assert_eq!(fees_after, 30_000i128);
 
     // State changed — this is the success case
-    assert!(fees_after > fees_before, "fees_accrued must increase on successful execution");
+    assert!(
+        fees_after > fees_before,
+        "fees_accrued must increase on successful execution"
+    );
     assert!(
         keeper_balance_after > keeper_balance_before,
         "keeper balance must increase on successful execution"
@@ -98,7 +98,9 @@ fn test_fees_unchanged_when_execution_rejected_invalid_status() {
     let keeper_balance_before = s.registry.keeper_balance(&keeper);
 
     // This should fail with InvalidTaskStatus.
-    let result = s.registry.try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"x"));
+    let result = s
+        .registry
+        .try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"x"));
     assert_eq!(result, Err(Ok(KeeperError::InvalidTaskStatus)));
 
     let fees_after = s.registry.fees_accrued();
@@ -139,11 +141,9 @@ fn test_fees_unchanged_when_wrong_keeper_executes() {
     let different_keeper_balance_before = s.registry.keeper_balance(&different_keeper);
 
     // Different keeper tries to execute — should fail with NotTaskClaimer
-    let result = s.registry.try_execute_task(
-        &different_keeper,
-        &id,
-        &Bytes::from_slice(&s.env, b"proof"),
-    );
+    let result =
+        s.registry
+            .try_execute_task(&different_keeper, &id, &Bytes::from_slice(&s.env, b"proof"));
     assert_eq!(result, Err(Ok(KeeperError::NotTaskClaimer)));
 
     let fees_after = s.registry.fees_accrued();
@@ -151,7 +151,10 @@ fn test_fees_unchanged_when_wrong_keeper_executes() {
     let different_keeper_balance_after = s.registry.keeper_balance(&different_keeper);
 
     // CRITICAL: No state changes must persist
-    assert_eq!(fees_before, fees_after, "fees_accrued must not change when NotTaskClaimer");
+    assert_eq!(
+        fees_before, fees_after,
+        "fees_accrued must not change when NotTaskClaimer"
+    );
     assert_eq!(
         claiming_keeper_balance_before, claiming_keeper_balance_after,
         "claiming keeper balance must not change"
@@ -183,15 +186,17 @@ fn test_fees_unchanged_when_proof_too_large() {
 
     // Create a proof that exceeds MAX_PROOF_LEN
     let oversized_proof = Bytes::from_slice(&s.env, &[0u8; (crate::MAX_PROOF_LEN + 1) as usize]);
-    let result =
-        s.registry.try_execute_task(&keeper, &id, &oversized_proof);
+    let result = s.registry.try_execute_task(&keeper, &id, &oversized_proof);
     assert_eq!(result, Err(Ok(KeeperError::ProofTooLarge)));
 
     let fees_after = s.registry.fees_accrued();
     let keeper_balance_after = s.registry.keeper_balance(&keeper);
 
     // CRITICAL: No state changes must persist
-    assert_eq!(fees_before, fees_after, "fees_accrued must not change when ProofTooLarge");
+    assert_eq!(
+        fees_before, fees_after,
+        "fees_accrued must not change when ProofTooLarge"
+    );
     assert_eq!(
         keeper_balance_before, keeper_balance_after,
         "keeper balance must not change when ProofTooLarge"
@@ -220,7 +225,9 @@ fn test_fees_unchanged_when_execution_past_deadline() {
     advance(&s.env, 1, 3_601);
 
     // Execution should fail with DeadlinePassed
-    let result = s.registry.try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof"));
+    let result = s
+        .registry
+        .try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof"));
     assert_eq!(result, Err(Ok(KeeperError::DeadlinePassed)));
 
     let fees_after = s.registry.fees_accrued();
@@ -262,13 +269,17 @@ fn test_repeated_failed_execution_leaves_fees_unchanged() {
     let snapshot_1 = s.registry.fees_accrued();
 
     // First failed attempt
-    let result_1 = s.registry.try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"x"));
+    let result_1 = s
+        .registry
+        .try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"x"));
     assert_eq!(result_1, Err(Ok(KeeperError::InvalidTaskStatus)));
 
     let snapshot_2 = s.registry.fees_accrued();
 
     // Second failed attempt (same reason)
-    let result_2 = s.registry.try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"y"));
+    let result_2 = s
+        .registry
+        .try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"y"));
     assert_eq!(result_2, Err(Ok(KeeperError::InvalidTaskStatus)));
 
     let snapshot_3 = s.registry.fees_accrued();
@@ -311,7 +322,9 @@ fn test_execute_twice_second_attempt_does_not_accrue_fee() {
     assert_eq!(s.registry.get_task(&id).status, TaskStatus::Executed);
 
     // Second execution attempt should fail because task is no longer Claimed
-    let result = s.registry.try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof2"));
+    let result = s
+        .registry
+        .try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof2"));
     assert_eq!(result, Err(Ok(KeeperError::InvalidTaskStatus)));
 
     let fees_after_second_attempt = s.registry.fees_accrued();
@@ -397,9 +410,9 @@ fn test_fee_accrual_with_mixed_success_and_failure() {
     let fees_after_task1 = s.registry.fees_accrued();
 
     // Task 2: keeper2 attempts to execute but task is still Pending (hasn't claimed)
-    let result = s
-        .registry
-        .try_execute_task(&keeper2, &task2, &Bytes::from_slice(&s.env, b"proof2"));
+    let result =
+        s.registry
+            .try_execute_task(&keeper2, &task2, &Bytes::from_slice(&s.env, b"proof2"));
     assert_eq!(result, Err(Ok(KeeperError::InvalidTaskStatus)));
 
     let fees_after_task2_attempt = s.registry.fees_accrued();
@@ -438,7 +451,7 @@ fn test_fee_accrual_zero_fee_dust_threshold() {
     let id = register_reward_task(&s, small_reward);
 
     let fees_before = s.registry.fees_accrued();
-    let keeper_balance_before = s.registry.keeper_balance(&keeper);
+    let _keeper_balance_before = s.registry.keeper_balance(&keeper);
 
     s.registry.claim_task(&keeper, &id);
     s.registry
