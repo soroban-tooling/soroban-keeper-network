@@ -6,16 +6,14 @@
 //! what it does not own, so adding a group does not require the caller to learn
 //! a new routing rule.
 
+//! [`parse`] is the single path from a raw RPC event to a stored row. Backfill
+//! and steady-state polling both call [`Ingestor::ingest_batch`]; neither has a
+//! parser of its own, so the two cannot drift as the event set evolves.
+
 pub mod admin;
 pub mod keepers;
-//! Per-event parsing and ingestion.
-//!
-//! This is the single path from a raw RPC event to a stored row. Backfill and
-//! steady-state polling both call [`Ingestor::ingest_batch`]; neither has a
-//! parser of its own, so the two cannot drift as the event set evolves. The
-//! only thing that differs between them is the ledger range being walked.
-
 pub mod parse;
+pub mod tasks;
 
 use anyhow::Result;
 use tokio::sync::broadcast;

@@ -30,6 +30,7 @@ fn test_pause_blocks_registration_but_allows_withdraw() {
             &(s.env.ledger().timestamp() + 3_600),
             &DEFAULT_TTL_LEDGERS,
             &60u32,
+            &None,
         ),
         Err(Ok(KeeperError::ContractPaused))
     );
@@ -109,6 +110,7 @@ fn test_pause_policy_matrix_entry_point_by_entry_point() {
         &(s.env.ledger().timestamp() + 100),
         &DEFAULT_TTL_LEDGERS,
         &120u32,
+        &None,
     );
 
     let claimed_keeper = Address::generate(&s.env);
@@ -133,6 +135,7 @@ fn test_pause_policy_matrix_entry_point_by_entry_point() {
             &(s.env.ledger().timestamp() + 3_600),
             &DEFAULT_TTL_LEDGERS,
             &60u32,
+            &None,
         ),
         Err(Ok(KeeperError::ContractPaused))
     );
@@ -300,6 +303,7 @@ fn test_set_min_reward_rejects_below_floor() {
             &(s.env.ledger().timestamp() + 3_600),
             &DEFAULT_TTL_LEDGERS,
             &60u32,
+            &None,
         ),
         Err(Ok(KeeperError::InvalidReward))
     );
@@ -312,6 +316,7 @@ fn test_set_min_reward_rejects_below_floor() {
         &(s.env.ledger().timestamp() + 3_600),
         &DEFAULT_TTL_LEDGERS,
         &60u32,
+        &None,
     );
     assert_eq!(id, 1u64);
 }

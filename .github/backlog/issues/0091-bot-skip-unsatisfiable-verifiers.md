@@ -8,11 +8,11 @@ depends_on: [0090, 0076]
 
 ## Summary
 
-Companion to wave 1's profitability check (issue 0041/0035) and to 0090: a bot should not claim a task it has no way to produce an acceptable proof for, or whose verifier's resource cost (per 0076's findings) would make execution unprofitable even if the base reward looks attractive.
+Companion to wave 1's profitability check (issue 0035) and to 0090: a bot should not claim a task it has no way to produce an acceptable proof for, or whose verifier's resource cost (per 0076's findings) would make execution unprofitable even if the base reward looks attractive.
 
 ## Expected behaviour
 
-Before claiming, the bot checks (in order): does it have a proof-generation strategy registered for this task's verifier kind (per 0090's extension point)? If not, skip. If yes, does simulating the eventual `execute_task` call (including the verifier's cost) still clear the profitability threshold from wave 1's issue 0041? If not, skip.
+Before claiming, the bot checks (in order): does it have a proof-generation strategy registered for this task's verifier kind (per 0090's extension point)? If not, skip. If yes, does simulating the eventual `execute_task` call (including the verifier's cost) still clear the profitability threshold from wave 1's issue 0035? If not, skip.
 
 ## Suggested approach
 

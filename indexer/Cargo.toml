@@ -3,24 +3,19 @@ name = "keeper-indexer"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Off-chain event indexer for the keeper registry contract"
-
-[dependencies]
-tokio = { workspace = true }
-tokio-postgres = { workspace = true }
-thiserror = { workspace = true }
-
-[dev-dependencies]
-tokio = { workspace = true }
-description = "Event indexer for the Soroban keeper registry contract"
-license = "Apache-2.0"
 publish = false
+description = "Event indexer for the keeper-registry contract (epic E14, docs/INDEXER_DESIGN.md)"
 
 [dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-postgres = "0.7"
+thiserror = "2"
 anyhow = "1.0"
 axum = { version = "0.8", features = ["ws"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 futures = "0.3"
+hex = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
@@ -30,8 +25,10 @@ sqlx = { version = "0.8", default-features = false, features = [
     "macros",
     "migrate",
 ] }
-thiserror = "2.0"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+# Matches the soroban-sdk version keeper-registry pins, so both crates decode
+# the same ScVal shapes. `base64` unlocks ScVal::from_xdr_base64.
+stellar-strkey = "0.0.9"
+stellar-xdr = { version = "22.1.0", features = ["base64"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

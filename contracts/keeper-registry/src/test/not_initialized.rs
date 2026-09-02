@@ -32,6 +32,7 @@ fn test_register_task_before_init_fails() {
             &(env.ledger().timestamp() + 3_600),
             &DEFAULT_TTL_LEDGERS,
             &120u32,
+            &None,
         ),
         Err(Ok(KeeperError::NotInitialized))
     );
