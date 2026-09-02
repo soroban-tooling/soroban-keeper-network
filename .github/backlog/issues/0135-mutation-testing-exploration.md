@@ -8,7 +8,7 @@ depends_on: []
 
 ## Summary
 
-Coverage percentage (issue 0030/0137's cargo-llvm-cov work) tells you which lines ran during the test suite, not whether the assertions would actually catch a bug in those lines. Mutation testing -- deliberately introducing small bugs (flipping a comparison operator, changing a constant) and checking whether the test suite fails -- answers the question coverage cannot. This issue is an evaluation, not a commitment: is a mutation-testing tool practical for a #![no_std] Soroban contract crate, and if so, is running it worth the (typically very high) CI time cost.
+Coverage percentage (issue 0030's cargo-llvm-cov work) tells you which lines ran during the test suite, not whether the assertions would actually catch a bug in those lines. Mutation testing -- deliberately introducing small bugs (flipping a comparison operator, changing a constant) and checking whether the test suite fails -- answers the question coverage cannot. This issue is an evaluation, not a commitment: is a mutation-testing tool practical for a #![no_std] Soroban contract crate, and if so, is running it worth the (typically very high) CI time cost.
 
 ## Expected behaviour
 

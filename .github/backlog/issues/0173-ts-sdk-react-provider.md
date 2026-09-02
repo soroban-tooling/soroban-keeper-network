@@ -20,7 +20,12 @@ A separate entry point (`@soroban-keeper-network/sdk/react`, so consumers who do
 - [ ] `useKeeperRegistryClient()` outside the provider throws a clear, actionable error rather than `undefined` silently propagating into a later crash.
 - [ ] A minimal test using React Testing Library confirms the provider/hook pair works.
 
+## Notes on Wallet Integration Pattern
+
+As defined in issue 0170 (`transactionBuilder.ts`), browser React hooks should use `client.buildTransaction(methodName, params)` to obtain unsigned XDR + required `signers`, pass the XDR to the user's connected wallet hook for signing, and call `client.submitSignedTransaction(signedXdr)` to submit. The SDK never requires private keys in browser applications.
+
 ## Files
 
 - packages/sdk-ts/src/react/provider.tsx
 - packages/sdk-ts/src/react/index.ts
+

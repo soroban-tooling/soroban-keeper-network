@@ -10,14 +10,18 @@
 //! rather than the prefix being retrofitted after something has already broken.
 
 pub mod auth;
+pub mod rate_limit;
 pub mod rest;
 pub mod types;
 pub mod websocket;
+
+use std::sync::Arc;
 
 use axum::Router;
 use utoipa::OpenApi;
 
 use crate::ingest::Ingestor;
+use rate_limit::RateLimiter;
 
 /// Shared state every handler reads from.
 #[derive(Clone)]
@@ -68,12 +72,19 @@ pub struct ApiState {
 )]
 pub struct ApiDoc;
 
-/// Build the API router.
-pub fn router(state: ApiState) -> Router {
+/// Build the API router, rate limited per client (by `X-API-Key`, else IP)
+/// on both REST routes and the WebSocket upgrade.
+pub fn router(state: ApiState, rate_limit_per_second: u32, rate_limit_burst: u32) -> Router {
+    let limiter = Arc::new(RateLimiter::new(rate_limit_per_second, rate_limit_burst));
+
     Router::new()
         .nest("/v1", rest::routes())
         .route("/v1/stream", axum::routing::get(websocket::subscribe))
         .with_state(state)
+        .layer(axum::middleware::from_fn_with_state(
+            limiter,
+            rate_limit::enforce,
+        ))
 }
 
 /// Render the OpenAPI document as YAML.
