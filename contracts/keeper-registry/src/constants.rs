@@ -65,7 +65,12 @@ pub(crate) const KEEPER_BALANCE_BUMP_THRESHOLD: u32 = 50_000;
 ///   `max_batch_size` entry points, the [`BatchTaskParams`] type, and the
 ///   `BatchTooLarge` / `EmptyBatch` / `BatchRewardCeilingExceeded` error
 ///   variants.
-pub const VERSION: u32 = 3;
+/// - `4` — optional on-chain proof verifier: `register_task`'s new
+///   `verifier: Option<Address>` parameter, the `IKeeperVerifier` interface
+///   `execute_task` calls before crediting the keeper, and the
+///   `VerificationFailed` error / `TaskVerificationFailed` event. See
+///   `docs/VERIFIER_DESIGN.md`.
+pub const VERSION: u32 = 4;
 
 /// Maximum `calldata` length, in bytes. Sized to hold an encoded contract
 /// call — a target address, a function symbol, and a handful of scalar or

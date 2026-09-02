@@ -122,3 +122,44 @@ Add the contract to a block explorer link for your application:
 ```
 https://stellar.expert/explorer/testnet/contract/<CONTRACT_ID>
 ```
+
+## Publishing the TypeScript SDK
+
+`packages/sdk-ts` (`@soroban-keeper-network/sdk`) publishes to npm
+independently of the contract's own `vX.Y.Z` releases above — it has its
+own tag namespace and its own workflow
+(`.github/workflows/sdk-ts-publish.yml`), so a contract release never
+triggers an npm publish and an SDK publish never tags a contract release.
+
+1. **Bump the version** in `packages/sdk-ts/package.json`.
+2. **Commit and tag it** as `sdk-ts-v<version>`, matching the bumped
+   version exactly — the workflow verifies this and fails the publish
+   otherwise:
+   ```sh
+   git commit -am "chore(sdk-ts): bump to 0.2.0"
+   git tag -a sdk-ts-v0.2.0 -m "sdk-ts v0.2.0"
+   git push origin main sdk-ts-v0.2.0
+   ```
+3. The workflow runs on that tag push: installs, runs the full unit test
+   suite and lint as a hard gate, builds, smoke-tests the built package
+   by type-checking `examples/node-signing` against `dist/` (not
+   source — this is what actually proves the published API works for a
+   real consumer), then publishes with npm's
+   [provenance](https://docs.npmjs.com/generating-provenance-statements)
+   attached.
+4. It never runs on an ordinary merge to `main` — only on a
+   `sdk-ts-v*.*.*` tag push, or manually via `workflow_dispatch` for an
+   existing tag.
+
+**One-time setup for whoever configures repository secrets:** create an
+npm [granular access
+token](https://docs.npmjs.com/creating-and-viewing-access-tokens#creating-granular-access-tokens)
+scoped to **only** the `@soroban-keeper-network/sdk` package with
+publish permission (not a personal account token, and not one scoped to
+the whole npm account/org) — automation tokens can also be restricted to
+never expire without triggering npm's normal login re-auth prompts, but
+prefer a token with an expiry you rotate over one that doesn't, and
+revoke it immediately if this workflow or its secret is ever suspected
+compromised. Add it as the `SDK_TS_NPM_TOKEN` secret on the repository's
+`npm-publish` GitHub Environment (not a plain repository secret) so it's
+protected by that environment's own review/approval rules.

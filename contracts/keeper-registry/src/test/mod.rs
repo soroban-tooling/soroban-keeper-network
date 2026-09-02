@@ -13,6 +13,7 @@ mod claim;
 mod common;
 mod events;
 mod expire;
+mod fee_accrual;
 mod integration;
 mod not_initialized;
 mod perf;
@@ -22,4 +23,6 @@ mod register;
 mod resource_report;
 mod reward_split;
 mod ttl;
+mod verifier;
 mod withdraw;
+

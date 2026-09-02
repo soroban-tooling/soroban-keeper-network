@@ -3,85 +3,33 @@
 use soroban_sdk::{testutils::Address as _, token, Address, Env};
 
 use super::common::*;
+use crate::mocks::{
+    ReentrantToken, ReentrantTokenClient, POINT_AFTER_BALANCE_UPDATE, TARGET_EXPIRE_TASK,
+};
 use crate::{KeeperError, KeeperRegistry, KeeperRegistryClient, TaskStatus, TaskType};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Re-entrancy regression: expire_task
 //
-// A minimal token contract whose `transfer` re-enters `expire_task` for the
-// same task_id mid-transfer, simulating a malicious or buggy reward token.
+// A malicious or buggy reward token whose `transfer` re-enters `expire_task`
+// for the same task_id mid-transfer.
 //
 // In practice Soroban's host already refuses to re-invoke a contract that is
 // still on the call stack, so the nested call below is rejected by the host
 // itself rather than reaching our `InvalidTaskStatus` guard — see the
-// `reentrant_code` assertion. That host protection is not something this
+// `reentry_error_code` assertion. That host protection is not something this
 // contract can rely on as its only line of defense (it is a platform detail,
 // not a documented guarantee of this contract's ABI), so the
 // checks-effects-interactions fix still matters: this test's real assertion
 // is that no matter why the second attempt was rejected, it never reaches a
 // second `transfer`, so the refund is paid exactly once.
+//
+// Uses the shared, configurable `ReentrantToken` mock (`crate::mocks`, issue
+// #203) rather than a bespoke contract hand-written in this file — armed for
+// `TARGET_EXPIRE_TASK` at `POINT_AFTER_BALANCE_UPDATE`, matching the exact
+// scenario this test always proved (the re-entrant call fires after the
+// refund transfer's own balance update completes).
 // ─────────────────────────────────────────────────────────────────────────────
-
-mod reentrant_token_expire {
-    use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env};
-
-    use crate::KeeperRegistryClient;
-
-    #[contract]
-    pub struct ExpireReentrantToken;
-
-    #[contractimpl]
-    impl ExpireReentrantToken {
-        pub fn set_balance(e: Env, id: Address, amount: i128) {
-            e.storage().persistent().set(&id, &amount);
-        }
-
-        pub fn balance(e: Env, id: Address) -> i128 {
-            e.storage().persistent().get(&id).unwrap_or(0i128)
-        }
-
-        /// Arms the re-entrancy: once set, every subsequent `transfer` will
-        /// attempt to call `expire_task(task_id)` on `registry` again.
-        pub fn arm(e: Env, registry: Address, task_id: u64) {
-            e.storage().instance().set(&symbol_short!("REG"), &registry);
-            e.storage().instance().set(&symbol_short!("TID"), &task_id);
-        }
-
-        /// The numeric code of the re-entrant call's result, for the test to
-        /// inspect: `InvalidTaskStatus as u32` on the expected rejection.
-        pub fn reentrant_code(e: Env) -> u32 {
-            e.storage()
-                .instance()
-                .get(&symbol_short!("RCODE"))
-                .unwrap_or(u32::MAX)
-        }
-
-        pub fn transfer(e: Env, from: Address, to: Address, amount: i128) {
-            let from_bal: i128 = e.storage().persistent().get(&from).unwrap_or(0i128);
-            e.storage().persistent().set(&from, &(from_bal - amount));
-            let to_bal: i128 = e.storage().persistent().get(&to).unwrap_or(0i128);
-            e.storage().persistent().set(&to, &(to_bal + amount));
-
-            if let Some(registry) = e
-                .storage()
-                .instance()
-                .get::<_, Address>(&symbol_short!("REG"))
-            {
-                let task_id: u64 = e.storage().instance().get(&symbol_short!("TID")).unwrap();
-                let client = KeeperRegistryClient::new(&e, &registry);
-                let code = match client.try_expire_task(&task_id) {
-                    Err(Ok(other)) => other as u32,
-                    Ok(Ok(())) => 0u32,
-                    Ok(Err(_)) => 111u32,
-                    Err(Err(_)) => 222u32,
-                };
-                e.storage().instance().set(&symbol_short!("RCODE"), &code);
-            }
-        }
-    }
-}
-
-use reentrant_token_expire::{ExpireReentrantToken, ExpireReentrantTokenClient};
 
 #[test]
 fn test_expire_task_reentrancy_pays_refund_exactly_once() {
@@ -89,9 +37,9 @@ fn test_expire_task_reentrancy_pays_refund_exactly_once() {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let token_id = env.register(ExpireReentrantToken, ());
-    let token = ExpireReentrantTokenClient::new(&env, &token_id);
-    token.set_balance(&admin, &5_000_000i128);
+    let token_id = env.register(ReentrantToken, ());
+    let token = ReentrantTokenClient::new(&env, &token_id);
+    token.mint(&admin, &5_000_000i128);
 
     let registry_id = env.register(KeeperRegistry, ());
     let registry = KeeperRegistryClient::new(&env, &registry_id);
@@ -106,24 +54,33 @@ fn test_expire_task_reentrancy_pays_refund_exactly_once() {
         &deadline,
         &DEFAULT_TTL_LEDGERS,
         &120u32,
+        &None,
     );
     assert_eq!(token.balance(&admin), 4_000_000i128); // escrowed
     assert_eq!(token.balance(&registry_id), 1_000_000i128);
 
     // Arm the token only now, so the escrow transfer above isn't itself
-    // treated as a re-entrant call.
-    token.arm(&registry_id, &task_id);
+    // treated as a re-entrant call. The refund transfer targets `admin`, so
+    // that's the trigger address.
+    token.arm(
+        &registry_id,
+        &admin,
+        &TARGET_EXPIRE_TASK,
+        &POINT_AFTER_BALANCE_UPDATE,
+        &admin,
+        &task_id,
+        &admin, // keeper arg unused for this target
+    );
 
     advance(&env, 1, 3_601); // past deadline
     registry.expire_task(&task_id);
 
-    // The nested call never succeeded (`Ok(Ok(()))` would be code 0) — either
-    // rejected by our own guard with InvalidTaskStatus, or by the host's
-    // built-in reentrancy protection. Either way it never ran a second
-    // transfer.
-    let code = token.reentrant_code();
-    assert_ne!(
-        code, 0u32,
+    // The nested call never succeeded — either rejected by our own guard
+    // with InvalidTaskStatus, or by the host's built-in reentrancy
+    // protection. Either way it never ran a second transfer.
+    assert!(token.reentry_fired());
+    assert!(
+        !token.reentry_succeeded(),
         "the re-entrant expire_task call must not succeed"
     );
 

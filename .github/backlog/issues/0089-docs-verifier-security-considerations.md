@@ -16,7 +16,7 @@ A security-considerations section (in `docs/VERIFIER_DESIGN.md` or a dedicated d
 - The griefing vector 0082 protects against, and why the protection is scoped the way it is.
 - The panic-isolation findings from 0075 and what they mean for a keeper's risk when claiming a verifier-gated task.
 - The resource-budget cost transfer from 0076 — a keeper claiming a verifier-gated task is trusting the owner didn't attach something abusively expensive.
-- Whether a malicious verifier could ever be used to *steal* funds (as opposed to merely griefing availability) — walk through the call sequence in `execute_task` and confirm the verifier call happens with no ability to reenter and no access to move funds itself, given it's called before the reward-crediting step.
+- Whether a malicious verifier could ever be used to *steal* funds (as opposed to merely griefing availability) — **see I-8 in `docs/ARCHITECTURE.md`** for the authoritative statement. I-8 walks through the call sequence in `execute_task` and confirms the verifier call happens with no ability to reenter and no access to move funds itself, given it's called before the reward-crediting step.
 
 ## Acceptance criteria
 

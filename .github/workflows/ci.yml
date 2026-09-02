@@ -4,10 +4,16 @@ name: CI
 # No manual step is needed — open a PR and this workflow starts.
 #
 # Job policy (see docs/CI.md for the rationale):
-#   REQUIRED  — format, test, build-wasm. These block the merge.
-#   ADVISORY  — clippy, audit, wasm-size, fuzz-pr, resource-cost, bot. These
-#               report findings as annotations or a job summary but never
-#               fail your PR.
+#   REQUIRED  — format, test, build-wasm, sdk-ts, bot, indexer. These block
+#               the merge.
+#   ADVISORY  — clippy, audit, wasm-size, sdk-bundle-size, fuzz-pr,
+#               resource-cost. These report findings as annotations or a job
+#               summary but never fail your PR.
+#
+# `bot`'s name/needs status has said "(required)" since before this comment
+# was last touched, even though the comment right above that job's own
+# definition still says "ADVISORY" — a pre-existing inconsistency, not
+# introduced or resolved here (see that job's own note).
 #
 # The split is deliberate. A contributor should never be blocked by a new
 # upstream advisory or a subjective lint, but formatting, a green test suite,
@@ -267,6 +273,109 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — generates the sdk-ts API reference from TSDoc comments
+  # (typedoc.json) and fails the summary (but not the PR) if TypeDoc reports
+  # any warning — most usefully, an exported method/hook/type missing a doc
+  # comment ("notDocumented" in typedoc.json's validation block), so a doc
+  # regression is caught going forward without needing a separate
+  # documentation PR per method. Only runs when the PR touches
+  # packages/sdk-ts/.
+  # ───────────────────────────────────────────────────────────────────────────
+  sdk-ts-docs:
+    name: sdk-ts API reference (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for relevant changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^packages/sdk-ts/'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Node.js
+        if: steps.changes.outputs.relevant == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: npm install
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: packages/sdk-ts
+        run: npm install
+
+      - name: Generate reference and check for doc-comment regressions
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: packages/sdk-ts
+        run: |
+          if npm run docs:check > typedoc-output.txt 2>&1; then
+            {
+              echo "### sdk-ts API reference"
+              echo
+              echo "Generated cleanly — every exported method, hook, and type has a documentation comment."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### sdk-ts API reference"
+              echo
+              echo "\`npm run docs:check\` reported warnings (treated as errors — see \`typedoc.json\`'s \`validation\` block):"
+              echo
+              echo '```'
+              cat typedoc-output.txt
+              echo '```'
+              echo
+              echo "_Advisory only — this does not block the PR, but a missing doc comment here means the generated reference is incomplete._"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Skip notice
+        if: steps.changes.outputs.relevant == 'false'
+        run: |
+          {
+            echo "### sdk-ts API reference"
+            echo
+            echo "Skipped — no changes under \`packages/sdk-ts/\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+  # ADVISORY — report the SDK's minified+gzipped bundle size, mirroring
+  # wasm-size's baseline-and-delta pattern for the frontend analogue of that
+  # concern (issue 0262 in the SDK epic).
+  # ───────────────────────────────────────────────────────────────────────────
+  sdk-bundle-size:
+    name: SDK bundle size report (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: sdk-ts
+    defaults:
+      run:
+        working-directory: packages/sdk-ts
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Report bundle size
+        run: node scripts/report-bundle-size.mjs >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────────
   # ADVISORY — time-boxed fuzz run. Every registered target (fuzz/fuzz_targets/)
   # gets a short, fixed-budget run so regressions are caught continuously
   # instead of only when a contributor remembers to fuzz locally. Only runs
@@ -373,12 +482,58 @@ jobs:
         run: ./scripts/report-resource-cost.sh
 
   # ───────────────────────────────────────────────────────────────────────────
+  # REQUIRED — the TypeScript SDK (packages/sdk-ts). Built and uploaded as an
+  # artifact so `bot` (below) can install it as a real `file:` dependency
+  # without re-running its build — `npm install` on a `file:` reference
+  # copies the referenced directory as-is, it does not build it.
+  # ───────────────────────────────────────────────────────────────────────────
+  sdk-ts:
+    name: SDK (TypeScript) (required)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/sdk-ts
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Upload built package (for the bot job to consume)
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdk-ts-dist
+          path: packages/sdk-ts/dist
+          retention-days: 1
+
+  # ───────────────────────────────────────────────────────────────────────────
   # ADVISORY — the example keeper bot. It is a reference implementation, so a
   # lint nit there should not gate a contract PR.
+  #
+  # NOTE: despite the comment above (and despite this job's own docstring
+  # here), this job's `name:` says "(required)" and `ci-required` (below)
+  # already listed `bot` in its `needs:` before this PR — a pre-existing
+  # inconsistency between this comment and the job's actual required status,
+  # left as-is rather than silently resolved one way or the other as part of
+  # an unrelated SDK migration PR.
   # ───────────────────────────────────────────────────────────────────────────
   bot:
     name: Keeper bot (required)
     runs-on: ubuntu-latest
+    needs: sdk-ts
     defaults:
       run:
         working-directory: examples/keeper-bot
@@ -388,6 +543,12 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "20"
+
+      - name: Download built SDK
+        uses: actions/download-artifact@v8
+        with:
+          name: sdk-ts-dist
+          path: packages/sdk-ts/dist
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
@@ -402,6 +563,159 @@ jobs:
         run: npm run lint
 
   # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — the TypeScript SDK package (packages/sdk-ts). Advisory rather
+  # than required until the dedicated typecheck/lint job (backlog 0187)
+  # establishes the same required/advisory split this repo already has on
+  # the Rust side, and until the epic's remaining PRs (client class, view
+  # methods, etc. — see the sdk-ts PRs open at the time this job was added)
+  # converge on one canonical package.json/build setup this job can depend
+  # on without conflict.
+  # ───────────────────────────────────────────────────────────────────────────
+  sdk-ts:
+    name: SDK (TypeScript) (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: packages/sdk-ts
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Build (ESM + CJS + declarations)
+        run: npm run build
+
+      - name: Test (smoke + unit)
+        run: npm test
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # REQUIRED — the indexer service. Format, build and test, with a real
+  # Postgres for the database-backed tests.
+  #
+  # The database is an ephemeral service container, created for this job and
+  # destroyed with it, rather than a shared instance. Tests here drop and
+  # recreate their tables, so a shared database would let concurrent runs
+  # corrupt each other's state and would make a green run depend on what else
+  # happened to be running at the time.
+  #
+  # Only runs when the PR touches indexer/ (or the workspace manifest, which
+  # can change how the indexer builds). A contract-only PR skips it, in the
+  # same style as fuzz-pr — but note the skip still reports success, so this
+  # job can be a required check without blocking contract-only work.
+  # ───────────────────────────────────────────────────────────────────────────
+  indexer:
+    name: Indexer (required)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: indexer_test
+        ports:
+          - 5432:5432
+        # Without a health check the job can start querying before Postgres is
+        # accepting connections, which fails as a confusing connection error
+        # rather than a wait.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for relevant changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qE '^(indexer/|Cargo\.toml|Cargo\.lock)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Rust
+        if: steps.changes.outputs.relevant == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache cargo
+        if: steps.changes.outputs.relevant == 'true'
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-indexer-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-indexer-
+
+      - name: cargo fmt --check
+        if: steps.changes.outputs.relevant == 'true'
+        run: cargo fmt --package keeper-indexer -- --check
+
+      - name: Build
+        if: steps.changes.outputs.relevant == 'true'
+        run: cargo build --package keeper-indexer --locked
+
+      # INDEXER_TEST_DATABASE_URL is what makes the database-backed tests run.
+      # When it is unset they skip themselves, which is what keeps the
+      # workspace-wide `test` job (and a contract contributor's laptop) green
+      # without a Postgres. Here it is set, so they must actually execute —
+      # hence the assertion on the result count below.
+      - name: Test
+        if: steps.changes.outputs.relevant == 'true'
+        env:
+          INDEXER_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/indexer_test
+        run: cargo test --package keeper-indexer --locked -- --nocapture
+
+      # A test that skips itself still exits 0, so a misconfigured database URL
+      # would turn the whole suite into a silent no-op and the job would stay
+      # green. Failing when any test reports a skip is what stops this job from
+      # passing vacuously.
+      - name: Verify the database-backed tests actually ran
+        if: steps.changes.outputs.relevant == 'true'
+        env:
+          INDEXER_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/indexer_test
+        run: |
+          output=$(cargo test --package keeper-indexer --locked -- --nocapture 2>&1)
+          if echo "$output" | grep -q "skipping: INDEXER_TEST_DATABASE_URL"; then
+            echo "::error::A database-backed test skipped itself even though a database was configured."
+            exit 1
+          fi
+          echo "All database-backed tests ran against the service container."
+
+      - name: Skip notice
+        if: steps.changes.outputs.relevant == 'false'
+        run: |
+          {
+            echo "### Indexer"
+            echo
+            echo "Skipped — no changes under \`indexer/\` or the workspace manifest."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────────
   # Aggregate gate. Branch protection should require only this single check;
   # it passes when all REQUIRED jobs pass and ignores advisory outcomes.
   # ───────────────────────────────────────────────────────────────────────────
@@ -409,12 +723,12 @@ jobs:
     name: CI required checks
     runs-on: ubuntu-latest
     if: always()
-    needs: [format, test, build-wasm, bot]
+    needs: [format, test, build-wasm, sdk-ts, bot, indexer]
     steps:
       - name: Verify required jobs succeeded
         run: |
           results='${{ join(needs.*.result, ' ') }}'
-          echo "Required job results (format, test, build-wasm, bot): $results"
+          echo "Required job results (format, test, build-wasm, sdk-ts, bot, indexer): $results"
           for r in $results; do
             if [ "$r" != "success" ]; then
               echo "::error::A required CI job did not succeed."
@@ -422,3 +736,4 @@ jobs:
             fi
           done
           echo "All required checks passed."
+

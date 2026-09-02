@@ -98,10 +98,16 @@ impl KeeperRegistry {
                 reward: params.reward,
                 deadline: params.deadline,
                 ttl_ledgers: params.ttl_ledgers,
+                verifier: None,
                 status: TaskStatus::Pending,
+
                 claimer: None,
                 claim_ledger: None,
                 lock_ledgers: params.lock_ledgers,
+                // `BatchTaskParams` has no `verifier` field yet — attaching a
+                // verifier to a batch-registered task is backlog issue 0102,
+                // separate from this batch-registration slice.
+                verifier: None,
             };
             save_task(&e, task_id, &task);
             emit_task_registered(&e, task_id, &owner, params.reward, params.deadline);

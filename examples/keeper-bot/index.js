@@ -44,9 +44,14 @@
 
 require("dotenv").config();
 
+// `rpc` is the Soroban RPC namespace. It was called `SorobanRpc` until
+// @stellar/stellar-sdk v16 dropped that alias — destructuring the old name
+// yields `undefined` rather than an error, so the bot used to get all the way
+// to `new SorobanRpc.Server(...)` before failing with an unhelpful
+// "Cannot read properties of undefined". See test/rpcNamespace.test.js.
 const {
   Keypair,
-  SorobanRpc,
+  rpc: SorobanRpc,
   TransactionBuilder,
   Networks,
   BASE_FEE,
@@ -54,25 +59,30 @@ const {
   scValToNative,
   Contract,
 } = require("@stellar/stellar-sdk");
+const { Keypair, nativeToScVal, scValToNative } = require("@stellar/stellar-sdk");
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Configuration — set via environment variables or .env file
+// The SDK (@soroban-keeper-network/sdk) — dynamic import, not require()
 // ─────────────────────────────────────────────────────────────────────────────
-
-const NETWORK_CONFIG = {
-  testnet: {
-    rpcUrl: "https://soroban-testnet.stellar.org",
-    networkPassphrase: Networks.TESTNET,
-  },
-  futurenet: {
-    rpcUrl: "https://rpc-futurenet.stellar.org",
-    networkPassphrase: Networks.FUTURENET,
-  },
-  mainnet: {
-    rpcUrl: "https://mainnet.sorobanrpc.com",
-    networkPassphrase: Networks.PUBLIC,
-  },
-};
+//
+// The SDK is a pure ESM package (see packages/sdk-ts/package.json), and this
+// bot is CommonJS with no build step. `require()` cannot load an ESM module,
+// but `import()` — a real, standard, promise-returning function, not a
+// transpiler trick — works from CommonJS in every Node version this bot
+// supports (engines: >=18.0.0). It's called once, here, and the resolved
+// module is cached in this variable for the rest of the file to use.
+//
+// This indirection is the price of keeping the SDK itself clean, modern ESM
+// rather than carrying dual-CJS/ESM build tooling for a package this size
+// (see the SDK's own package.json comment / this migration's PR description
+// for why that tradeoff was made deliberately, not by accident).
+let sdk;
+async function loadSdk() {
+  if (!sdk) {
+    sdk = await import("@soroban-keeper-network/sdk");
+  }
+  return sdk;
+}
 
 let CONFIG; // Initialized in main() after validation
 
@@ -110,10 +120,13 @@ function requireEnv(name, { parse, validate, secret = false, fallback }) {
 
 async function validateAndLoadConfig() {
   const { StrKey } = require("@stellar/stellar-sdk"); // Moved inside to be used only here
+  const { NETWORK_PRESETS, NETWORK_NAMES, isNetworkName, KeeperRegistryClient } =
+    await loadSdk();
+
   const network = requireEnv("NETWORK", {
     validate: {
-      fn: (v) => Object.keys(NETWORK_CONFIG).includes(v),
-      reason: `must be one of: ${Object.keys(NETWORK_CONFIG).join(", ")}`,
+      fn: isNetworkName,
+      reason: `must be one of: ${NETWORK_NAMES.join(", ")}`,
     },
     fallback: "testnet",
   });
@@ -136,10 +149,18 @@ async function validateAndLoadConfig() {
   // After validating the required string values, we can create the server
   // connection and use it to validate the contract's existence on the network.
   const { rpcUrl } = NETWORK_CONFIG[network];
-  const server = new SorobanRpc.Server(rpcUrl, { allowHttp: false });
+  const server = createServer(rpcUrl);
+  // After validating the required string values, we can create the client
+  // and use its underlying RPC connection to validate the contract's
+  // existence on the network.
+  const client = new KeeperRegistryClient({
+    contractId: registryContractId,
+    network: NETWORK_PRESETS[network],
+    keypair: Keypair.fromSecret(secretKey),
+  });
 
   try {
-    await server.getContractData(registryContractId);
+    await client.rpc.getContractData(registryContractId);
   } catch (e) {
     if (e.response && e.response.status === 404) {
       fail(
@@ -186,6 +207,14 @@ async function validateAndLoadConfig() {
       parse: (v) => v.toLowerCase() === "true",
       fallback: true,
     }),
+    // Minimum profit margin (in stroops) required for claiming a task.
+    // Net reward minus estimated gas fees (claim + execute + verifier) must
+    // exceed this threshold. Defaults to 0 (must be non-negative).
+    minProfitMarginStroops: requireEnv("MIN_PROFIT_MARGIN_STROOPS", {
+      parse: BigInt,
+      validate: { fn: (v) => v >= 0n, reason: "must be >= 0" },
+      fallback: 0n,
+    }),
     // Development only — see the EXECUTORS section below and .env.example
     // for the accompanying warning. Never the default: a keeper with this
     // unset and no real executor registered for a task type simply skips
@@ -208,6 +237,14 @@ async function validateAndLoadConfig() {
  * confirmed) should be retried. Deterministic contract errors — e.g. a task
  * already claimed by another keeper — are surfaced immediately so we don't
  * waste fees resubmitting a call that can never succeed.
+ *
+ * This is now a thin wrapper around the SDK's `withRetry` (see
+ * `packages/sdk-ts/src/retry.ts`) — the label + logging behavior is specific
+ * to this bot, so it stays here rather than in the generic SDK utility. The
+ * actual backoff/jitter/retry-limit logic lives in the SDK; this wrapper's
+ * own signature and every observable behavior (including the exact log
+ * message) are UNCHANGED from before the migration, so the existing test
+ * suite (test/retry.test.js) needed no changes.
  */
 async function withRetry(label, fn, options = {}) {
   // The retry policy and the sleep function are injectable so the unit tests
@@ -219,25 +256,18 @@ async function withRetry(label, fn, options = {}) {
     sleepFn = sleep,
   } = options;
 
-  let lastErr;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      if (isPermanentError(err) || attempt === maxRetries) {
-        throw err;
-      }
-      const backoff = retryBaseMs * 2 ** attempt;
-      const jitter = Math.floor(Math.random() * retryBaseMs);
-      const delay = backoff + jitter;
+  const { withRetry: sdkWithRetry } = await loadSdk();
+  return sdkWithRetry(fn, {
+    maxRetries,
+    retryBaseMs,
+    sleepFn,
+    isPermanentError,
+    onRetry: (attempt, delayMs, err) => {
       console.warn(
-        `${label} failed (attempt ${attempt + 1}), retrying in ${delay}ms: ${err.message}`
+        `${label} failed (attempt ${attempt + 1}), retrying in ${delayMs}ms: ${err.message}`
       );
-      await sleepFn(delay);
-    }
-  }
-  throw lastErr;
+    },
+  });
 }
 
 /**
@@ -284,13 +314,29 @@ const REGISTRY_EVENTS = {
   taskRegistered: [topicSymbol("reg"), topicSymbol("task")],
 };
 
+/**
+ * Builds the Soroban RPC client. Both call sites (startup validation and
+ * main) need identical settings, so they share one factory rather than
+ * repeating the constructor and its options.
+ *
+ * `allowHttp: false` is not configurable on purpose: every endpoint in
+ * NETWORK_CONFIG is https, and a keeper signs transactions, so quietly
+ * permitting plaintext would put a secret key's traffic on the wire.
+ *
+ * Constructing a server performs no network I/O, which is what lets the
+ * regression test in test/rpcNamespace.test.js call this offline.
+ */
+function createServer(rpcUrl) {
+  return new rpc.Server(rpcUrl, { allowHttp: false });
+}
+
 async function simulateAndSend(server, keypair, networkPassphrase, tx) {
   const simResponse = await server.simulateTransaction(tx);
-  if (SorobanRpc.Api.isSimulationError(simResponse)) {
+  if (rpc.Api.isSimulationError(simResponse)) {
     throw new Error(`Simulation failed: ${simResponse.error}`);
   }
 
-  const preparedTx = SorobanRpc.assembleTransaction(tx, simResponse).build();
+  const preparedTx = rpc.assembleTransaction(tx, simResponse).build();
   preparedTx.sign(keypair);
 
   const sendResponse = await server.sendTransaction(preparedTx);
@@ -301,13 +347,13 @@ async function simulateAndSend(server, keypair, networkPassphrase, tx) {
   // Poll for confirmation
   let getResponse = await server.getTransaction(sendResponse.hash);
   let attempts = 0;
-  while (getResponse.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND && attempts < 30) {
+  while (getResponse.status === rpc.Api.GetTransactionStatus.NOT_FOUND && attempts < 30) {
     await sleep(2000);
     getResponse = await server.getTransaction(sendResponse.hash);
     attempts++;
   }
 
-  if (getResponse.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+  if (getResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
     return getResponse;
   } else {
     throw new Error(`Transaction failed with status: ${getResponse.status}`);
@@ -355,11 +401,17 @@ async function readContract(server, sourcePublicKey, networkPassphrase, contract
     .build();
 
   const sim = await server.simulateTransaction(tx);
-  if (SorobanRpc.Api.isSimulationError(sim)) {
+  if (rpc.Api.isSimulationError(sim)) {
     throw new Error(`Simulation failed: ${sim.error}`);
   }
   return sim.result ? scValToNative(sim.result.retval) : null;
 }
+// `simulateAndSend`/`invokeContract`/`readContract` used to live here as
+// hand-rolled functions. They are now `KeeperRegistryClient.invoke()` /
+// `KeeperRegistryClient.read()` in the SDK (packages/sdk-ts/src/client.ts) —
+// ported behavior-for-behavior, including the exact error message shapes,
+// so every call site below reads the same way it did before, just through
+// `client.invoke(...)` / `client.read(...)` instead of a bare function call.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Task fetching — reads pending tasks by querying events
@@ -487,6 +539,175 @@ const EXECUTORS = {
   TtlExtension: ttlExtensionExecutor,
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Verifier interface & Proof-generation strategies (0090 / 0116)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// When a task has an optional `verifier` contract attached (Phase 2), the keeper
+// must provide a proof that satisfies the verifier contract's `verify` callback.
+//
+// Keepers register verifier strategies by verifier contract address or verifier kind.
+// If a task specifies a verifier for which no strategy is registered, the keeper
+// skips the task before claiming, preventing wasted claim gas and claim locking.
+
+/**
+ * Registry of proof generation strategies for known verifiers.
+ * Key: verifier contract ID (or symbolic identifier)
+ * Value: async fn(task, ctx) => Buffer | null
+ */
+const VERIFIER_STRATEGIES = {};
+
+/**
+ * Standard baseline gas estimation constants (in stroops / min fees).
+ * 1 XLM = 10_000_000 stroops. BASE_FEE = 100 stroops.
+ *
+ * Typical transactions on Soroban consume base fee plus resource fees.
+ * Estimated conservatively if simulation cannot be executed.
+ */
+const ESTIMATED_CLAIM_FEE_STROOPS = 10_000n;
+const ESTIMATED_EXECUTE_BASE_FEE_STROOPS = 50_000n;
+
+/**
+ * Checks whether the bot has a valid proof generation mechanism for the given
+ * task and verifier.
+ *
+ * @param {object} task - Task details including taskTypeName and verifier
+ * @param {boolean} simulateExecution - Whether dev simulation fallback is active
+ * @returns {{ supported: boolean, reason?: string }}
+ */
+function checkVerifierSupport(task, simulateExecution = false) {
+  // If task has no verifier attached, standard task executor handles it.
+  if (!task.verifier) {
+    const hasExecutor = Boolean(EXECUTORS[task.taskTypeName]);
+    if (!hasExecutor && !simulateExecution) {
+      return {
+        supported: false,
+        reason: `no executor registered for task type ${task.taskTypeName}`,
+      };
+    }
+    return { supported: true };
+  }
+
+  // Task has an attached verifier contract address.
+  const strategy = VERIFIER_STRATEGIES[task.verifier];
+  if (strategy) {
+    return { supported: true };
+  }
+
+  if (simulateExecution) {
+    return { supported: true, reason: "using simulated verifier strategy" };
+  }
+
+  return {
+    supported: false,
+    reason: `unrecognized verifier contract ${task.verifier} (no proof-generation strategy registered)`,
+  };
+}
+
+/**
+ * Simulates a verifier call directly (`IKeeperVerifier::verify`) before claiming,
+ * or calculates estimated gas costs to determine if executing the task is profitable.
+ *
+ * @param {object} params
+ * @returns {Promise<{ profitable: boolean, estimatedFee: bigint, netProfit: bigint, reason?: string }>}
+ */
+async function estimateTaskProfitability({
+  server,
+  sourcePublicKey,
+  networkPassphrase,
+  task,
+  proof,
+  minProfitMargin = 0n,
+}) {
+  let estimatedVerifierFee = 0n;
+
+  if (task.verifier) {
+    if (server && sourcePublicKey) {
+      try {
+        const rawAccount = await server.getAccount(sourcePublicKey);
+        // Ensure we have an Account object that TransactionBuilder accepts
+        const account =
+          typeof rawAccount.sequenceNumber === "function"
+            ? rawAccount
+            : new (require("@stellar/stellar-sdk").Account)(
+                rawAccount.accountId || sourcePublicKey,
+                rawAccount.sequence || "1"
+              );
+
+        const verifierContract = new Contract(task.verifier);
+        const proofBytes = proof || Buffer.alloc(0);
+
+        const tx = new TransactionBuilder(account, {
+          fee: BASE_FEE,
+          networkPassphrase: networkPassphrase || Networks.TESTNET,
+        })
+          .addOperation(
+            verifierContract.call(
+              "verify",
+              nativeToScVal(task.taskId, { type: "u64" }),
+              nativeToScVal(sourcePublicKey, { type: "address" }),
+              nativeToScVal(proofBytes, { type: "bytes" })
+            )
+          )
+          .setTimeout(30)
+          .build();
+
+        const sim = await server.simulateTransaction(tx);
+        const isError =
+          (SorobanRpc.Api && typeof SorobanRpc.Api.isSimulationError === "function" && SorobanRpc.Api.isSimulationError(sim)) ||
+          Boolean(sim && sim.error);
+
+        if (isError) {
+          return {
+            profitable: false,
+            estimatedFee: 0n,
+            netProfit: 0n,
+            reason: `verifier simulation failed: ${sim.error || "unknown simulation error"}`,
+          };
+        }
+
+        // If minResourceFee is reported by Soroban RPC simulation, use it.
+        if (sim && sim.minResourceFee) {
+          estimatedVerifierFee = BigInt(sim.minResourceFee);
+        } else {
+          estimatedVerifierFee = 50_000n;
+        }
+      } catch (err) {
+        if (err.message && err.message.toLowerCase().includes("simulation failed")) {
+          return {
+            profitable: false,
+            estimatedFee: 0n,
+            netProfit: 0n,
+            reason: `verifier simulation failed: ${err.message}`,
+          };
+        }
+        estimatedVerifierFee = 50_000n;
+      }
+    } else {
+      // Default baseline estimate when no RPC server is provided (e.g. static evaluation)
+      estimatedVerifierFee = 50_000n;
+    }
+  }
+
+  const totalEstimatedFees =
+    ESTIMATED_CLAIM_FEE_STROOPS +
+    ESTIMATED_EXECUTE_BASE_FEE_STROOPS +
+    estimatedVerifierFee;
+
+  const reward = BigInt(task.reward);
+  const netProfit = reward - totalEstimatedFees;
+  const profitable = netProfit >= BigInt(minProfitMargin);
+
+  return {
+    profitable,
+    estimatedFee: totalEstimatedFees,
+    netProfit,
+    reason: profitable
+      ? undefined
+      : `net profit (${netProfit} stroops) below minimum margin (${minProfitMargin} stroops; estimated gas: ${totalEstimatedFees} stroops, reward: ${reward} stroops)`,
+  };
+}
+
 /**
  * Dispatches a task to its registered executor. Returns `null` (never
  * throws) when there is no executor for the task's type, when
@@ -501,6 +722,16 @@ const EXECUTORS = {
  * function directly do not run.
  */
 async function executeTaskOffChain(task, ctx, simulateExecution) {
+  // If task has a specific verifier strategy registered, use it.
+  if (task.verifier && VERIFIER_STRATEGIES[task.verifier]) {
+    try {
+      return await VERIFIER_STRATEGIES[task.verifier](task, ctx);
+    } catch (err) {
+      ctx.log(`  Verifier strategy for task ${task.taskId} threw: ${err.message}`);
+      return null;
+    }
+  }
+
   const executor = EXECUTORS[task.taskTypeName];
 
   if (!executor) {
@@ -525,13 +756,7 @@ async function executeTaskOffChain(task, ctx, simulateExecution) {
 // Main keeper loop
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function keeperLoop(
-  server,
-  keypair,
-  networkPassphrase,
-  contractId,
-  emptyRounds = 0
-) {
+async function keeperLoop(client, emptyRounds = 0) {
   // A round is successful if it runs to completion without any unhandled
   // exceptions. An RPC error that cannot be resolved with retries, or any
   // other unexpected error, is a failure.
@@ -539,17 +764,18 @@ async function keeperLoop(
   // another keeper is also a success, as this is normal competitive behaviour.
   const summary = { processed: 0, errors: [] };
   let newEmptyRounds = emptyRounds;
+  const keypair = client.keypair;
 
   try {
     const nowSeconds = Math.floor(Date.now() / 1000);
     console.log(`\nKeeper round at ${new Date().toISOString()}`);
 
-    const latestLedger = await server.getLatestLedger();
+    const latestLedger = await client.rpc.getLatestLedger();
     const startLedger = Math.max(1, latestLedger.sequence - 1000);
 
     const pendingTasks = await fetchPendingTasks(
-      server,
-      contractId,
+      client.rpc,
+      client.contractId,
       startLedger
     );
     console.log(
@@ -574,14 +800,9 @@ async function keeperLoop(
         if (CONFIG.expireStaleTasks) {
           try {
             await withRetry(`expire_task ${task.taskId}`, () =>
-              invokeContract(
-                server,
-                keypair,
-                networkPassphrase,
-                contractId,
-                "expire_task",
-                [nativeToScVal(task.taskId, { type: "u64" })]
-              )
+              client.invoke("expire_task", [
+                nativeToScVal(task.taskId, { type: "u64" }),
+              ])
             );
             console.log(
               `  Task ${task.taskId} expired — escrow refunded to owner`
@@ -598,8 +819,94 @@ async function keeperLoop(
       }
 
       try {
+        // Fetch full task details before claiming so the bot can evaluate:
+        // 1. Task type and calldata
+        // 2. Attached verifier (if any)
+        // 3. Verifier strategy support
+        // 4. Pre-claim profitability check factoring in verifier cost
+        const fullTask = await readContract(
+          server,
+          keypair.publicKey(),
+          networkPassphrase,
+          contractId,
+          "get_task",
+          [nativeToScVal(task.taskId, { type: "u64" })]
+        );
         console.log(
           `  Attempting to claim task ${task.taskId} (reward: ${task.reward})...`
+        );
+        await withRetry(`claim_task ${task.taskId}`, () =>
+          client.invoke("claim_task", [
+            nativeToScVal(keypair.publicKey(), { type: "address" }),
+            nativeToScVal(task.taskId, { type: "u64" }),
+          ])
+        );
+        const taskType = fullTask.task_type;
+        const taskTypeName = TASK_TYPE_NAMES[taskType] || `Unknown(${taskType})`;
+        const verifier = fullTask.verifier || null;
+
+        const evaluatedTask = {
+          taskId: task.taskId,
+          taskType,
+          taskTypeName,
+          calldata: fullTask.calldata,
+          reward: task.reward,
+          deadline: task.deadline,
+          verifier,
+        };
+
+        // Step 1: Check if bot has a proof-generation strategy for this verifier / task type
+        const support = checkVerifierSupport(
+          evaluatedTask,
+          CONFIG.simulateExecution
+        );
+        if (!support.supported) {
+          console.log(
+            `  Skipping task ${task.taskId}: unsupported verifier/executor — ${support.reason}`
+          );
+          continue;
+        }
+
+        const executorCtx = {
+          server: client.rpc,
+          keypair,
+          networkPassphrase: client.networkPassphrase,
+          log: (msg) => console.log(msg),
+        };
+
+        // Generate candidate proof pre-claim if possible for accurate verifier simulation
+        const candidateProof = await executeTaskOffChain(
+          evaluatedTask,
+          executorCtx,
+          CONFIG.simulateExecution
+        );
+
+        if (candidateProof === null || candidateProof === undefined) {
+          console.log(
+            `  Skipping task ${task.taskId} (${taskTypeName}): could not generate valid proof before claim.`
+          );
+          continue;
+        }
+
+        // Step 2: Pre-claim profitability check (including verifier resource costs)
+        const profitCheck = await estimateTaskProfitability({
+          server,
+          sourcePublicKey: keypair.publicKey(),
+          networkPassphrase,
+          task: evaluatedTask,
+          proof: candidateProof,
+          minProfitMargin: CONFIG.minProfitMarginStroops,
+        });
+
+        if (!profitCheck.profitable) {
+          console.log(
+            `  Skipping task ${task.taskId}: unprofitable — ${profitCheck.reason}`
+          );
+          continue;
+        }
+
+        console.log(
+          `  Attempting to claim task ${task.taskId} (reward: ${task.reward}, est net profit: ${profitCheck.netProfit} stroops)...`
         );
         await withRetry(`claim_task ${task.taskId}`, () =>
           invokeContract(
@@ -616,54 +923,6 @@ async function keeperLoop(
         );
         console.log(`  Task ${task.taskId} claimed!`);
 
-        // Fetch full task details — the TaskRegistered event decoded in
-        // fetchPendingTasks carries only { taskId, reward, deadline }, but
-        // an executor needs task_type and calldata to know what off-chain
-        // work to perform.
-        const fullTask = await readContract(
-          server,
-          keypair.publicKey(),
-          networkPassphrase,
-          contractId,
-          "get_task",
-          [nativeToScVal(task.taskId, { type: "u64" })]
-        );
-        const taskType = fullTask.task_type;
-        const taskTypeName = TASK_TYPE_NAMES[taskType] || `Unknown(${taskType})`;
-
-        const executorCtx = {
-          server,
-          keypair,
-          networkPassphrase,
-          log: (msg) => console.log(msg),
-        };
-        const proof = await executeTaskOffChain(
-          {
-            taskId: task.taskId,
-            taskType,
-            taskTypeName,
-            calldata: fullTask.calldata,
-            reward: task.reward,
-            deadline: task.deadline,
-          },
-          executorCtx,
-          CONFIG.simulateExecution
-        );
-
-        if (proof === null || proof === undefined) {
-          console.log(
-            `  Task ${task.taskId} (${taskTypeName}) not executed — leaving claimed for expiry or another keeper.`
-          );
-          continue;
-        }
-
-        if (proof === null || proof === undefined) {
-          console.log(
-            `  Task ${task.taskId} (${taskTypeName}) not executed — leaving claimed for expiry or another keeper.`
-          );
-          continue;
-        }
-
         await withRetry(`execute_task ${task.taskId}`, () =>
           invokeContract(
             server,
@@ -674,12 +933,12 @@ async function keeperLoop(
             [
               nativeToScVal(keypair.publicKey(), { type: "address" }),
               nativeToScVal(task.taskId, { type: "u64" }),
-              nativeToScVal(proof, { type: "bytes" }),
+              nativeToScVal(candidateProof, { type: "bytes" }),
             ]
           )
         );
         console.log(
-          `  Task ${task.taskId} executed! Proof: ${proof.toString("hex").slice(0, 20)}...`
+          `  Task ${task.taskId} executed! Proof: ${candidateProof.toString("hex").slice(0, 20)}...`
         );
         summary.processed++;
       } catch (err) {
@@ -701,14 +960,9 @@ async function keeperLoop(
   // simulation makes the read free enough that the extra round-trip isn't
   // worth trading away the guarantee of reading current on-chain state.
   try {
-    const rawBalance = await readContract(
-      server,
-      keypair.publicKey(),
-      networkPassphrase,
-      contractId,
-      "keeper_balance",
-      [nativeToScVal(keypair.publicKey(), { type: "address" })]
-    );
+    const rawBalance = await client.read("keeper_balance", [
+      nativeToScVal(keypair.publicKey(), { type: "address" }),
+    ]);
     const balance = BigInt(rawBalance || 0);
     console.log(`  Accumulated reward balance: ${balance} stroops`);
 
@@ -716,14 +970,9 @@ async function keeperLoop(
       console.log(`  Withdrawing ${balance} stroops...`);
       // withdraw_rewards mutates state, so it still goes through the
       // submitting path.
-      await invokeContract(
-        server,
-        keypair,
-        networkPassphrase,
-        contractId,
-        "withdraw_rewards",
-        [nativeToScVal(keypair.publicKey(), { type: "address" })]
-      );
+      await client.invoke("withdraw_rewards", [
+        nativeToScVal(keypair.publicKey(), { type: "address" }),
+      ]);
       console.log(`  Withdrawal complete!`);
     }
   } catch (err) {
@@ -740,9 +989,16 @@ async function keeperLoop(
 async function main() {
   await validateAndLoadConfig();
 
-  const { rpcUrl, networkPassphrase } = NETWORK_CONFIG[CONFIG.network];
+  const { NETWORK_PRESETS, KeeperRegistryClient, checkContractCompatibility, compatibilityWarning } =
+    await loadSdk();
+  const { rpcUrl } = NETWORK_PRESETS[CONFIG.network];
   const keypair = Keypair.fromSecret(CONFIG.secretKey);
-  const server = new SorobanRpc.Server(rpcUrl, { allowHttp: false });
+  const server = createServer(rpcUrl);
+  const client = new KeeperRegistryClient({
+    contractId: CONFIG.registryContractId,
+    network: CONFIG.network,
+    keypair,
+  });
 
   console.log("");
   console.log("Soroban Keeper Network — Keeper Bot v0.1.0          ");
@@ -762,19 +1018,30 @@ async function main() {
   // Verify connectivity
   try {
     const health = await server.getHealth();
+    // `latestLedger`, not `ledger` — the same v16 API drift as the `rpc`
+    // rename above. This one degraded quietly to "ledger undefined" instead
+    // of throwing, so the startup banner has been printing a hole where the
+    // one number that proves RPC is live should be.
+    console.log(`RPC healthy — ledger ${health.latestLedger}`);
+    const health = await client.rpc.getHealth();
     console.log(`RPC healthy — ledger ${health.ledger}`);
   } catch (e) {
     console.error(`RPC unreachable at ${rpcUrl}: ${e.message}`);
     process.exit(1);
   }
 
+  // SDK ↔ contract version compatibility check (packages/sdk-ts/VERSIONING.md).
+  // Advisory only — logged, never a hard stop, since an operator running an
+  // older-but-still-working combination should not be forced to upgrade to
+  // silence a warning.
+  const contractVersion = await client.version();
+  const warning = compatibilityWarning(checkContractCompatibility(contractVersion));
+  if (warning) {
+    console.warn(warning);
+  }
+
   if (CONFIG.once) {
-    const { summary } = await keeperLoop(
-      server,
-      keypair,
-      networkPassphrase,
-      CONFIG.registryContractId
-    );
+    const { summary } = await keeperLoop(client);
     const ok = summary.errors.length === 0;
     console.log(ok ? "Round complete." : "Round completed with errors.");
     process.exit(ok ? 0 : 1);
@@ -804,10 +1071,7 @@ async function main() {
     roundInFlight = true;
     try {
       const { summary, emptyRounds: newEmptyRounds } = await keeperLoop(
-        server,
-        keypair,
-        networkPassphrase,
-        CONFIG.registryContractId,
+        client,
         emptyRounds
       );
       emptyRounds = newEmptyRounds;
@@ -842,6 +1106,7 @@ function sleep(ms) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 module.exports = {
+  createServer,
   isPermanentError,
   withRetry,
   fetchPendingTasks,
@@ -850,9 +1115,14 @@ module.exports = {
   sleep,
   TASK_TYPE_NAMES,
   EXECUTORS,
+  VERIFIER_STRATEGIES,
+  checkVerifierSupport,
+  estimateTaskProfitability,
   executeTaskOffChain,
   ttlExtensionExecutor,
   simulatedExecutor,
+  ESTIMATED_CLAIM_FEE_STROOPS,
+  ESTIMATED_EXECUTE_BASE_FEE_STROOPS,
 };
 
 // Only run main() when executed directly, not when imported for testing

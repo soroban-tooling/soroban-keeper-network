@@ -45,12 +45,19 @@ pub enum TaskType {
 /// Lifecycle state of a task. Transitions are enforced by each function.
 ///
 /// ```text
-/// PENDING ──claim──▶ CLAIMED ──execute──▶ EXECUTED
-///    │                  │
-///  cancel             expire (deadline passed)
-///    ▼                  ▼
-/// CANCELLED          EXPIRED
+/// PENDING ──claim──▶ CLAIMED ──execute+verify(pass)──▶ EXECUTED
+///    │                  │ ▲
+///  cancel             expire│ execute+verify(reject, retryable)
+///    ▼             (deadline│ (returns to CLAIMED for retry)
+/// CANCELLED          passed)│
+///                       ▼   │
+///                    EXPIRED│
+///                           └──────────────┘
 /// ```
+///
+/// Note: When a verifier rejects an execution attempt, `execute_task` may
+/// return the task to CLAIMED state (retryable failure), distinct from
+/// terminal states like CANCELLED or EXPIRED.
 #[contracttype]
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum TaskStatus {
@@ -77,13 +84,23 @@ pub struct Task {
     pub deadline: u64,
     /// Ledger TTL for this storage entry.
     pub ttl_ledgers: u32,
+    pub verifier: Option<Address>,
     pub status: TaskStatus,
+
     /// Set when a keeper claims the task.
     pub claimer: Option<Address>,
     /// Ledger sequence at claim time — used to enforce the lock window.
     pub claim_ledger: Option<u32>,
     /// Ledgers the claimer holds exclusive rights before re-claim is allowed.
     pub lock_ledgers: u32,
+    /// Optional on-chain proof verifier attached at registration
+    /// (`docs/VERIFIER_DESIGN.md`). `None` means `execute_task` trusts the
+    /// claimer's proof as before (the wave-1 MVP path, unchanged). `Some(addr)`
+    /// means `execute_task` calls `addr`'s `IKeeperVerifier::verify` before
+    /// crediting the keeper, rejecting with `KeeperError::VerificationFailed`
+    /// if it returns `false` or panics. Any address is permitted — verifiers
+    /// are permissionless, like keepers (design doc §5).
+    pub verifier: Option<Address>,
 }
 
 /// One entry in a [`KeeperRegistry::batch_register_tasks`] call — the same

@@ -89,6 +89,7 @@ impl RegistryHarness {
             &(self.env.ledger().timestamp() + 1000), // Far future deadline
             &1000, // ttl_ledgers
             &100,  // lock_ledgers
+            &None, // verifier
         )
     }
 
