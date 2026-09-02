@@ -88,6 +88,7 @@ fuzz_target!(|data: &[u8]| {
         &deadline,
         &ttl_ledgers,
         &lock_ledgers,
+        &None,
     );
     
     match result {

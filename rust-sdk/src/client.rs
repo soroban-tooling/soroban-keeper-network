@@ -111,12 +111,11 @@ impl<'a, S: TransactionSigner> KeeperClient<'a, S> {
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
     #[error("Contract call failed: {0}")]
-    ContractError(alloc::string::String),
+    ContractError(String),
     #[error("Signer error: {0}")]
     SigningFailed(#[from] crate::signing::SignerError),
 }
 
-fn alloc_format_error<E: core::fmt::Debug>(err: E) -> alloc::string::String {
-    extern crate alloc;
-    alloc::format!("{:?}", err)
+fn alloc_format_error<E: core::fmt::Debug>(err: E) -> String {
+    format!("{err:?}")
 }

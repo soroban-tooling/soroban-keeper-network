@@ -5,11 +5,10 @@
 //! [`KeeperRegistryCrossContract`] constructs typed [`CrossContractInvocation`]s
 //! that can be passed directly to `env.invoke_contract`.
 
-use keeper_registry::types::TaskType;
-use soroban_sdk::{vec, Address, Bytes, Env, FromVal, IntoVal, Symbol, Val, Vec};
+use keeper_registry::TaskType;
+use soroban_sdk::{vec, Address, Bytes, Env, IntoVal, Symbol, TryFromVal, Val, Vec};
 
 /// Represents an un-executed cross-contract invocation.
-#[derive(Clone, Debug, PartialEq)]
 pub struct CrossContractInvocation<'a> {
     pub contract: Address,
     pub function: Symbol,
@@ -29,7 +28,7 @@ impl<'a> CrossContractInvocation<'a> {
     }
 
     /// Execute this invocation via the Soroban host environment.
-    pub fn invoke<T: FromVal<Env, Val>>(&self) -> T {
+    pub fn invoke<T: TryFromVal<Env, Val>>(&self) -> T {
         self.env
             .invoke_contract(&self.contract, &self.function, self.args.clone())
     }
@@ -156,7 +155,6 @@ impl<'a> KeeperRegistryCrossContract<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use keeper_registry::KeeperRegistryClient;
     use soroban_sdk::{testutils::Address as _, Address, Bytes, Env, IntoVal, Symbol, Val};
 
     #[test]
@@ -196,10 +194,7 @@ mod tests {
         )
             .into_val(&env);
 
-        assert_eq!(invocation.args.len(), expected_args.len());
-        for i in 0..invocation.args.len() {
-            assert_eq!(invocation.args.get(i), expected_args.get(i));
-        }
+        assert_eq!(invocation.args, expected_args);
     }
 
     #[test]

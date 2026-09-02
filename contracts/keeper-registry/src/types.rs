@@ -85,12 +85,21 @@ pub struct Task {
     /// Ledger TTL for this storage entry.
     pub ttl_ledgers: u32,
     pub status: TaskStatus,
+
     /// Set when a keeper claims the task.
     pub claimer: Option<Address>,
     /// Ledger sequence at claim time — used to enforce the lock window.
     pub claim_ledger: Option<u32>,
     /// Ledgers the claimer holds exclusive rights before re-claim is allowed.
     pub lock_ledgers: u32,
+    /// Optional on-chain proof verifier attached at registration
+    /// (`docs/VERIFIER_DESIGN.md`). `None` means `execute_task` trusts the
+    /// claimer's proof as before (the wave-1 MVP path, unchanged). `Some(addr)`
+    /// means `execute_task` calls `addr`'s `IKeeperVerifier::verify` before
+    /// crediting the keeper, rejecting with `KeeperError::VerificationFailed`
+    /// if it returns `false` or panics. Any address is permitted — verifiers
+    /// are permissionless, like keepers (design doc §5).
+    pub verifier: Option<Address>,
 }
 
 /// One entry in a [`KeeperRegistry::batch_register_tasks`] call — the same

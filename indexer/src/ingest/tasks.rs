@@ -272,10 +272,7 @@ pub async fn task_history(
 }
 
 /// Query the derived current state for a single task id.
-pub async fn task_state(
-    client: &Client,
-    task_id: i64,
-) -> Result<Option<TaskState>, IndexerError> {
+pub async fn task_state(client: &Client, task_id: i64) -> Result<Option<TaskState>, IndexerError> {
     let history = task_history(client, task_id).await?;
     Ok(TaskState::fold(task_id, &history))
 }

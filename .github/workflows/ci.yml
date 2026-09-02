@@ -503,6 +503,9 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+
       - name: Build
         run: npm run build
 
@@ -561,41 +564,6 @@ jobs:
 
       - name: Lint
         run: npm run lint
-
-  # ───────────────────────────────────────────────────────────────────────────
-  # ADVISORY — the TypeScript SDK package (packages/sdk-ts). Advisory rather
-  # than required until the dedicated typecheck/lint job (backlog 0187)
-  # establishes the same required/advisory split this repo already has on
-  # the Rust side, and until the epic's remaining PRs (client class, view
-  # methods, etc. — see the sdk-ts PRs open at the time this job was added)
-  # converge on one canonical package.json/build setup this job can depend
-  # on without conflict.
-  # ───────────────────────────────────────────────────────────────────────────
-  sdk-ts:
-    name: SDK (TypeScript) (advisory)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    defaults:
-      run:
-        working-directory: packages/sdk-ts
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "20"
-
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Typecheck
-        run: npx tsc --noEmit -p tsconfig.json
-
-      - name: Build (ESM + CJS + declarations)
-        run: npm run build
-
-      - name: Test (smoke + unit)
-        run: npm test
 
   # ───────────────────────────────────────────────────────────────────────────
   # REQUIRED — the indexer service. Format, build and test, with a real
@@ -736,3 +704,4 @@ jobs:
             fi
           done
           echo "All required checks passed."
+

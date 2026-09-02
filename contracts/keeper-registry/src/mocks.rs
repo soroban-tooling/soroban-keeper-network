@@ -98,9 +98,7 @@ impl ReentrantToken {
         env.storage().instance().set(&DataKey::TaskId, &task_id);
         env.storage().instance().set(&DataKey::Keeper, &keeper);
         env.storage().instance().set(&DataKey::Armed, &true);
-        env.storage()
-            .instance()
-            .set(&DataKey::ReentryFired, &false);
+        env.storage().instance().set(&DataKey::ReentryFired, &false);
         env.storage()
             .instance()
             .set(&DataKey::ReentrySucceeded, &false);

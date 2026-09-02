@@ -153,6 +153,7 @@ fn check_register_task(ctx: &Ctx) {
             &ctx.deadline,
             &ctx.ttl_ledgers,
             &ctx.lock_ledgers,
+            &None,
         ),
         [
             InvalidReward,

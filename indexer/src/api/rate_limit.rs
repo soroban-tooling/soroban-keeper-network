@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -48,7 +48,7 @@ impl RateLimiter {
     pub fn new(requests_per_second: u32, burst: u32) -> Self {
         Self {
             requests_per_second: requests_per_second.max(1) as f64,
-            burst: burst.max(requests_per_second).max(1) as f64,
+            burst: burst.max(1) as f64,
             buckets: Mutex::new(HashMap::new()),
         }
     }
@@ -105,13 +105,22 @@ fn rate_limited() -> Response {
 /// Axum middleware: reject a request over its client's limit with 429 before
 /// it reaches the handler. Applies equally to REST calls and WebSocket
 /// upgrades, since both are routed through the same middleware stack.
+///
+/// Takes `ConnectInfo` from the request's extensions rather than as a typed
+/// `Option<ConnectInfo<SocketAddr>>` extractor: axum 0.8's `FromFn` blanket
+/// impls do not resolve for that combination when the handler's state type
+/// is generic (`Router::layer` is applied before the state is erased by
+/// `with_state`), so the extractor form fails to type-check here even though
+/// each extractor individually satisfies its own bound.
 pub async fn enforce(
     State(limiter): State<std::sync::Arc<RateLimiter>>,
-    connect_info: Option<ConnectInfo<SocketAddr>>,
     request: Request,
     next: Next,
 ) -> Response {
-    let addr = connect_info.map(|ConnectInfo(addr)| addr);
+    let addr = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(addr)| *addr);
     let key = client_key(request.headers(), addr);
     if limiter.allow(&key) {
         next.run(request).await
@@ -123,6 +132,7 @@ pub async fn enforce(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn allows_requests_up_to_the_burst_then_rejects() {
@@ -162,7 +172,6 @@ mod tests {
 
     #[test]
     fn api_key_takes_priority_over_ip() {
-        let limiter = RateLimiter::new(1, 1);
         let mut headers = HeaderMap::new();
         headers.insert(API_KEY_HEADER, "abc123".parse().unwrap());
         let addr: SocketAddr = "127.0.0.1:1234".parse().unwrap();

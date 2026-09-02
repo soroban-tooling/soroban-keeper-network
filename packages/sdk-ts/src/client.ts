@@ -12,6 +12,7 @@ import {
   Account,
   BASE_FEE,
   Contract,
+  Operation,
   StrKey,
   TransactionBuilder,
   rpc,
@@ -21,12 +22,38 @@ import {
 
 import type { ContractCaller, TransactionSigner } from "./core/caller.js";
 import { KeeperRpcError, KeeperSdkError, toKeeperError } from "./errors.js";
+import type { IntegerInput } from "./core/scval.js";
+import type { Task } from "./types.js";
 import type { ContractCompatibility, VersionOptions } from "./methods/views.js";
 import * as views from "./methods/views.js";
 import type { WithdrawRewardsParams } from "./methods/withdrawRewards.js";
 import { tryWithdrawRewards, withdrawRewards } from "./methods/withdrawRewards.js";
 import type { ExecuteTaskParams } from "./methods/executeTask.js";
+import type { AuthEntrySigner } from "./core/auth.js";
+import { signAuthEntries } from "./core/auth.js";
 import { executeTask } from "./methods/executeTask.js";
+import type { RegisterTaskParams } from "./methods/registerTask.js";
+import { registerTask } from "./methods/registerTask.js";
+import type { IncreaseRewardParams } from "./methods/increaseReward.js";
+import { increaseReward } from "./methods/increaseReward.js";
+import type { ClaimTaskOutcome, ClaimTaskParams } from "./methods/claimTask.js";
+import { claimTask } from "./methods/claimTask.js";
+import type { CancelTaskOutcome, CancelTaskParams } from "./methods/cancelTask.js";
+import { cancelTask } from "./methods/cancelTask.js";
+import type { ExpireTaskParams } from "./methods/expireTask.js";
+import { expireTask } from "./methods/expireTask.js";
+import type {
+  SweepFeesParams,
+  TransferAdminParams,
+  UpgradeParams,
+} from "./methods/adminDualAuth.js";
+import { sweepFees, transferAdmin, upgrade } from "./methods/adminDualAuth.js";
+import type {
+  AdminCallParams,
+  SetFeeBpsParams,
+  SetMinRewardParams,
+} from "./methods/admin.js";
+import { pause, setFeeBps, setMinReward, unpause } from "./methods/admin.js";
 
 /**
  * The subset of `rpc.Server` this SDK uses.
@@ -37,7 +64,11 @@ import { executeTask } from "./methods/executeTask.js";
  */
 export type RpcServerLike = Pick<
   rpc.Server,
-  "getAccount" | "simulateTransaction" | "sendTransaction" | "getTransaction"
+  | "getAccount"
+  | "simulateTransaction"
+  | "sendTransaction"
+  | "getTransaction"
+  | "getLatestLedger"
 >;
 
 /** Minimal `Keypair` surface, so callers need not import the class type. */
@@ -96,6 +127,13 @@ export interface KeeperRegistryClientOptions {
  * machine holding no funded key at all -- which is exactly the case
  * `admin()`-on-an-uninitialized-registry has to serve.
  */
+/**
+ * How long a signed auth entry stays valid, in ledgers (~5s each, so ~1 hour).
+ * Long enough to survive submission and retry, short enough that a signature
+ * captured off the wire is not reusable indefinitely.
+ */
+const AUTH_ENTRY_VALIDITY_LEDGERS = 720;
+
 const READ_SOURCE_ACCOUNT = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 export class KeeperRegistryClient implements ContractCaller {
@@ -179,6 +217,63 @@ export class KeeperRegistryClient implements ContractCaller {
   /** See {@link views.checkContractCompatibility}. */
   checkContractCompatibility(): Promise<ContractCompatibility> {
     return views.checkContractCompatibility(this);
+  }
+
+  /** See {@link views.getTask}. */
+  getTask(taskId: IntegerInput): Promise<Task> {
+    return views.getTask(this, taskId);
+  }
+
+  /** See {@link views.taskCount}. */
+  taskCount(): Promise<number> {
+    return views.taskCount(this);
+  }
+
+  /** See {@link views.keeperBalance}. */
+  keeperBalance(keeper: string): Promise<bigint> {
+    return views.keeperBalance(this, keeper);
+  }
+
+  /** See {@link views.isClaimable}. */
+  isClaimable(taskId: IntegerInput): Promise<boolean> {
+    return views.isClaimable(this, taskId);
+  }
+
+  /** See {@link transferAdmin}. */
+  transferAdmin(params: TransferAdminParams): Promise<void> {
+    return transferAdmin(this, params);
+  }
+
+  /** See {@link upgrade}. */
+  upgrade(params: UpgradeParams): Promise<void> {
+    return upgrade(this, params);
+  }
+
+  /** See {@link sweepFees}. */
+  sweepFees(params: SweepFeesParams): Promise<void> {
+    return sweepFees(this, params);
+  }
+
+  /** See {@link pause}. */
+  pause(params: AdminCallParams): Promise<void> {
+    return pause(this, params);
+  }
+
+  /** See {@link unpause}. */
+  unpause(params: AdminCallParams): Promise<void> {
+    return unpause(this, params);
+  }
+
+  /** See {@link setFeeBps}. */
+  setFeeBps(params: SetFeeBpsParams): Promise<void> {
+    return setFeeBps(this, params);
+  }
+
+  /** See {@link setMinReward}. */
+  setMinReward(params: SetMinRewardParams): Promise<void> {
+    return setMinReward(this, params);
+  }
+
   /** See {@link withdrawRewards}. */
   withdrawRewards(params: WithdrawRewardsParams): Promise<bigint> {
     return withdrawRewards(this, params);
@@ -187,9 +282,36 @@ export class KeeperRegistryClient implements ContractCaller {
   /** See {@link tryWithdrawRewards}: resolves to `0n` instead of rejecting. */
   tryWithdrawRewards(params: WithdrawRewardsParams): Promise<bigint> {
     return tryWithdrawRewards(this, params);
+  }
+
   /** See {@link executeTask}. */
   executeTask(params: ExecuteTaskParams): Promise<void> {
     return executeTask(this, params);
+  }
+
+  /** See {@link registerTask}. */
+  registerTask(params: RegisterTaskParams): Promise<bigint> {
+    return registerTask(this, params);
+  }
+
+  /** See {@link increaseReward}. */
+  increaseReward(params: IncreaseRewardParams): Promise<void> {
+    return increaseReward(this, params);
+  }
+
+  /** See {@link claimTask}: routine claim-race outcomes are returned, not thrown. */
+  claimTask(params: ClaimTaskParams): Promise<ClaimTaskOutcome> {
+    return claimTask(this, params);
+  }
+
+  /** See {@link cancelTask}: a live lock and a terminal status are returned, not thrown. */
+  cancelTask(params: CancelTaskParams): Promise<CancelTaskOutcome> {
+    return cancelTask(this, params);
+  }
+
+  /** See {@link expireTask}. */
+  expireTask(params: ExpireTaskParams): Promise<void> {
+    return expireTask(this, params);
   }
 
   // -- shared plumbing -------------------------------------------------------
@@ -253,6 +375,97 @@ export class KeeperRegistryClient implements ContractCaller {
     }
 
     const prepared = rpc.assembleTransaction(built, simulation).build();
+    const signedXdr = await signer.signTransaction(prepared.toXDR(), {
+      networkPassphrase: this.networkPassphrase,
+    });
+    const signed = TransactionBuilder.fromXDR(signedXdr, this.networkPassphrase);
+
+    let sent: rpc.Api.SendTransactionResponse;
+    try {
+      sent = await this.server.sendTransaction(signed as never);
+    } catch (cause) {
+      throw toKeeperError(cause, context);
+    }
+    if (sent.status !== "PENDING") {
+      throw toKeeperError(sent.errorResult ?? `submission returned ${sent.status}`, context);
+    }
+
+    return this.confirm<T>(sent.hash, context);
+  }
+
+  /**
+   * Like {@link invoke}, but additionally signs the Soroban auth entries that
+   * require an address other than the source account.
+   *
+   * Only `transfer_admin` needs this today. The flow differs from `invoke` in
+   * one place: after simulation reports which addresses must authorize, each
+   * matching entry is signed and the transaction is *rebuilt* carrying those
+   * signed entries, because auth entries are part of the operation and cannot
+   * be attached to an already-built transaction.
+   *
+   * @internal Plumbing for the wrappers above; not a supported entry point.
+   */
+  async invokeMultiAuth<T>(params: {
+    method: string;
+    args?: xdr.ScVal[];
+    source: string;
+    signer?: TransactionSigner;
+    /** Signers for every address the call requires, including the source. */
+    authSigners: readonly AuthEntrySigner[];
+  }): Promise<T> {
+    const { method, args = [], source, authSigners } = params;
+    const context = `${method} failed`;
+    const signer = this.resolveSigner(method, source, params.signer);
+
+    const account = await this.loadAccount(source, context);
+    // `build()` advances the local sequence counter, so the rebuild below needs
+    // the value from before the first build, not the mutated one.
+    const startingSequence = account.sequenceNumber();
+    const built = this.buildTransaction(account, method, args);
+
+    let simulation: rpc.Api.SimulateTransactionResponse;
+    try {
+      simulation = await this.server.simulateTransaction(built);
+    } catch (cause) {
+      throw toKeeperError(cause, context);
+    }
+    if (rpc.Api.isSimulationError(simulation)) {
+      throw toKeeperError(simulation.error, context);
+    }
+
+    const success = simulation as rpc.Api.SimulateTransactionSuccessResponse;
+    const entries = success.result?.auth ?? [];
+
+    let validUntilLedgerSeq: number;
+    try {
+      validUntilLedgerSeq =
+        (await this.server.getLatestLedger()).sequence + AUTH_ENTRY_VALIDITY_LEDGERS;
+    } catch (cause) {
+      throw toKeeperError(cause, context);
+    }
+
+    const signedAuth = await signAuthEntries(
+      entries,
+      authSigners,
+      validUntilLedgerSeq,
+      this.networkPassphrase,
+      method,
+    );
+
+    const rebuilt = new TransactionBuilder(new Account(source, startingSequence), {
+      fee: this.fee,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        Operation.invokeHostFunction({
+          func: (built.operations[0] as Operation.InvokeHostFunction).func,
+          auth: signedAuth,
+        }),
+      )
+      .setTimeout(this.timeoutSeconds)
+      .build();
+
+    const prepared = rpc.assembleTransaction(rebuilt, simulation).build();
     const signedXdr = await signer.signTransaction(prepared.toXDR(), {
       networkPassphrase: this.networkPassphrase,
     });

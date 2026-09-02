@@ -117,6 +117,7 @@ fuzz_target!(|data: &[u8]| {
         &deadline,
         &1_000u32,
         &100u32,
+        &None,
     );
 
     client.claim_task(&harness.keeper, &task_id);

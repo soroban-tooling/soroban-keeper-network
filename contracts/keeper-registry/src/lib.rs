@@ -27,6 +27,15 @@
 //! index in `.github/backlog/README.md` for the complete roadmap, or
 //! `CONTRIBUTING.md` for branching rules and the PR checklist.
 //!
+//! ## Verifier Execution & Resource Costs (Phase 2 / E04)
+//! In Phase 2, tasks may optionally attach an on-chain verifier contract
+//! (`IKeeperVerifier`). In Soroban, sub-contract calls run synchronously
+//! against the caller's transaction budget, with no in-band mechanism to cap
+//! sub-call resource consumption. The executing keeper bears the entire
+//! transaction gas/resource cost of the attached verifier. Keepers and keeper
+//! bots must inspect and simulate verifier calls (`verify`) prior to claiming
+//! to ensure net profitability. See `docs/VERIFIER_DESIGN.md` §3.
+//!
 //! ## Storage Layout
 //! - Instance:   Admin, FeeBps, Paused, TaskCounter, RewardToken, FeesAccrued
 //! - Persistent: Task(id) → Task struct, KeeperReward(address) → i128
@@ -43,12 +52,14 @@ mod events;
 mod internal;
 mod task;
 mod types;
+mod verifier;
 mod views;
 
 pub use constants::*;
 pub use errors::KeeperError;
 pub use events::*;
 pub use types::{BatchTaskParams, DataKey, Task, TaskStatus, TaskType};
+pub use verifier::{IKeeperVerifier, KeeperVerifierClient};
 
 // Re-exported for the test and fuzz harnesses, which assert on the reward
 // split directly rather than inferring it from a balance delta.
