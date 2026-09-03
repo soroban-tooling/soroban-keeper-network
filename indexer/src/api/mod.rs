@@ -9,6 +9,7 @@
 //! a dashboard built against v1 keeps working when v2 appears alongside it,
 //! rather than the prefix being retrofitted after something has already broken.
 
+pub mod auth;
 pub mod rate_limit;
 pub mod rest;
 pub mod types;
