@@ -59,7 +59,6 @@ const {
   scValToNative,
   Contract,
 } = require("@stellar/stellar-sdk");
-const { Keypair, nativeToScVal, scValToNative } = require("@stellar/stellar-sdk");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The SDK (@soroban-keeper-network/sdk) — dynamic import, not require()
@@ -120,8 +119,7 @@ function requireEnv(name, { parse, validate, secret = false, fallback }) {
 
 async function validateAndLoadConfig() {
   const { StrKey } = require("@stellar/stellar-sdk"); // Moved inside to be used only here
-  const { NETWORK_PRESETS, NETWORK_NAMES, isNetworkName, KeeperRegistryClient } =
-    await loadSdk();
+  const { NETWORK_PRESETS, NETWORK_NAMES, isNetworkName } = await loadSdk();
 
   const network = requireEnv("NETWORK", {
     validate: {
@@ -148,19 +146,11 @@ async function validateAndLoadConfig() {
 
   // After validating the required string values, we can create the server
   // connection and use it to validate the contract's existence on the network.
-  const { rpcUrl } = NETWORK_CONFIG[network];
+  const { rpcUrl } = NETWORK_PRESETS[network];
   const server = createServer(rpcUrl);
-  // After validating the required string values, we can create the client
-  // and use its underlying RPC connection to validate the contract's
-  // existence on the network.
-  const client = new KeeperRegistryClient({
-    contractId: registryContractId,
-    network: NETWORK_PRESETS[network],
-    keypair: Keypair.fromSecret(secretKey),
-  });
 
   try {
-    await client.rpc.getContractData(registryContractId);
+    await server.getContractData(registryContractId);
   } catch (e) {
     if (e.response && e.response.status === 404) {
       fail(
@@ -327,52 +317,7 @@ const REGISTRY_EVENTS = {
  * regression test in test/rpcNamespace.test.js call this offline.
  */
 function createServer(rpcUrl) {
-  return new rpc.Server(rpcUrl, { allowHttp: false });
-}
-
-async function simulateAndSend(server, keypair, networkPassphrase, tx) {
-  const simResponse = await server.simulateTransaction(tx);
-  if (rpc.Api.isSimulationError(simResponse)) {
-    throw new Error(`Simulation failed: ${simResponse.error}`);
-  }
-
-  const preparedTx = rpc.assembleTransaction(tx, simResponse).build();
-  preparedTx.sign(keypair);
-
-  const sendResponse = await server.sendTransaction(preparedTx);
-  if (sendResponse.status === "ERROR") {
-    throw new Error(`Send failed: ${JSON.stringify(sendResponse.errorResult)}`);
-  }
-
-  // Poll for confirmation
-  let getResponse = await server.getTransaction(sendResponse.hash);
-  let attempts = 0;
-  while (getResponse.status === rpc.Api.GetTransactionStatus.NOT_FOUND && attempts < 30) {
-    await sleep(2000);
-    getResponse = await server.getTransaction(sendResponse.hash);
-    attempts++;
-  }
-
-  if (getResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
-    return getResponse;
-  } else {
-    throw new Error(`Transaction failed with status: ${getResponse.status}`);
-  }
-}
-
-async function invokeContract(server, keypair, networkPassphrase, contractId, method, args) {
-  const account = await server.getAccount(keypair.publicKey());
-  const contract = new Contract(contractId);
-
-  const tx = new TransactionBuilder(account, {
-    fee: BASE_FEE,
-    networkPassphrase,
-  })
-    .addOperation(contract.call(method, ...args))
-    .setTimeout(30)
-    .build();
-
-  return simulateAndSend(server, keypair, networkPassphrase, tx);
+  return new SorobanRpc.Server(rpcUrl, { allowHttp: false });
 }
 
 /**
@@ -380,13 +325,13 @@ async function invokeContract(server, keypair, networkPassphrase, contractId, me
  *
  * No transaction is signed, submitted, or confirmed, and no sequence number
  * is consumed — this is safe (and cheap) to call on every polling round.
- * Use `invokeContract` instead for anything that mutates state, since that
- * is the only path that actually submits.
+ * Use the SDK client's own typed methods (`client.claimTask`,
+ * `client.executeTask`, ...) instead for anything that mutates state, since
+ * those are the paths that actually submit.
  *
  * Note: simulation still builds a transaction envelope, so `server.getAccount`
- * requires the source account to already exist (be funded) on-chain — the
- * same requirement `invokeContract` has today. A brand-new, unfunded keeper
- * key will throw here.
+ * requires the source account to already exist (be funded) on-chain. A
+ * brand-new, unfunded keeper key will throw here.
  */
 async function readContract(server, sourcePublicKey, networkPassphrase, contractId, method, args) {
   const account = await server.getAccount(sourcePublicKey);
@@ -401,7 +346,7 @@ async function readContract(server, sourcePublicKey, networkPassphrase, contract
     .build();
 
   const sim = await server.simulateTransaction(tx);
-  if (rpc.Api.isSimulationError(sim)) {
+  if (SorobanRpc.Api.isSimulationError(sim)) {
     throw new Error(`Simulation failed: ${sim.error}`);
   }
   return sim.result ? scValToNative(sim.result.retval) : null;
@@ -756,7 +701,7 @@ async function executeTaskOffChain(task, ctx, simulateExecution) {
 // Main keeper loop
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function keeperLoop(client, emptyRounds = 0) {
+async function keeperLoop(client, keypair, emptyRounds = 0) {
   // A round is successful if it runs to completion without any unhandled
   // exceptions. An RPC error that cannot be resolved with retries, or any
   // other unexpected error, is a failure.
@@ -764,17 +709,17 @@ async function keeperLoop(client, emptyRounds = 0) {
   // another keeper is also a success, as this is normal competitive behaviour.
   const summary = { processed: 0, errors: [] };
   let newEmptyRounds = emptyRounds;
-  const keypair = client.keypair;
+  const server = client.getServer();
 
   try {
     const nowSeconds = Math.floor(Date.now() / 1000);
     console.log(`\nKeeper round at ${new Date().toISOString()}`);
 
-    const latestLedger = await client.rpc.getLatestLedger();
+    const latestLedger = await server.getLatestLedger();
     const startLedger = Math.max(1, latestLedger.sequence - 1000);
 
     const pendingTasks = await fetchPendingTasks(
-      client.rpc,
+      server,
       client.contractId,
       startLedger
     );
@@ -827,8 +772,8 @@ async function keeperLoop(client, emptyRounds = 0) {
         const fullTask = await readContract(
           server,
           keypair.publicKey(),
-          networkPassphrase,
-          contractId,
+          client.networkPassphrase,
+          client.contractId,
           "get_task",
           [nativeToScVal(task.taskId, { type: "u64" })]
         );
@@ -836,10 +781,7 @@ async function keeperLoop(client, emptyRounds = 0) {
           `  Attempting to claim task ${task.taskId} (reward: ${task.reward})...`
         );
         await withRetry(`claim_task ${task.taskId}`, () =>
-          client.invoke("claim_task", [
-            nativeToScVal(keypair.publicKey(), { type: "address" }),
-            nativeToScVal(task.taskId, { type: "u64" }),
-          ])
+          client.claimTask({ keeper: keypair.publicKey(), taskId: task.taskId })
         );
         const taskType = fullTask.task_type;
         const taskTypeName = TASK_TYPE_NAMES[taskType] || `Unknown(${taskType})`;
@@ -868,7 +810,7 @@ async function keeperLoop(client, emptyRounds = 0) {
         }
 
         const executorCtx = {
-          server: client.rpc,
+          server,
           keypair,
           networkPassphrase: client.networkPassphrase,
           log: (msg) => console.log(msg),
@@ -892,7 +834,7 @@ async function keeperLoop(client, emptyRounds = 0) {
         const profitCheck = await estimateTaskProfitability({
           server,
           sourcePublicKey: keypair.publicKey(),
-          networkPassphrase,
+          networkPassphrase: client.networkPassphrase,
           task: evaluatedTask,
           proof: candidateProof,
           minProfitMargin: CONFIG.minProfitMarginStroops,
@@ -909,33 +851,16 @@ async function keeperLoop(client, emptyRounds = 0) {
           `  Attempting to claim task ${task.taskId} (reward: ${task.reward}, est net profit: ${profitCheck.netProfit} stroops)...`
         );
         await withRetry(`claim_task ${task.taskId}`, () =>
-          invokeContract(
-            server,
-            keypair,
-            networkPassphrase,
-            contractId,
-            "claim_task",
-            [
-              nativeToScVal(keypair.publicKey(), { type: "address" }),
-              nativeToScVal(task.taskId, { type: "u64" }),
-            ]
-          )
+          client.claimTask({ keeper: keypair.publicKey(), taskId: task.taskId })
         );
         console.log(`  Task ${task.taskId} claimed!`);
 
         await withRetry(`execute_task ${task.taskId}`, () =>
-          invokeContract(
-            server,
-            keypair,
-            networkPassphrase,
-            contractId,
-            "execute_task",
-            [
-              nativeToScVal(keypair.publicKey(), { type: "address" }),
-              nativeToScVal(task.taskId, { type: "u64" }),
-              nativeToScVal(candidateProof, { type: "bytes" }),
-            ]
-          )
+          client.executeTask({
+            keeper: keypair.publicKey(),
+            taskId: task.taskId,
+            proof: candidateProof,
+          })
         );
         console.log(
           `  Task ${task.taskId} executed! Proof: ${candidateProof.toString("hex").slice(0, 20)}...`
@@ -989,15 +914,15 @@ async function keeperLoop(client, emptyRounds = 0) {
 async function main() {
   await validateAndLoadConfig();
 
-  const { NETWORK_PRESETS, KeeperRegistryClient, checkContractCompatibility, compatibilityWarning } =
-    await loadSdk();
-  const { rpcUrl } = NETWORK_PRESETS[CONFIG.network];
+  const { NETWORK_PRESETS, KeeperRegistryClient, keypairSigner } = await loadSdk();
+  const { rpcUrl, networkPassphrase } = NETWORK_PRESETS[CONFIG.network];
   const keypair = Keypair.fromSecret(CONFIG.secretKey);
   const server = createServer(rpcUrl);
   const client = new KeeperRegistryClient({
     contractId: CONFIG.registryContractId,
-    network: CONFIG.network,
-    keypair,
+    rpcUrl,
+    networkPassphrase,
+    signer: keypairSigner(keypair),
   });
 
   console.log("");
@@ -1023,8 +948,6 @@ async function main() {
     // of throwing, so the startup banner has been printing a hole where the
     // one number that proves RPC is live should be.
     console.log(`RPC healthy — ledger ${health.latestLedger}`);
-    const health = await client.rpc.getHealth();
-    console.log(`RPC healthy — ledger ${health.ledger}`);
   } catch (e) {
     console.error(`RPC unreachable at ${rpcUrl}: ${e.message}`);
     process.exit(1);
@@ -1033,15 +956,11 @@ async function main() {
   // SDK ↔ contract version compatibility check (packages/sdk-ts/VERSIONING.md).
   // Advisory only — logged, never a hard stop, since an operator running an
   // older-but-still-working combination should not be forced to upgrade to
-  // silence a warning.
-  const contractVersion = await client.version();
-  const warning = compatibilityWarning(checkContractCompatibility(contractVersion));
-  if (warning) {
-    console.warn(warning);
-  }
+  // silence a warning. `client.version()` already warns on a mismatch.
+  await client.version();
 
   if (CONFIG.once) {
-    const { summary } = await keeperLoop(client);
+    const { summary } = await keeperLoop(client, keypair);
     const ok = summary.errors.length === 0;
     console.log(ok ? "Round complete." : "Round completed with errors.");
     process.exit(ok ? 0 : 1);
@@ -1072,6 +991,7 @@ async function main() {
     try {
       const { summary, emptyRounds: newEmptyRounds } = await keeperLoop(
         client,
+        keypair,
         emptyRounds
       );
       emptyRounds = newEmptyRounds;

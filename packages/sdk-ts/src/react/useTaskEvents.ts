@@ -10,8 +10,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { decodeTaskEvent, type TaskEvent } from "../events";
-import { useKeeperRegistryClient } from "./provider";
+import { decodeTaskEvent, type TaskEvent } from "../events.js";
+import { useKeeperRegistryClient } from "./provider.js";
 
 const DEFAULT_POLL_INTERVAL_MS = 5000;
 /** `getEvents` retention window is short-lived on most RPC providers; a page just mounted has no prior cursor, so it starts from "now" rather than attempting to backfill history it may not be entitled to. */
@@ -70,7 +70,7 @@ export function useTaskEvents(options: UseTaskEventsOptions = {}): UseTaskEvents
 
   const poll = useCallback(async () => {
     try {
-      const server = client.invoker.getServer();
+      const server = client.getServer();
       const request =
         cursorRef.current !== undefined
           ? { cursor: cursorRef.current, limit: EVENTS_PER_POLL_LIMIT }
@@ -85,7 +85,7 @@ export function useTaskEvents(options: UseTaskEventsOptions = {}): UseTaskEvents
 
       const response = await server.getEvents({
         ...request,
-        filters: [{ type: "contract", contractIds: [client.config.contractId] }],
+        filters: [{ type: "contract", contractIds: [client.contractId] }],
       });
 
       cursorRef.current = response.cursor;
@@ -132,7 +132,6 @@ export function useTaskEvents(options: UseTaskEventsOptions = {}): UseTaskEvents
     // the cursor/dedup state) on every parent re-render rather than only
     // when the poll interval or client actually changes. `poll`'s closure
     // reads the current `eventTypes` value fresh on every tick regardless.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [poll, pollIntervalMs]);
 
   return { events, loading, error };

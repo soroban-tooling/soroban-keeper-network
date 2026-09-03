@@ -5,9 +5,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { TaskNotFoundError } from "../errors";
-import type { Task } from "../types";
-import { useKeeperRegistryClient } from "./provider";
+import { TaskNotFoundError } from "../errors.js";
+import type { Task } from "../types.js";
+import { useKeeperRegistryClient } from "./provider.js";
 
 const DEFAULT_POLL_INTERVAL_MS = 5000;
 
@@ -81,7 +81,6 @@ export function useTask(taskId: number, options: UseTaskOptions = {}): UseTaskRe
   }, [fetchTask]);
 
   useEffect(() => {
-    let intervalId: ReturnType<typeof setInterval> | undefined;
     let cancelled = false;
 
     const isDocumentHidden = () => typeof document !== "undefined" && document.hidden;
@@ -94,7 +93,7 @@ export function useTask(taskId: number, options: UseTaskOptions = {}): UseTaskRe
     // Initial fetch fires immediately regardless of visibility — a task
     // detail view navigated to directly should never start blank.
     void fetchTask();
-    intervalId = setInterval(tick, pollIntervalMs);
+    const intervalId = setInterval(tick, pollIntervalMs);
 
     const handleVisibilityChange = () => {
       // Resuming from hidden should refresh immediately rather than

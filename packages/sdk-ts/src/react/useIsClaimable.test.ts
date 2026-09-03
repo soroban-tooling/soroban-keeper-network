@@ -1,30 +1,33 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { useIsClaimable } from "./useIsClaimable";
+import { useIsClaimable } from "./useIsClaimable.js";
+import { KeeperRegistryProvider } from "./provider.js";
+
+function wrapper(client: unknown) {
+  return ({ children }: { children: ReactNode }) =>
+    createElement(KeeperRegistryProvider, { client: client as never, children });
+}
 
 describe("useIsClaimable", () => {
   it("tracks changes in claimability", async () => {
     let claimable = false;
-
     const isClaimable = vi.fn(async () => claimable);
 
-    const client = {
-      isClaimable,
-    };
+    const { result } = renderHook(() => useIsClaimable(1n), {
+      wrapper: wrapper({ isClaimable }),
+    });
 
-    // Mount through the repository's actual
-    // KeeperRegistryProvider implementation.
-
-    // Initial state:
-    expect(claimable).toBe(false);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(isClaimable).toHaveBeenCalled();
+    expect(result.current.isClaimable).toBe(false);
 
     claimable = true;
+    await act(async () => {
+      await result.current.refetch();
+    });
 
-    // Trigger refetch using the hook result.
-    // The exact wrapper should use the project's
-    // existing provider/test utilities.
-
-    expect(isClaimable).toHaveBeenCalled();
+    expect(result.current.isClaimable).toBe(true);
   });
 });

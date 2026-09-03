@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { useKeeperRegistryClient } from "./provider";
+import { useKeeperRegistryClient } from "./provider.js";
 
 export type RegisterTaskStatus =
   | "idle"

@@ -7,7 +7,7 @@
 
 import { createContext, type ReactNode, useContext } from "react";
 
-import type { KeeperRegistryClient } from "../client";
+import type { KeeperRegistryClient } from "../client.js";
 
 const KeeperRegistryContext = createContext<KeeperRegistryClient | undefined>(undefined);
 

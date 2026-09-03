@@ -12,5 +12,5 @@ import { Keypair } from "@stellar/stellar-sdk";
 import { randomBytes } from "node:crypto";
 
 export function randomKeypair(): Keypair {
-  return Keypair.fromRawEd25519Seed(new Uint8Array(randomBytes(32)));
+  return Keypair.fromRawEd25519Seed(new Uint8Array(randomBytes(32)) as unknown as Buffer);
 }

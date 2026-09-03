@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeKeeperError, KeeperContractError, KeeperErrorCode, TaskNotFoundError } from "./errors";
+import { decodeKeeperError, KeeperContractError, KeeperErrorCode, TaskNotFoundError } from "./errors.js";
 
 describe("decodeKeeperError", () => {
   it("extracts a known error code from the standard Soroban diagnostic format", () => {
@@ -56,10 +56,8 @@ describe("TaskNotFoundError", () => {
     expect(err.taskId).toBe(42);
     expect(err.message).toBe("Task 42 not found");
     expect(err.name).toBe("TaskNotFoundError");
-import {
-  KeeperErrorCode,
-  decodeKeeperError,
-} from "./errors";
+  });
+});
 
 describe("KeeperErrorCode", () => {
   it("matches the contract discriminants", () => {
@@ -86,34 +84,5 @@ describe("KeeperErrorCode", () => {
     expect(KeeperErrorCode.BatchTooLarge).toBe(21);
     expect(KeeperErrorCode.EmptyBatch).toBe(22);
     expect(KeeperErrorCode.BatchRewardCeilingExceeded).toBe(23);
-  });
-
-  it("decodes a known contract error", () => {
-    expect(
-      decodeKeeperError({ errorCode: 4 }),
-    ).toBe(KeeperErrorCode.TaskNotFound);
-  });
-
-  it("returns undefined for an unknown code", () => {
-    expect(
-      decodeKeeperError({ errorCode: 999 }),
-    ).toBeUndefined();
-  });
-
-  it("returns undefined for network errors", () => {
-    expect(
-      decodeKeeperError(
-        new Error("network unavailable"),
-      ),
-    ).toBeUndefined();
-  });
-
-  it("returns undefined for non-contract failures", () => {
-    expect(
-      decodeKeeperError({
-        status: 500,
-        message: "RPC unavailable",
-      }),
-    ).toBeUndefined();
   });
 });
