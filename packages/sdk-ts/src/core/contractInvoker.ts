@@ -14,7 +14,7 @@ import {
   type xdr,
 } from "@stellar/stellar-sdk";
 
-import type { KeeperRegistryClientConfig } from "../types";
+import type { KeeperRegistryClientConfig } from "../types.js";
 
 /** How long a built transaction accepts a signature before it expires. */
 const DEFAULT_TX_TIMEOUT_SECONDS = 30;

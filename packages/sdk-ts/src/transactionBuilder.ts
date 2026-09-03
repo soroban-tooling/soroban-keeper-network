@@ -11,7 +11,7 @@
 
 import { BASE_FEE, nativeToScVal, rpc as SorobanRpc, type Transaction, TransactionBuilder as StellarTransactionBuilder } from "@stellar/stellar-sdk";
 
-import type { KeeperRegistryClient } from "./client";
+import type { KeeperRegistryClient } from "./client.js";
 
 /**
  * An unsigned transaction plus enough metadata for a caller to drive its
@@ -52,11 +52,11 @@ export async function buildTransaction(
   method: string,
   args: ReturnType<typeof nativeToScVal>[],
 ): Promise<UnsignedTransaction> {
-  const tx = await client.invoker.buildAndAssembleTransaction(sourcePublicKey, method, args);
+  const tx = await client.buildAssembledTransaction(sourcePublicKey, method, args);
   return {
     xdr: tx.toXDR(),
     signerAccounts: [sourcePublicKey],
-    networkPassphrase: client.config.networkPassphrase,
+    networkPassphrase: client.networkPassphrase,
   };
 }
 
@@ -79,17 +79,17 @@ export function buildFeeBumpTransaction(
   sponsorPublicKey: string,
   signedInnerTxXdr: string,
 ): UnsignedTransaction {
-  const innerTx = StellarTransactionBuilder.fromXDR(signedInnerTxXdr, client.config.networkPassphrase) as Transaction;
+  const innerTx = StellarTransactionBuilder.fromXDR(signedInnerTxXdr, client.networkPassphrase) as Transaction;
   const feeBumpTx = StellarTransactionBuilder.buildFeeBumpTransaction(
     sponsorPublicKey,
     BASE_FEE,
     innerTx,
-    client.config.networkPassphrase,
+    client.networkPassphrase,
   );
   return {
     xdr: feeBumpTx.toXDR(),
     signerAccounts: [sponsorPublicKey],
-    networkPassphrase: client.config.networkPassphrase,
+    networkPassphrase: client.networkPassphrase,
   };
 }
 
@@ -113,8 +113,8 @@ export interface ExternalSigner {
  * simulating once, right before the last signature is collected.
  */
 export async function submitSignedTransaction<T>(client: KeeperRegistryClient, signedXdr: string): Promise<T> {
-  const tx = StellarTransactionBuilder.fromXDR(signedXdr, client.config.networkPassphrase) as Transaction;
-  const server = client.invoker.getServer();
+  const tx = StellarTransactionBuilder.fromXDR(signedXdr, client.networkPassphrase) as Transaction;
+  const server = client.getServer();
 
   const sendResponse = await server.sendTransaction(tx);
   if (sendResponse.status === "ERROR") {
