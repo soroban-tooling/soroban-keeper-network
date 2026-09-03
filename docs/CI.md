@@ -13,6 +13,7 @@ without blocking your PR.
 | `sdk-ts` | Required | The TypeScript SDK (`packages/sdk-ts`) must build, pass its own test suite, and lint clean. Uploads its built `dist/` as an artifact for `bot` to consume. |
 | `bot` | Required | The example keeper bot (`examples/keeper-bot`) must lint, syntax-check, and pass its own test suite. Depends on `sdk-ts`'s built output (the bot's `@soroban-keeper-network/sdk` dependency is a local `file:` reference, which `npm install` copies as-is rather than building). |
 | `indexer` | Required | The indexer service (`indexer/`) must format, build, and pass its test suite, including the database-backed tests. See [The indexer job](#the-indexer-job). |
+| `rust-sdk` | Required | The Rust SDK crate (`rust-sdk/`) must compile and pass all unit and integration tests. |
 | `clippy` | Advisory (`continue-on-error: true`) | Lints are useful but subjective enough that a maintainer should decide case-by-case, not have every PR blocked by a new upstream lint. |
 | `audit` | Advisory (`continue-on-error: true`) | A new upstream dependency CVE should notify maintainers, not fail every open PR the moment it's published. |
 | `wasm-size` | Advisory (`continue-on-error: true`) | Reports binary size for visibility; see below. |
@@ -21,8 +22,9 @@ without blocking your PR.
 | `sdk-bundle-size` | Advisory (`continue-on-error: true`) | Reports the SDK's minified+gzipped bundle size for visibility — the frontend analogue of `wasm-size`; see below. |
 
 `ci-required` is the single check branch protection should require — it
-passes only when `format`, `test`, `build-wasm`, `sdk-ts`, `bot`, and
-`indexer` all succeed, and ignores the advisory jobs' outcomes entirely.
+passes only when `format`, `test`, `build-wasm`, `sdk-ts`, `bot`, `indexer`, and `rust-sdk` all
+succeed, and ignores the advisory jobs' outcomes entirely.
+
 
 Run every required check locally before opening a PR:
 
