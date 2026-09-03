@@ -1,6 +1,5 @@
 use soroban_keeper_sdk::{
-    BatchTaskParams, KeeperClient, KeypairSigner, TaskRegisteredEvent, TaskType,
-    TransactionSigner,
+    BatchTaskParams, KeeperClient, KeypairSigner, TaskRegisteredEvent, TaskType, TransactionSigner,
 };
 use soroban_sdk::{testutils::Address as _, Address, Bytes, Env, Vec};
 
@@ -13,7 +12,10 @@ impl TransactionSigner for CustomHsmSigner {
         self.addr.clone()
     }
 
-    fn sign_payload(&self, payload: &[u8]) -> Result<soroban_sdk::Bytes, soroban_keeper_sdk::SignerError> {
+    fn sign_payload(
+        &self,
+        payload: &[u8],
+    ) -> Result<soroban_sdk::Bytes, soroban_keeper_sdk::SignerError> {
         let mut bytes = Bytes::new(&self.addr.env());
         for &b in payload {
             bytes.push_back(b);
@@ -38,7 +40,7 @@ fn test_signer_abstraction() {
 fn test_event_decoding() {
     let env = Env::default();
     let owner = Address::generate(&env);
-    
+
     let event = TaskRegisteredEvent {
         task_id: 42,
         owner: owner.clone(),
@@ -64,7 +66,9 @@ fn test_client_initialization_and_admin() {
     let client = KeeperClient::new(&env, contract_id.clone(), &signer);
 
     // Initialize
-    client.initialize(&reward_token, 300).expect("Failed to initialize");
+    client
+        .initialize(&reward_token, 300)
+        .expect("Failed to initialize");
 
     // Pause & Unpause
     client.pause().expect("Failed to pause");
@@ -74,7 +78,9 @@ fn test_client_initialization_and_admin() {
     client.set_fee_bps(500).expect("Failed to set fee bps");
 
     // Min reward
-    client.set_min_reward(1000).expect("Failed to set min reward");
+    client
+        .set_min_reward(1000)
+        .expect("Failed to set min reward");
 }
 
 #[test]
@@ -92,7 +98,9 @@ fn test_batch_operations_and_queries() {
     token_admin.mint(&admin_addr, &100_000_000);
 
     let client = KeeperClient::new(&env, contract_id.clone(), &signer);
-    client.initialize(&reward_token, 300).expect("Failed to initialize");
+    client
+        .initialize(&reward_token, 300)
+        .expect("Failed to initialize");
 
     let mut tasks = Vec::new(&env);
     tasks.push_back(BatchTaskParams {
@@ -104,7 +112,9 @@ fn test_batch_operations_and_queries() {
         lock_ledgers: 20,
     });
 
-    let task_ids = client.batch_register_tasks(tasks, 1_000_000).expect("Failed to batch register");
+    let task_ids = client
+        .batch_register_tasks(tasks, 1_000_000)
+        .expect("Failed to batch register");
     assert_eq!(task_ids.len(), 1);
 
     let retrieved = client.get_tasks(task_ids.clone());
