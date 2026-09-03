@@ -19,17 +19,41 @@ async fn pool() -> Option<PgPool> {
             return None;
         }
     };
+    // Fixtures run in their own SCHEMA, not just their own version range:
+    // sqlx keeps one _sqlx_migrations record per schema and cross-checks
+    // every applied version against the resolved source, so fixture rows in
+    // the shared record would make every later run of the REAL migrator
+    // fail with VersionMissing. search_path isolation gives the fixtures a
+    // record of their own and leaves the real one untouched.
     let pool = PgPoolOptions::new()
         .max_connections(2)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("create schema if not exists migrate_fixtures")
+                    .execute(&mut *conn)
+                    .await?;
+                sqlx::query("set search_path to migrate_fixtures")
+                    .execute(&mut *conn)
+                    .await?;
+                Ok(())
+            })
+        })
         .connect(&url)
         .await
         .expect("connect to INDEXER_TEST_DATABASE_URL");
-    // A truly fresh database for every test: the fixture table and the
-    // migration record both go, so "fresh database, one command" is real.
-    sqlx::query("drop table if exists fixture_tasks, _sqlx_migrations cascade")
+    // A truly fresh slate for every test: the whole fixture schema goes —
+    // tables and migration record alike — so "fresh database, one command"
+    // is real.
+    sqlx::query("drop schema if exists migrate_fixtures cascade")
         .execute(&pool)
         .await
         .expect("reset");
+    // `if not exists`: a second pool connection's after_connect hook may
+    // race this recreate with its own idempotent create.
+    sqlx::query("create schema if not exists migrate_fixtures")
+        .execute(&pool)
+        .await
+        .expect("recreate fixture schema");
     Some(pool)
 }
 

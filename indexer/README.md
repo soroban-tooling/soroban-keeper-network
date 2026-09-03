@@ -49,8 +49,13 @@ because it stores nothing yet.
 ## Tests
 
 `cargo test -p keeper-indexer` — config validation (including the
-secret-redaction contract) and RPC response decoding. Nothing here needs a
-database or network.
+secret-redaction contract) and RPC response decoding need nothing. The
+ingestion-idempotency and migration suites additionally run against a real
+Postgres when `INDEXER_TEST_DATABASE_URL` is set (e.g. a throwaway
+`docker run -e POSTGRES_PASSWORD=pw -p 55440:5432 postgres:16-alpine`),
+and print a skip and pass without it — so the workspace suite stays green
+in environments with no database. Migration-test fixtures run in their own
+`migrate_fixtures` schema and never touch the real migration record.
 
 ## Health
 
