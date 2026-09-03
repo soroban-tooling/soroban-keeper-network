@@ -127,6 +127,29 @@ impl Event {
         }
     }
 
+    /// The task a task-scoped event concerns; `None` for admin- and
+    /// keeper-scoped events. Stored in its own indexed column so the task
+    /// detail page's event-history query never scans jsonb.
+    pub fn task_id(&self) -> Option<u64> {
+        match self {
+            Event::TaskRegistered { task_id, .. }
+            | Event::TaskClaimed { task_id, .. }
+            | Event::TaskExecuted { task_id, .. }
+            | Event::TaskExpired { task_id }
+            | Event::TaskCancelled { task_id, .. }
+            | Event::RewardIncreased { task_id, .. }
+            | Event::DeadlineExtended { task_id, .. } => Some(*task_id),
+            Event::RewardsWithdrawn { .. }
+            | Event::Paused { .. }
+            | Event::FeeUpdated { .. }
+            | Event::AdminTransferred { .. }
+            | Event::MinRewardUpdated { .. }
+            | Event::FeesSwept { .. }
+            | Event::Initialized { .. }
+            | Event::Upgraded { .. } => None,
+        }
+    }
+
     fn payload(&self) -> serde_json::Value {
         match self {
             Event::TaskRegistered {
@@ -240,8 +263,8 @@ pub async fn apply(
     let mut tx = pool.begin().await?;
 
     let inserted = sqlx::query(
-        "insert into events (event_id, ledger, closed_at, contract_id, type, payload)
-         values ($1, $2, $3::timestamptz, $4, $5, $6)
+        "insert into events (event_id, ledger, closed_at, contract_id, type, task_id, payload)
+         values ($1, $2, $3::timestamptz, $4, $5, $6, $7)
          on conflict (event_id) do nothing",
     )
     .bind(event_id)
@@ -249,6 +272,7 @@ pub async fn apply(
     .bind(closed_at)
     .bind(contract_id)
     .bind(event.type_name())
+    .bind(event.task_id().map(|id| id as i64))
     .bind(event.payload())
     .execute(&mut *tx)
     .await?
