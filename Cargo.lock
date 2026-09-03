@@ -2873,6 +2873,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "soroban-keeper-sdk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "keeper-registry",
+ "rand 0.8.7",
+ "soroban-sdk",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "soroban-ledger-snapshot"
 version = "22.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"

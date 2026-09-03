@@ -3,10 +3,12 @@ resolver = "2"
 members = [
     "contracts/keeper-registry",
     "indexer",
+    "rust-sdk",
 ]
 
 [workspace.dependencies]
 soroban-sdk = { version = "22.0.1", features = ["testutils"] }
+thiserror = "2"
 
 [profile.release]
 opt-level = "z"
