@@ -5,7 +5,9 @@ use keeper_indexer::store::Store;
 
 #[tokio::test]
 async fn test_protocol_stats_and_address_activity() {
-    let store = Store::connect("sqlite::memory:").await.expect("connect store");
+    let store = Store::connect("sqlite::memory:")
+        .await
+        .expect("connect store");
 
     // Ingest events
     let owner = "GD5JDJFDG7O5VJ5FBG4G4G4G4G4G4G4G4G4G4G4G4G4G4G4G4G4G4G4G";
@@ -74,7 +76,9 @@ async fn test_protocol_stats_and_address_activity() {
         .unwrap();
 
     // 1. Verify protocol stats query (Issue #356)
-    let stats = get_protocol_stats(&store).await.expect("get_protocol_stats");
+    let stats = get_protocol_stats(&store)
+        .await
+        .expect("get_protocol_stats");
     assert_eq!(stats.total_tasks_registered, 1);
     assert_eq!(stats.total_value_escrowed, "1000000");
     assert_eq!(stats.total_fees_swept, "30000");

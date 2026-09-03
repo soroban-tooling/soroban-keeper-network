@@ -3,11 +3,11 @@
 //! Aggregates historical and current protocol metrics from indexed event history:
 //! total tasks, total value escrowed, active open escrow, swept fees, and current fee rate.
 
+use crate::events::EventPayload;
+use crate::store::Store;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use crate::events::EventPayload;
-use crate::store::Store;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ProtocolStats {

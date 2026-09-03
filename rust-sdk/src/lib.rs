@@ -22,4 +22,3 @@ pub use network::{CustomNetworkConfig, Network, NetworkConfig, FUTURENET, MAINNE
 pub use retry::{default_classify, ErrorClass, RetryPolicy, RpcCallError, TransportError};
 pub use signing::{KeypairSigner, SignerError, TransactionSigner};
 pub use types::{BatchTaskParams, Task, TaskStatus, TaskType};
-

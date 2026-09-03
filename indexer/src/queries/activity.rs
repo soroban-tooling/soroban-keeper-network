@@ -3,11 +3,11 @@
 //! Interleaves owner-role and keeper-role events chronologically into a single
 //! feed, tagged with the active role for user dashboards.
 
+use crate::events::EventPayload;
+use crate::store::Store;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use crate::events::EventPayload;
-use crate::store::Store;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -50,7 +50,12 @@ pub async fn get_address_activity(
 
     for ev in page.events {
         match &ev.payload {
-            EventPayload::TaskRegistered { task_id, owner, reward, .. } => {
+            EventPayload::TaskRegistered {
+                task_id,
+                owner,
+                reward,
+                ..
+            } => {
                 if owner == address {
                     feed_items.push(ActivityItem {
                         cursor: ev.cursor,
@@ -63,7 +68,9 @@ pub async fn get_address_activity(
                     });
                 }
             }
-            EventPayload::TaskClaimed { task_id, keeper, .. } => {
+            EventPayload::TaskClaimed {
+                task_id, keeper, ..
+            } => {
                 if keeper == address {
                     feed_items.push(ActivityItem {
                         cursor: ev.cursor,
@@ -76,7 +83,12 @@ pub async fn get_address_activity(
                     });
                 }
             }
-            EventPayload::TaskExecuted { task_id, keeper, net_reward, .. } => {
+            EventPayload::TaskExecuted {
+                task_id,
+                keeper,
+                net_reward,
+                ..
+            } => {
                 if keeper == address {
                     feed_items.push(ActivityItem {
                         cursor: ev.cursor,
@@ -120,11 +132,7 @@ pub async fn get_address_activity(
     }
 
     let total_count = feed_items.len();
-    let paged_items: Vec<ActivityItem> = feed_items
-        .into_iter()
-        .skip(offset)
-        .take(limit)
-        .collect();
+    let paged_items: Vec<ActivityItem> = feed_items.into_iter().skip(offset).take(limit).collect();
 
     Ok(AddressActivityFeed {
         address: address.to_string(),

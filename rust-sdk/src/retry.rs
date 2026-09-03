@@ -131,7 +131,8 @@ impl RetryPolicy {
     /// `classify` calls it permanent — never retried.
     pub async fn run<T, C, Classify, SleepFn, SleepFut>(
         &self,
-        mut op: impl FnMut() -> std::pin::Pin<Box<dyn Future<Output = Result<T, RpcCallError<C>>> + Send>>,
+        mut op: impl FnMut()
+            -> std::pin::Pin<Box<dyn Future<Output = Result<T, RpcCallError<C>>> + Send>>,
         classify: Classify,
         sleep: SleepFn,
     ) -> Result<T, RpcCallError<C>>
@@ -198,7 +199,11 @@ mod tests {
             .await;
 
         assert_eq!(result, Ok("submitted"));
-        assert_eq!(calls.load(Ordering::SeqCst), 2, "one retry after the timeout");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "one retry after the timeout"
+        );
     }
 
     #[tokio::test]
@@ -226,7 +231,11 @@ mod tests {
             result,
             Err(RpcCallError::Contract(MockKeeperError::LockPeriodActive))
         );
-        assert_eq!(calls.load(Ordering::SeqCst), 1, "no retry on a decoded contract error");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "no retry on a decoded contract error"
+        );
     }
 
     #[tokio::test]
@@ -241,7 +250,9 @@ mod tests {
             .run(
                 || {
                     calls.fetch_add(1, Ordering::SeqCst);
-                    Box::pin(async { Err(RpcCallError::Transport(TransportError::ConnectionReset)) })
+                    Box::pin(async {
+                        Err(RpcCallError::Transport(TransportError::ConnectionReset))
+                    })
                 },
                 default_classify,
                 instant_sleep,

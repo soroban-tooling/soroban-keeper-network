@@ -1,8 +1,8 @@
 //! High-level typed client for the Keeper Registry Soroban contract (Issues #333, #334, #340).
 
-use soroban_sdk::{Address, Env, Vec};
 use crate::signing::TransactionSigner;
 pub use crate::types::{BatchTaskParams, Task};
+use soroban_sdk::{Address, Env, Vec};
 
 /// High-level client wrapping all contract interactions for integrators and keepers.
 pub struct KeeperClient<'a, S: TransactionSigner> {
@@ -50,11 +50,7 @@ impl<'a, S: TransactionSigner> KeeperClient<'a, S> {
     // ── Issue #334: Admin Entry Points ───────────────────────────────────────
 
     /// Initialize the contract with admin address, reward token, and fee basis points.
-    pub fn initialize(
-        &self,
-        reward_token: &Address,
-        fee_bps: u32,
-    ) -> Result<(), ClientError> {
+    pub fn initialize(&self, reward_token: &Address, fee_bps: u32) -> Result<(), ClientError> {
         let raw_client = keeper_registry::KeeperRegistryClient::new(self.env, &self.contract_id);
         raw_client
             .try_initialize(&self.signer.address(), reward_token, &fee_bps)
