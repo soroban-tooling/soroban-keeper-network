@@ -9,6 +9,7 @@
 //! a dashboard built against v1 keeps working when v2 appears alongside it,
 //! rather than the prefix being retrofitted after something has already broken.
 
+pub mod auth;
 pub mod rate_limit;
 pub mod rest;
 pub mod types;
@@ -19,6 +20,7 @@ use std::sync::Arc;
 use axum::Router;
 use utoipa::OpenApi;
 
+use crate::cache::AggregateCaches;
 use crate::ingest::Ingestor;
 use rate_limit::RateLimiter;
 
@@ -26,6 +28,9 @@ use rate_limit::RateLimiter;
 #[derive(Clone)]
 pub struct ApiState {
     pub ingestor: Ingestor,
+    /// Short-TTL caches in front of the expensive aggregate folds. Cloned with
+    /// the state, so every handler shares one set of entries.
+    pub caches: AggregateCaches,
 }
 
 /// The OpenAPI document, derived from the same handler and response types the

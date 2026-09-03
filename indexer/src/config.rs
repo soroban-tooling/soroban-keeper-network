@@ -27,6 +27,12 @@ pub struct Config {
     pub poll_interval_secs: u64,
     /// Ledgers requested per `getEvents` page during backfill.
     pub backfill_page_size: u32,
+    /// Seconds a cached aggregate response may be served for.
+    ///
+    /// This is the staleness bound the API promises: no cached response is
+    /// ever older than this. `0` disables aggregate caching entirely, for a
+    /// deployment that needs read-your-own-writes and will pay for it.
+    pub cache_ttl_secs: u64,
     /// Requests a single client (by API key, else by IP) may make per second
     /// against the REST API or new WebSocket connections, sustained.
     pub rate_limit_per_second: u32,
@@ -151,6 +157,15 @@ impl Config {
             problems.push("INDEXER_BACKFILL_PAGE_SIZE must be greater than zero".to_string());
         }
 
+        // No lower bound check: zero is meaningful here (caching off), unlike
+        // the page size above where zero is simply unusable.
+        let cache_ttl_secs = optional_parsed(
+            &get,
+            "INDEXER_CACHE_TTL_SECS",
+            crate::cache::DEFAULT_TTL_SECS,
+            &mut problems,
+        );
+
         let rate_limit_per_second = optional_parsed(
             &get,
             "INDEXER_RATE_LIMIT_PER_SECOND",
@@ -178,6 +193,7 @@ impl Config {
                 bind_address,
                 poll_interval_secs,
                 backfill_page_size,
+                cache_ttl_secs,
                 rate_limit_per_second,
                 rate_limit_burst,
             })
@@ -241,6 +257,7 @@ mod tests {
         assert_eq!(config.bind_address, DEFAULT_BIND_ADDRESS);
         assert_eq!(config.poll_interval_secs, DEFAULT_POLL_INTERVAL_SECS);
         assert_eq!(config.backfill_page_size, DEFAULT_BACKFILL_PAGE_SIZE);
+        assert_eq!(config.cache_ttl_secs, crate::cache::DEFAULT_TTL_SECS);
         assert_eq!(config.rate_limit_per_second, DEFAULT_RATE_LIMIT_PER_SECOND);
         assert_eq!(config.rate_limit_burst, DEFAULT_RATE_LIMIT_BURST);
     }

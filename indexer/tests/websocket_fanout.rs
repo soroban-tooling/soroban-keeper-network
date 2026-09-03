@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
 use keeper_indexer::api::{router, ApiState};
+use keeper_indexer::cache::AggregateCaches;
 use keeper_indexer::ingest::Ingestor;
 use keeper_indexer::rpc::{RawEvent, RawValue};
 use keeper_indexer::store::Store;
@@ -25,6 +26,7 @@ async fn start_server() -> (String, Ingestor) {
     let app = router(
         ApiState {
             ingestor: ingestor.clone(),
+            caches: AggregateCaches::from_secs(0),
         },
         10_000,
         10_000,

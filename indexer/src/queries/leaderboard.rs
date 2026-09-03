@@ -30,7 +30,8 @@ use crate::events::{EventPayload, I128};
 use crate::store::Store;
 
 /// Which metric to rank by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+// `Hash` so the cache can key on the full parameter set — see `crate::cache`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RankBy {
     /// Tasks executed, most first.

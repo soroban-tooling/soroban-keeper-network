@@ -21,12 +21,32 @@
 //! - [`state`] — folds mirroring the contract's own views.
 //! - [`backfill`] — the ledger walk shared by catch-up and steady state.
 //! - [`queries`] — aggregate folds the API exposes, such as the leaderboard.
+//! - [`reorg`] — detecting a ledger the source later reports differently.
+//! - [`cache`] — a short-TTL cache in front of those folds, so dashboard
+//!   traffic does not translate into repeated identical aggregation.
 //!
 //! See `docs/INDEXER_DESIGN.md` for the architecture and
 //! `docs/INDEXER_DEPLOYMENT.md` for running one.
 
+pub mod api;
+pub mod backfill;
+pub mod cache;
+pub mod config;
 pub mod event;
+pub mod events;
+pub mod ingest;
 pub mod numeric;
+pub mod queries;
+pub mod reorg;
+pub mod rpc;
+pub mod state;
+pub mod store;
+
+pub use backfill::Backfiller;
+pub use config::Config;
+pub use events::{EventPayload, EventType, IndexedEvent};
+pub use ingest::Ingestor;
+pub use store::Store;
 
 use tokio_postgres::Client;
 
@@ -74,19 +94,3 @@ pub async fn ingest_all(client: &Client, events: &[event::Event]) -> Result<(), 
     }
     Ok(())
 }
-
-pub mod api;
-pub mod backfill;
-pub mod config;
-pub mod events;
-pub mod ingest;
-pub mod queries;
-pub mod rpc;
-pub mod state;
-pub mod store;
-
-pub use backfill::Backfiller;
-pub use config::Config;
-pub use events::{EventPayload, EventType, IndexedEvent};
-pub use ingest::Ingestor;
-pub use store::Store;
