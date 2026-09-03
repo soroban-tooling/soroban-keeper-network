@@ -1,0 +1,89 @@
+{
+  "environment": {
+    "recorded_at": "2026-08-30T19:55:06.549Z",
+    "node": "v24.18.0",
+    "platform": "linux 7.1.4-102.fc43.x86_64 x64",
+    "cpu": "Intel(R) Core(TM) i5-6300U CPU @ 2.40GHz",
+    "cores": 4,
+    "total_memory_gb": 15.5,
+    "target": "http://127.0.0.1:8080",
+    "duration_s": 8,
+    "concurrency": 16,
+    "subscribers": 25
+  },
+  "rest": [
+    {
+      "scenario": "leaderboard:repeated",
+      "requests": 2382,
+      "errors": 0,
+      "throughput_rps": 296.7,
+      "latency_ms": {
+        "p50": 33.32,
+        "p95": 93.97,
+        "p99": 346.13,
+        "max": 2433.41
+      }
+    },
+    {
+      "scenario": "leaderboard:repeated-reward",
+      "requests": 830,
+      "errors": 0,
+      "throughput_rps": 102.5,
+      "latency_ms": {
+        "p50": 85.82,
+        "p95": 442.81,
+        "p99": 1206.45,
+        "max": 3572.88
+      }
+    },
+    {
+      "scenario": "leaderboard:varied-window",
+      "requests": 79,
+      "errors": 0,
+      "throughput_rps": 8.2,
+      "latency_ms": {
+        "p50": 1893.2,
+        "p95": 2213.88,
+        "p99": 2277.09,
+        "max": 2277.09
+      }
+    },
+    {
+      "scenario": "events:page",
+      "requests": 467,
+      "errors": 0,
+      "throughput_rps": 56.2,
+      "latency_ms": {
+        "p50": 266.5,
+        "p95": 396.8,
+        "p99": 548.35,
+        "max": 597.18
+      }
+    },
+    {
+      "scenario": "health",
+      "requests": 4969,
+      "errors": 0,
+      "throughput_rps": 617.3,
+      "latency_ms": {
+        "p50": 22.36,
+        "p95": 45.45,
+        "p99": 93.96,
+        "max": 168.16
+      }
+    }
+  ],
+  "websocket": {
+    "scenario": "websocket:subscribers",
+    "attempted": 25,
+    "connected": 25,
+    "held_to_end": 25,
+    "frames_received": 25,
+    "connect_ms": {
+      "p50": 115.29,
+      "p95": 129.92,
+      "max": 130.21
+    }
+  },
+  "cache": null
+}

@@ -1,0 +1,12 @@
+{
+  "name": "keeper-indexer-loadtest",
+  "private": true,
+  "description": "Repeatable load test and baseline for the keeper indexer API",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "loadtest": "node run.mjs",
+    "test": "node --test"
+  }
+}

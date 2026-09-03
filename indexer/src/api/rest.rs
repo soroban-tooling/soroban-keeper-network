@@ -15,6 +15,7 @@ use super::types::{
     AdminConfigResponse, ApiError, EventFeedResponse, HealthResponse, TaskDetail, TaskListResponse,
 };
 use super::ApiState;
+use crate::cache::LeaderboardKey;
 use crate::events::EventType;
 use crate::queries::leaderboard::{leaderboard, Leaderboard, RankBy};
 
@@ -239,7 +240,20 @@ pub async fn keeper_leaderboard(
         .unwrap_or(DEFAULT_LEADERBOARD_SIZE)
         .clamp(1, MAX_LEADERBOARD_SIZE);
 
-    let board = leaderboard(state.ingestor.store(), rank_by, query.since, limit)
+    // Served from cache within its TTL. The key is the full parameter set, so
+    // two requests share an entry only when they would produce the same
+    // answer -- see `cache` for why this is a TTL rather than explicit
+    // invalidation.
+    let key = LeaderboardKey {
+        rank_by,
+        since: query.since,
+        limit,
+    };
+    let store = state.ingestor.store();
+    let board = state
+        .caches
+        .leaderboard
+        .get_or_insert_with(key, || leaderboard(store, rank_by, query.since, limit))
         .await
         .map_err(internal)?;
 
@@ -311,6 +325,7 @@ pub async fn event_feed(
 mod tests {
     use super::*;
     use crate::api::{router, ApiState};
+    use crate::cache::AggregateCaches;
     use crate::events::{EventPayload, I128};
     use crate::ingest::Ingestor;
     use crate::store::Store;
@@ -357,6 +372,7 @@ mod tests {
         router(
             ApiState {
                 ingestor: Ingestor::new(store),
+                caches: AggregateCaches::from_secs(crate::cache::DEFAULT_TTL_SECS),
             },
             1_000,
             1_000,

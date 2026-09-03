@@ -19,6 +19,7 @@ use std::sync::Arc;
 use axum::Router;
 use utoipa::OpenApi;
 
+use crate::cache::AggregateCaches;
 use crate::ingest::Ingestor;
 use rate_limit::RateLimiter;
 
@@ -26,6 +27,9 @@ use rate_limit::RateLimiter;
 #[derive(Clone)]
 pub struct ApiState {
     pub ingestor: Ingestor,
+    /// Short-TTL caches in front of the expensive aggregate folds. Cloned with
+    /// the state, so every handler shares one set of entries.
+    pub caches: AggregateCaches,
 }
 
 /// The OpenAPI document, derived from the same handler and response types the

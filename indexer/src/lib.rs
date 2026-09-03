@@ -22,12 +22,15 @@
 //! - [`backfill`] — the ledger walk shared by catch-up and steady state.
 //! - [`queries`] — aggregate folds the API exposes, such as the leaderboard.
 //! - [`reorg`] — detecting a ledger the source later reports differently.
+//! - [`cache`] — a short-TTL cache in front of those folds, so dashboard
+//!   traffic does not translate into repeated identical aggregation.
 //!
 //! See `docs/INDEXER_DESIGN.md` for the architecture and
 //! `docs/INDEXER_DEPLOYMENT.md` for running one.
 
 pub mod api;
 pub mod backfill;
+pub mod cache;
 pub mod config;
 pub mod event;
 pub mod events;

@@ -130,3 +130,24 @@ fields, in the order `contracts/keeper-registry/src/events.rs` publishes them:
 Fields the events do not carry are not reconstructed. `TaskClaimed` has no
 reward, so a consumer needing the claim and the reward together joins against
 the task's `TaskRegistered` event rather than reading an invented value.
+
+## Caching
+
+The aggregate queries the API exposes — currently the keeper leaderboard — are
+served from a short-TTL cache (`src/cache.rs`).
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `INDEXER_CACHE_TTL_SECS` | `10` | Staleness bound for cached aggregates. `0` disables caching entirely. |
+
+The TTL **is** the guarantee: no cached response is ever older than it. At the
+default of 10 seconds, against a ~5s ledger close, a viewer can be at most two
+ledgers behind — less than the time it takes to read the page.
+
+A TTL is used rather than explicit invalidation because the event that would
+invalidate the leaderboard (`task_executed`) is the one that arrives
+continuously while the indexer is caught up: an invalidate-on-write cache would
+spend most of its life empty, and would be emptiest exactly when traffic is
+highest. Point lookups are not cached — their cost does not grow with traffic
+the same way, and they are the reads most likely to be checked right after a
+write.
