@@ -86,8 +86,7 @@ export function usePolling<T>(
       return;
     }
 
-    let intervalId: ReturnType<typeof window.setInterval> | null =
-      null;
+    let intervalId: number | null = null;
 
     const startPolling = () => {
       if (intervalId !== null) {

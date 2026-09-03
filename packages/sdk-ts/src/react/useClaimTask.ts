@@ -3,7 +3,8 @@ import {
   useState,
 } from "react";
 
-import { useKeeperRegistryClient } from "./provider";
+import type { ClaimTaskOutcome, ClaimTaskParams } from "../methods/claimTask.js";
+import { useKeeperRegistryClient } from "./provider.js";
 
 export type ClaimTaskStatus =
   | "idle"
@@ -12,7 +13,7 @@ export type ClaimTaskStatus =
   | "error";
 
 export interface UseClaimTaskResult {
-  claimTask: (taskId: bigint) => Promise<unknown>;
+  claimTask: (params: ClaimTaskParams) => Promise<ClaimTaskOutcome>;
   status: ClaimTaskStatus;
   error: Error | null;
   reset: () => void;
@@ -28,14 +29,12 @@ export function useClaimTask(): UseClaimTaskResult {
     useState<Error | null>(null);
 
   const claimTask = useCallback(
-    async (taskId: bigint) => {
+    async (params: ClaimTaskParams) => {
       setStatus("pending");
       setError(null);
 
       try {
-        const result = await client.claimTask({
-          taskId,
-        });
+        const result = await client.claimTask(params);
 
         setStatus("success");
 

@@ -1,18 +1,18 @@
 import { nativeToScVal, rpc as SorobanRpc } from "@stellar/stellar-sdk";
 import { act, renderHook } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
-import { KeeperRegistryClient } from "../client";
-import { TASK_CLAIMED_TOPIC, TASK_REGISTERED_TOPIC } from "../events";
-import { KeeperRegistryProvider } from "./provider";
-import { useTaskEvents } from "./useTaskEvents";
+import { KeeperRegistryClient } from "../client.js";
+import { TASK_CLAIMED_TOPIC, TASK_REGISTERED_TOPIC } from "../events.js";
+import { KeeperRegistryProvider } from "./provider.js";
+import { useTaskEvents } from "./useTaskEvents.js";
 
 const CONTRACT_ID = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
 const ADDRESS = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ";
 
 function wrapper(client: KeeperRegistryClient) {
-  return ({ children }: { children: ReactNode }) => createElement(KeeperRegistryProvider, { client }, children);
+  return ({ children }: { children: ReactNode }) => createElement(KeeperRegistryProvider, { client, children });
 }
 
 /** See `useTask.test.ts`'s `flush()` doc comment — `waitFor` hangs under `vi.useFakeTimers()`; this is the working substitute used throughout this file instead. */
@@ -40,8 +40,8 @@ function claimedEvent(id: string, taskId: bigint) {
 
 describe("useTaskEvents", () => {
   let client: KeeperRegistryClient;
-  let getEventsSpy: ReturnType<typeof vi.spyOn>;
-  let getLatestLedgerSpy: ReturnType<typeof vi.spyOn>;
+  let getEventsSpy: MockInstance<SorobanRpc.Server["getEvents"]>;
+  let getLatestLedgerSpy: MockInstance<SorobanRpc.Server["getLatestLedger"]>;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -68,7 +68,7 @@ describe("useTaskEvents", () => {
     await flush();
     expect(getEventsSpy).toHaveBeenCalledTimes(1);
     expect(getLatestLedgerSpy).toHaveBeenCalledOnce();
-    const [request] = getEventsSpy.mock.calls[0];
+    const [request] = getEventsSpy.mock.calls[0]!;
     expect(request).toMatchObject({ startLedger: 1000 });
   });
 
@@ -83,7 +83,7 @@ describe("useTaskEvents", () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
     expect(getEventsSpy).toHaveBeenCalledTimes(2);
-    const [secondRequest] = getEventsSpy.mock.calls[1];
+    const [secondRequest] = getEventsSpy.mock.calls[1]!;
     expect(secondRequest).toMatchObject({ cursor: "cursor-1" });
     expect(secondRequest).not.toHaveProperty("startLedger");
   });

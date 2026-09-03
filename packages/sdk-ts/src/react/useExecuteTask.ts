@@ -3,7 +3,8 @@ import {
   useState,
 } from "react";
 
-import { useKeeperRegistryClient } from "./provider";
+import type { ExecuteTaskParams } from "../methods/executeTask.js";
+import { useKeeperRegistryClient } from "./provider.js";
 
 export type ExecuteTaskStatus =
   | "idle"
@@ -11,19 +12,14 @@ export type ExecuteTaskStatus =
   | "success"
   | "error";
 
-export interface UseExecuteTaskResult<Proof> {
-  executeTask: (
-    params: {
-      taskId: bigint;
-      proof: Proof;
-    },
-  ) => Promise<unknown>;
+export interface UseExecuteTaskResult {
+  executeTask: (params: ExecuteTaskParams) => Promise<void>;
   status: ExecuteTaskStatus;
   error: Error | null;
   reset: () => void;
 }
 
-export function useExecuteTask<Proof>(): UseExecuteTaskResult<Proof> {
+export function useExecuteTask(): UseExecuteTaskResult {
   const client = useKeeperRegistryClient();
 
   const [status, setStatus] =
@@ -33,21 +29,12 @@ export function useExecuteTask<Proof>(): UseExecuteTaskResult<Proof> {
     useState<Error | null>(null);
 
   const executeTask = useCallback(
-    async ({
-      taskId,
-      proof,
-    }: {
-      taskId: bigint;
-      proof: Proof;
-    }) => {
+    async (params: ExecuteTaskParams) => {
       setStatus("pending");
       setError(null);
 
       try {
-        const result = await client.executeTask({
-          taskId,
-          proof,
-        });
+        const result = await client.executeTask(params);
 
         setStatus("success");
 

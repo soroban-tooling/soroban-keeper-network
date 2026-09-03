@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 
-import { useKeeperRegistryClient } from "./provider";
-import { usePolling } from "./usePolling";
+import { useKeeperRegistryClient } from "./provider.js";
+import { usePolling } from "./usePolling.js";
 
 export interface UseKeeperBalanceOptions {
   pollIntervalMs?: number;
