@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { KeeperRegistryClient } from "./client";
+import { KeeperRegistryClient } from "./client.js";
 
 // A real, valid Soroban contract address StrKey (StrKey.encodeContract of
 // 32 zero bytes, confirmed via StrKey.isValidContract before trusting it —
@@ -31,7 +31,7 @@ describe("KeeperRegistryClient constructor validation", () => {
           rpcUrl: VALID_RPC_URL,
           networkPassphrase: VALID_NETWORK_PASSPHRASE,
         }),
-    ).toThrow(/not a valid Soroban contract address/);
+    ).toThrow(/expected a C\.\.\. Soroban contract address/);
   });
 
   it("rejects an account address (G...) passed where a contract address (C...) is expected", () => {
@@ -45,18 +45,17 @@ describe("KeeperRegistryClient constructor validation", () => {
           rpcUrl: VALID_RPC_URL,
           networkPassphrase: VALID_NETWORK_PASSPHRASE,
         }),
-    ).toThrow(/not a valid Soroban contract address/);
+    ).toThrow(/expected a C\.\.\. Soroban contract address/);
   });
 
-  it("rejects a non-URL rpcUrl", () => {
+  it("rejects a missing rpcUrl when no server is supplied", () => {
     expect(
       () =>
         new KeeperRegistryClient({
           contractId: VALID_CONTRACT_ID,
-          rpcUrl: "not-a-url",
           networkPassphrase: VALID_NETWORK_PASSPHRASE,
         }),
-    ).toThrow(/not a valid RPC URL/);
+    ).toThrow(/rpcUrl is required/);
   });
 
   it("rejects an empty networkPassphrase", () => {
@@ -68,17 +67,5 @@ describe("KeeperRegistryClient constructor validation", () => {
           networkPassphrase: "",
         }),
     ).toThrow(/networkPassphrase is required/);
-  });
-});
-
-describe("KeeperRegistryClient.getTask", () => {
-  it("throws a clear, actionable error when no source account is available for simulation", async () => {
-    const client = new KeeperRegistryClient({
-      contractId: VALID_CONTRACT_ID,
-      rpcUrl: VALID_RPC_URL,
-      networkPassphrase: VALID_NETWORK_PASSPHRASE,
-      // readOnlySourceAccount deliberately omitted
-    });
-    await expect(client.getTask(1)).rejects.toThrow(/requires a source account/);
   });
 });

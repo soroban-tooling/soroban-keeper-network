@@ -18,13 +18,14 @@ import {
   nativeToScVal,
   rpc as SorobanRpc,
   SorobanDataBuilder,
+  type Transaction,
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
-import { KeeperRegistryClient } from "./client";
-import { randomKeypair } from "./test-utils/randomKeypair";
-import { buildFeeBumpTransaction, buildTransaction, type ExternalSigner, submitSignedTransaction } from "./transactionBuilder";
+import { KeeperRegistryClient } from "./client.js";
+import { randomKeypair } from "./test-utils/randomKeypair.js";
+import { buildFeeBumpTransaction, buildTransaction, type ExternalSigner, submitSignedTransaction } from "./transactionBuilder.js";
 
 const CONTRACT_ID = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
 const RPC_URL = "https://soroban-testnet.stellar.org";
@@ -48,7 +49,7 @@ function mockSimulationSuccess(): SimulateTransactionResponse {
     _parsed: true,
     transactionData: new SorobanDataBuilder(),
     minResourceFee: "100",
-    result: { auth: [], retval: nativeToScVal(null, { type: "void" }) },
+    result: { auth: [], retval: nativeToScVal(null) },
     cost: { cpuInsns: "0", memBytes: "0" },
   } as unknown as SimulateTransactionResponse;
 }
@@ -103,7 +104,7 @@ describe("buildTransaction / submitSignedTransaction round trip", () => {
     // legitimately produces no fee change).
     expect(simulateSpy).toHaveBeenCalledOnce();
 
-    const tx = TransactionBuilder.fromXDR(unsigned.xdr, NETWORK_PASSPHRASE);
+    const tx = TransactionBuilder.fromXDR(unsigned.xdr, NETWORK_PASSPHRASE) as Transaction;
     expect(tx.source).toBe(sourceKeypair.publicKey());
     expect(tx.operations).toHaveLength(1);
   });
@@ -132,7 +133,7 @@ describe("buildTransaction / submitSignedTransaction round trip", () => {
 
     // Confirm what was actually submitted really does carry the source
     // keypair's signature — not merely that submission didn't throw.
-    const submittedTx = sendSpy.mock.calls[0][0];
+    const submittedTx = sendSpy.mock.calls[0]![0];
     expect(submittedTx.signatures).toHaveLength(1);
   });
 
@@ -165,7 +166,7 @@ describe("buildTransaction / submitSignedTransaction round trip", () => {
 
     await expect(
       buildTransaction(client, sourceKeypair.publicKey(), "get_task", [nativeToScVal(1, { type: "u64" })]),
-    ).rejects.toThrow(/Simulation failed/);
+    ).rejects.toThrow(/simulation failed/);
   });
 
   it("fee-bumps a source account with zero XLM balance for fees, and the sponsor's fee-bump makes it submittable", async () => {
@@ -183,13 +184,12 @@ describe("buildTransaction / submitSignedTransaction round trip", () => {
     expect(feeBumpUnsigned.signerAccounts).toEqual([sponsorKeypair.publicKey()]);
 
     const feeBumpTx = TransactionBuilder.fromXDR(feeBumpUnsigned.xdr, feeBumpUnsigned.networkPassphrase);
-    // @ts-expect-error -- FeeBumpTransaction's .sign accepts a Keypair the same way Transaction's does.
     feeBumpTx.sign(sponsorKeypair);
 
     await submitSignedTransaction(client, feeBumpTx.toXDR());
 
     expect(sendSpy).toHaveBeenCalledOnce();
-    const submitted = sendSpy.mock.calls[0][0];
+    const submitted = sendSpy.mock.calls[0]![0];
     // The submitted envelope is the fee-bump wrapper, not the bare inner
     // tx — confirmed by its outer signature being the sponsor's, not the
     // source account's.

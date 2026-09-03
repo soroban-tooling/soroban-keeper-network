@@ -1,17 +1,17 @@
 import { act, renderHook } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
-import { KeeperRegistryClient } from "../client";
-import { TaskNotFoundError } from "../errors";
-import { TaskStatus, TaskType } from "../types";
-import { KeeperRegistryProvider } from "./provider";
-import { useTask } from "./useTask";
+import { KeeperRegistryClient } from "../client.js";
+import { TaskNotFoundError } from "../errors.js";
+import { TaskStatus, TaskType } from "../types.js";
+import { KeeperRegistryProvider } from "./provider.js";
+import { useTask } from "./useTask.js";
 
 const CONTRACT_ID = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
 
 function wrapper(client: KeeperRegistryClient) {
-  return ({ children }: { children: ReactNode }) => createElement(KeeperRegistryProvider, { client }, children);
+  return ({ children }: { children: ReactNode }) => createElement(KeeperRegistryProvider, { client, children });
 }
 
 /**
@@ -43,7 +43,7 @@ const SAMPLE_TASK = {
 
 describe("useTask", () => {
   let client: KeeperRegistryClient;
-  let getTaskSpy: ReturnType<typeof vi.spyOn>;
+  let getTaskSpy: MockInstance<KeeperRegistryClient["getTask"]>;
 
   beforeEach(() => {
     vi.useFakeTimers();
