@@ -31,7 +31,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 # Matches the soroban-sdk version keeper-registry pins, so both crates decode
 # the same ScVal shapes. `base64` unlocks ScVal::from_xdr_base64.
 stellar-strkey = "0.0.9"
-stellar-xdr = { version = "22.1.0", features = ["base64"] }
+stellar-xdr = { version = "28.0.0", features = ["base64"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
