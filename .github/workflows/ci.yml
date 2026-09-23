@@ -4,7 +4,7 @@ name: CI
 # No manual step is needed — open a PR and this workflow starts.
 #
 # Job policy (see docs/CI.md for the rationale):
-#   REQUIRED  — format, test, build-wasm, sdk-ts, bot, indexer. These block
+#   REQUIRED  — format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk. These block
 #               the merge.
 #   ADVISORY  — clippy, audit, wasm-size, sdk-bundle-size, fuzz-pr,
 #               resource-cost. These report findings as annotations or a job
@@ -584,6 +584,102 @@ jobs:
         run: npm run lint
 
   # ───────────────────────────────────────────────────────────────────────────
+  # REQUIRED — the keeper-bot-v2 service. Build, lint, and test suite, with
+  # an ephemeral Postgres service container for persistent state tests.
+  #
+  # Ephemeral service container mirrors the indexer approach (issue 0233):
+  # an isolated Postgres container created specifically for this job and
+  # destroyed with it, ensuring test idempotency without shared state.
+  #
+  # Runs only when the PR touches examples/keeper-bot-v2/, packages/sdk-ts/,
+  # or .github/workflows/ci.yml. A contract-only PR skips it while reporting
+  # success, so bot-v2 can be a required gate without blocking contract work.
+  # ───────────────────────────────────────────────────────────────────────────
+  bot-v2:
+    name: Keeper bot v2 (required)
+    runs-on: ubuntu-latest
+    needs: sdk-ts
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: keeper_bot_v2_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: examples/keeper-bot-v2
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for relevant changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qE '^(examples/keeper-bot-v2/|packages/sdk-ts/|\.github/workflows/ci\.yml)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node.js
+        if: steps.changes.outputs.relevant == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Download SDK artifact
+        if: steps.changes.outputs.relevant == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: sdk-ts-dist
+          path: packages/sdk-ts/dist
+
+      - name: Install SDK dependencies
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: packages/sdk-ts
+        run: npm ci --no-audit --no-fund
+
+      - name: Install keeper-bot-v2 dependencies
+        if: steps.changes.outputs.relevant == 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Build keeper-bot-v2
+        if: steps.changes.outputs.relevant == 'true'
+        run: npm run build
+
+      - name: Lint keeper-bot-v2
+        if: steps.changes.outputs.relevant == 'true'
+        run: npm run lint
+
+      - name: Test keeper-bot-v2 against ephemeral Postgres
+        if: steps.changes.outputs.relevant == 'true'
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/keeper_bot_v2_test
+        run: npm test
+
+      - name: Skipped (no keeper-bot-v2 changes)
+        if: steps.changes.outputs.relevant == 'false'
+        run: |
+          echo "PR does not touch examples/keeper-bot-v2 or SDK dependencies; keeper-bot-v2 checks skipped."
+
+  # ───────────────────────────────────────────────────────────────────────────
   # REQUIRED — the indexer service. Format, build and test, with a real
   # Postgres for the database-backed tests.
   #
@@ -724,12 +820,12 @@ jobs:
     name: CI required checks
     runs-on: ubuntu-latest
     if: always()
-    needs: [format, test, build-wasm, sdk-ts, bot, indexer, rust-sdk]
+    needs: [format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk]
     steps:
       - name: Verify required jobs succeeded
         run: |
           results='${{ join(needs.*.result, ' ') }}'
-          echo "Required job results (format, test, build-wasm, sdk-ts, bot, indexer, rust-sdk): $results"
+          echo "Required job results (format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk): $results"
           for r in $results; do
             if [ "$r" != "success" ]; then
               echo "::error::A required CI job did not succeed."

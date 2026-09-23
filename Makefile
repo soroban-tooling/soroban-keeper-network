@@ -16,7 +16,7 @@ WASM := target/wasm32-unknown-unknown/release/keeper_registry.wasm
 #   make indexer INDEXER_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/indexer_test
 INDEXER_TEST_DATABASE_URL ?=
 
-.PHONY: help build test fmt fmt-check lint wasm optimize clean bot bot-test sdk-ts indexer ci check
+.PHONY: help build test fmt fmt-check lint wasm optimize clean bot bot-test bot-v2-test sdk-ts indexer ci check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -58,9 +58,12 @@ sdk-ts: ## Build and test the TypeScript SDK (matches CI)
 bot-test: sdk-ts ## Build the SDK then run the keeper bot's tests (matches CI) — bot depends on sdk-ts's dist/ output
 	cd examples/keeper-bot && npm install --no-audit --no-fund && npm test && npm run lint
 
+bot-v2-test: sdk-ts ## Build the SDK then build, test and lint keeper-bot-v2 (matches CI)
+	cd examples/keeper-bot-v2 && npm install --no-audit --no-fund && npm run build && npm test && npm run lint
+
 clean: ## Remove build artifacts
 	cargo clean
 
-ci: fmt-check test wasm sdk-ts bot-test indexer ## Run all required CI checks locally (blocking checks only)
+ci: fmt-check test wasm sdk-ts bot-test bot-v2-test indexer ## Run all required CI checks locally (blocking checks only)
 
 check: ci lint ## Run all checks contributors should run before opening a PR
