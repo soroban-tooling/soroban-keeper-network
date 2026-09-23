@@ -29,8 +29,9 @@ npm-debug.log*
 yarn-error.log*
 
 # TypeScript build output
-# TypeScript package build output (packages/*/dist)
+# TypeScript package build output (packages/*/dist, examples/*/dist)
 packages/*/dist/
+examples/*/dist/
 
 # Editor / OS
 .DS_Store
