@@ -1,0 +1,34 @@
+{
+  "name": "soroban-keeper-bot-v2",
+  "version": "0.2.0",
+  "description": "Production-grade, concurrent off-chain keeper bot for the Soroban Keeper Network",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js",
+    "benchmark": "node benchmark/benchmark.js",
+    "lint": "node --check src/*.js test/*.js benchmark/*.js"
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "keeper-bot",
+    "keeper-bot-v2",
+    "automation",
+    "defi"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@soroban-keeper-network/sdk": "file:../../packages/sdk-ts",
+    "@stellar/stellar-sdk": "^16.2.0",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0",
+    "globals": "^17.8.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
