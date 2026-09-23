@@ -60,6 +60,21 @@ const {
   Contract,
 } = require("@stellar/stellar-sdk");
 
+const {
+  DEFAULT_EXECUTOR_TIMEOUT_MS,
+  EXECUTOR_TIMEOUTS_MS,
+  getExecutorTimeout,
+  executeWithTimeout,
+} = require("./src/executors/interface.js");
+
+const {
+  OutcomeAction,
+  OutcomeStatus,
+  OutcomeStore,
+  isAmbiguousTimeoutError,
+  verifyOnChainLanding,
+} = require("./src/state/outcomes.js");
+
 // ─────────────────────────────────────────────────────────────────────────────
 // The SDK (@soroban-keeper-network/sdk) — dynamic import, not require()
 // ─────────────────────────────────────────────────────────────────────────────
@@ -667,12 +682,28 @@ async function estimateTaskProfitability({
  * function directly do not run.
  */
 async function executeTaskOffChain(task, ctx, simulateExecution) {
+  const customTimeouts = (ctx && ctx.executorTimeouts) || (typeof CONFIG !== "undefined" && CONFIG && CONFIG.executorTimeouts);
+  const timeoutMs = (ctx && typeof ctx.executorTimeoutMs === "number" && ctx.executorTimeoutMs > 0)
+    ? ctx.executorTimeoutMs
+    : getExecutorTimeout(task.taskTypeName, customTimeouts);
+
   // If task has a specific verifier strategy registered, use it.
   if (task.verifier && VERIFIER_STRATEGIES[task.verifier]) {
     try {
-      return await VERIFIER_STRATEGIES[task.verifier](task, ctx);
+      return await executeWithTimeout(
+        VERIFIER_STRATEGIES[task.verifier],
+        task,
+        ctx,
+        timeoutMs
+      );
     } catch (err) {
-      ctx.log(`  Verifier strategy for task ${task.taskId} threw: ${err.message}`);
+      if (err.code === "EXECUTOR_TIMEOUT") {
+        ctx.log(
+          `  Verifier strategy for task ${task.taskId} timed out after ${timeoutMs}ms — treating as failed attempt.`
+        );
+      } else {
+        ctx.log(`  Verifier strategy for task ${task.taskId} threw: ${err.message}`);
+      }
       return null;
     }
   }
@@ -690,9 +721,15 @@ async function executeTaskOffChain(task, ctx, simulateExecution) {
   }
 
   try {
-    return await executor(task, ctx);
+    return await executeWithTimeout(executor, task, ctx, timeoutMs);
   } catch (err) {
-    ctx.log(`  Executor for task ${task.taskId} threw: ${err.message}`);
+    if (err.code === "EXECUTOR_TIMEOUT") {
+      ctx.log(
+        `  Executor for task ${task.taskId} (${task.taskTypeName}) timed out after ${timeoutMs}ms — treating as failed attempt.`
+      );
+    } else {
+      ctx.log(`  Executor for task ${task.taskId} threw: ${err.message}`);
+    }
     return null;
   }
 }
@@ -1043,6 +1080,15 @@ module.exports = {
   simulatedExecutor,
   ESTIMATED_CLAIM_FEE_STROOPS,
   ESTIMATED_EXECUTE_BASE_FEE_STROOPS,
+  DEFAULT_EXECUTOR_TIMEOUT_MS,
+  EXECUTOR_TIMEOUTS_MS,
+  getExecutorTimeout,
+  executeWithTimeout,
+  OutcomeAction,
+  OutcomeStatus,
+  OutcomeStore,
+  isAmbiguousTimeoutError,
+  verifyOnChainLanding,
 };
 
 // Only run main() when executed directly, not when imported for testing
