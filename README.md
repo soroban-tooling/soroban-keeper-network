@@ -373,6 +373,9 @@ value from the `max_batch_size()` view instead of hardcoding it.
 | `RewardToken` | `Address` | Instance | Instance lifetime | — |
 | `Task(u64)` | `Task` struct | Persistent | `task.ttl_ledgers` | — |
 | `KeeperReward(Address)` | `i128` | Persistent | ~1 year (6.3M ledgers) | `0` |
+| `KeeperStake(Address)` | `i128` | Persistent | ~1 year (6.3M ledgers) | `0` |
+| `UnbondRequest(Address)` | `UnbondRequest` struct | Persistent | ~1 year (6.3M ledgers) | none (no pending request) |
+| `SlashIncident(BytesN<32>)` | `()` (presence-only) | Persistent | ~1 year (6.3M ledgers) | not recorded |
 
 `Task.calldata` is capped at `MAX_CALLDATA_LEN` = 1024 bytes, enforced at
 `register_task`. `save_task` re-writes the whole `Task` struct (including
@@ -433,6 +436,10 @@ without breaking existing consumers.
 | `AdminTransferred` | `transfer_admin` | `("admin", "xfer")` | `(old_admin: Address, new_admin: Address)` |
 | `FeesSwept` | `sweep_fees` | `("sweep", "admin")` | `(treasury: Address, amount: i128, remaining: i128)` |
 | `Upgraded` | `upgrade` | `("upgrade", "admin")` | `(admin: Address, new_wasm_hash: BytesN<32>)` — emitted before the executable is swapped |
+| `StakeDeposited` | `stake_deposit` | `("deposit", "stake")` | `(keeper: Address, amount: i128, new_total: i128)` |
+| `UnbondInitiated` | `initiate_unbond` | `("unbond", "stake")` | `(keeper: Address, amount: i128, release_ledger: u32)` |
+| `StakeWithdrawn` | `withdraw_stake` | `("wdraw", "stake")` | `(keeper: Address, amount: i128)` |
+| `Slashed` | `slash` | `("slash", "stake")` | `(keeper: Address, amount: i128, reason: Symbol, incident_id: BytesN<32>, treasury: Address)` |
 
 Notes:
 

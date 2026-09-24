@@ -15,7 +15,7 @@
 
 #![cfg(any(test, fuzzing))]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env};
 
 use crate::KeeperRegistryClient;
 
@@ -24,6 +24,18 @@ use crate::KeeperRegistryClient;
 pub const TARGET_CANCEL_TASK: u32 = 0;
 pub const TARGET_EXPIRE_TASK: u32 = 1;
 pub const TARGET_WITHDRAW_REWARDS: u32 = 2;
+/// E06 (`docs/STAKING_DESIGN.md`) — see `test/staking.rs`'s
+/// `test_reentrant_token_*` tests. These three reuse the `owner` slot in
+/// `arm`'s fixed parameter list to carry the keeper address (stake
+/// operations key off a keeper, not a task owner), and the `task_id: u64`
+/// slot is unused by all three (amounts come from the registry's own
+/// existing stake state at reentry time, not from a caller-supplied value,
+/// since `stake_deposit`/`withdraw_stake`/`slash`'s own arguments are fixed
+/// by the outer call that triggered the reentrant transfer in the first
+/// place).
+pub const TARGET_STAKE_DEPOSIT: u32 = 3;
+pub const TARGET_WITHDRAW_STAKE: u32 = 4;
+pub const TARGET_SLASH: u32 = 5;
 
 /// At which point in this token's own `transfer` the re-entrant call fires.
 pub const POINT_BEFORE_BALANCE_UPDATE: u32 = 0;
@@ -63,6 +75,28 @@ impl ReentrantToken {
         env.storage()
             .persistent()
             .set(&DataKey::Balance(to), &(balance + amount));
+    }
+
+    /// Test-only convenience: this mock does not manage its own storage TTL
+    /// the way a real SAC does, so a test that jumps the ledger sequence
+    /// forward by a large amount (e.g. E06's unbonding delay,
+    /// `docs/STAKING_DESIGN.md`) must explicitly keep this contract's own
+    /// instance entry and the balance entries it is about to touch alive
+    /// across that jump, or they archive before the test's next call. Only
+    /// extends entries that already exist (a `holder` with no balance entry
+    /// yet is left alone).
+    pub fn extend_ttl_for_test(env: Env, holders: soroban_sdk::Vec<Address>, to_ledger: u32) {
+        env.storage()
+            .instance()
+            .extend_ttl(to_ledger, to_ledger);
+        for holder in holders.iter() {
+            let key = DataKey::Balance(holder);
+            if env.storage().persistent().has(&key) {
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&key, to_ledger, to_ledger);
+            }
+        }
     }
 
     pub fn balance(env: Env, id: Address) -> i128 {
@@ -230,6 +264,53 @@ fn reenter(env: &Env) {
         TARGET_WITHDRAW_REWARDS => {
             let keeper: Address = env.storage().instance().get(&DataKey::Keeper).unwrap();
             match client.try_withdraw_rewards(&keeper) {
+                Ok(_) => (true, NO_ERROR_CODE),
+                Err(Ok(err)) => (false, err as u32),
+                Err(Err(_)) => (false, NO_ERROR_CODE),
+            }
+        }
+        // E06 (`docs/STAKING_DESIGN.md`): `owner`'s slot carries the keeper
+        // address (stake operations key off a keeper, not a task owner);
+        // `task_id`'s slot doubles as the i128 amount for the two targets
+        // that need one.
+        TARGET_STAKE_DEPOSIT => {
+            let keeper: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
+            let amount: u64 = env.storage().instance().get(&DataKey::TaskId).unwrap();
+            match client.try_stake_deposit(&keeper, &(amount as i128)) {
+                Ok(_) => (true, NO_ERROR_CODE),
+                Err(Ok(err)) => (false, err as u32),
+                Err(Err(_)) => (false, NO_ERROR_CODE),
+            }
+        }
+        TARGET_WITHDRAW_STAKE => {
+            let keeper: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
+            match client.try_withdraw_stake(&keeper) {
+                Ok(_) => (true, NO_ERROR_CODE),
+                Err(Ok(err)) => (false, err as u32),
+                Err(Err(_)) => (false, NO_ERROR_CODE),
+            }
+        }
+        TARGET_SLASH => {
+            let keeper: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
+            let admin: Address = env.storage().instance().get(&DataKey::Keeper).unwrap();
+            let treasury: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::TriggerTo)
+                .unwrap();
+            // The reentrant call's own incident id — deliberately the same
+            // fixed value `test_reentrant_token_slash` uses for the outer
+            // call, so a correct CEI ordering (incident recorded before the
+            // token transfer) rejects this as a duplicate.
+            let incident_id = BytesN::from_array(env, &[9u8; 32]);
+            match client.try_slash(
+                &admin,
+                &keeper,
+                &100_000i128,
+                &symbol_short!("fraud"),
+                &incident_id,
+                &treasury,
+            ) {
                 Ok(_) => (true, NO_ERROR_CODE),
                 Err(Ok(err)) => (false, err as u32),
                 Err(Err(_)) => (false, NO_ERROR_CODE),
