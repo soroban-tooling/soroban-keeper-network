@@ -1,7 +1,7 @@
 {
   "name": "@soroban-keeper-network/keeper-bot-v2",
   "version": "0.1.0",
-  "description": "Soroban Keeper Network v2 bot with support for external secret managers and multi-account signing",
+  "description": "Production-ready keeper bot for Soroban Keeper Network with external secret managers, graceful RPC degradation, and persistent state",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -23,11 +23,13 @@
     "test": "vitest run",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist dist-test",
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@soroban-keeper-network/sdk": "workspace:*",
-    "@stellar/stellar-sdk": "^16.2.0"
+    "@stellar/stellar-sdk": "^16.2.0",
+    "dotenv": "^17.4.2"
   },
   "optionalDependencies": {
     "@aws-sdk/client-secrets-manager": "^3.600.0"

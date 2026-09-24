@@ -1,8 +1,14 @@
 /**
- * Soroban Keeper Network v2 Bot
+ * Keeper Bot v2 - production-ready keeper for Soroban Keeper Network
  *
- * Main entry point for the keeper-bot-v2 package.
- * Exports the secrets module for loading signing keys from multiple sources.
+ * Main entry point. Exports secrets module for key management and KeeperLoop for core operations.
  */
 
-export * from "./secrets";
+// Secrets management exports
+export * from "./secrets/index.js";
+
+// Keeper loop and core functionality
+export { KeeperLoop, simulateRound } from "./loop.js";
+export { loadConfig } from "./config.js";
+export { LoggingAlert, NoOpAlert, getAlertTransport } from "./alerts.js";
+export type { Config, Alert, AlertTransport, DegradedModeState } from "./types.js";
