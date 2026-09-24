@@ -12,3 +12,18 @@ export {
   requireEnv,
   type ProfitabilityConfig,
 } from "./config.js";
+export {
+  ExecutorRegistry,
+  dispatchTask,
+} from "./executors/interface.js";
+export type {
+  ExecuteContext,
+  ExecutorEstimate,
+  KeeperTask,
+  TaskExecutor,
+} from "./executors/interface.js";
+export {
+  loadExecutorModules,
+  parseExecutorModuleList,
+} from "./executors/loader.js";
+export { ttlExtensionExecutor } from "./executors/ttl-extension.js";
