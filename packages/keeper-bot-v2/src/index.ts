@@ -27,3 +27,9 @@ export {
   parseExecutorModuleList,
 } from "./executors/loader.js";
 export { ttlExtensionExecutor } from "./executors/ttl-extension.js";
+export {
+  KeeperMetrics,
+  SKIP_REASONS,
+  startMetricsServer,
+  type SkipReason,
+} from "./metrics.js";

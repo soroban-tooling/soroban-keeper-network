@@ -60,3 +60,15 @@ unknown task types; they emit `task_skipped_no_executor` and remain unclaimed.
 calldata is UTF-8 JSON containing `contractId` and `extendToLedger`. It invokes
 the core's TTL-extension submission capability with the stable idempotency key
 and returns a proof tied to the submitted transaction hash.
+
+## Metrics
+
+`KeeperMetrics` publishes Prometheus text at `/metrics` through a dedicated HTTP
+server. The default bind is `127.0.0.1:9464`. The scrape handler only reads the
+in-memory registry; it does not call RPC or wait for the keeper loop.
+
+The endpoint exposes last-completed-round task counts, separate skip labels for
+`not_claimable`, `unprofitable`, `no_executor`, and `other`, the current keeper
+balance, last-round duration, and cumulative RPC errors labeled by type. A
+round builds its counts privately and publishes them together on `finish()`, so
+a scrape never observes a partially updated round.
