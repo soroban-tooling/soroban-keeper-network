@@ -1,0 +1,42 @@
+{
+  "name": "soroban-keeper-bot-v2",
+  "version": "0.1.0",
+  "description": "Production-grade keeper bot for the Soroban Keeper Network with persistence, concurrency, metrics, and alerting",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "keeper",
+    "automation",
+    "defi",
+    "production"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@soroban-keeper-network/sdk": "file:../../packages/sdk-ts",
+    "@stellar/stellar-sdk": "^16.2.0",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^20.0.0",
+    "@vitest/ui": "^1.0.0",
+    "eslint": "^10.8.0",
+    "globals": "^17.8.0",
+    "typescript": "^5.3.0",
+    "typescript-eslint": "^7.0.0",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
