@@ -19,6 +19,8 @@ module.exports = [
     },
     rules: {
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/explicit-function-return-type": "warn",
       "no-empty": ["error", { allowEmptyCatch: false }],
       "prefer-const": "warn",
       eqeqeq: ["warn", "smart"],

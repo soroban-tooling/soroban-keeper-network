@@ -1,6 +1,6 @@
 # Soroban Keeper Network - Keeper Bot v2
 
-A TypeScript-based keeper bot for the Soroban Keeper Network designed for operators running keepers competitively with adaptive fee management and profitability checks.
+A TypeScript-based keeper bot for the Soroban Keeper Network designed for operators running keepers competitively with adaptive fee management, profitability checks, persistence, concurrency, metrics, and alerting.
 
 ## Overview
 
@@ -9,13 +9,17 @@ This is **keeper-bot-v2**, aimed at operators and enterprises running keeper ope
 - **TypeScript**: Type-safe, production-ready implementation
 - **Adaptive Fees**: Adjusts transaction fees based on current network conditions within configurable limits
 - **Profitability Checks**: Evaluates whether each task execution will be profitable before submission
-- **Modular Architecture**: Pluggable components for custom executors, state persistence, and more
+- **Persistence**: Durable task state tracking across restarts
+- **Concurrency**: Parallel task processing for improved throughput
+- **Metrics**: Operational observability with comprehensive metrics collection
+- **Alerting**: Real-time alerts for missed executions, RPC errors, and stagnant balance
+- **Modular Architecture**: Pluggable components for custom executors, state persistence, and transport layers
 
 If you're new to the Soroban Keeper Network, start with [examples/keeper-bot](../keeper-bot) instead — it's a single-file JavaScript example designed to be beginner-friendly.
 
 ## Features
 
-### Adaptive Fee Management (Issue #260)
+### Adaptive Fee Management
 
 The bot queries Soroban RPC for current network fee conditions and adjusts submission fees accordingly:
 
@@ -24,13 +28,7 @@ The bot queries Soroban RPC for current network fee conditions and adjusts submi
 - **Configurable**: Tunable via environment variables for different risk/cost tradeoffs
 - **Fallback strategy**: Reverts to BASE_FEE if RPC is unavailable
 
-Example scenarios:
-
-- **Quiet network**: Use p50 (median) with 1.0x multiplier to save costs
-- **Normal conditions**: Use p90 with 1.1x multiplier for reliable inclusion
-- **High congestion**: Use p99 with a high multiplier or accept the ceiling limit
-
-### Profitability Checks (Issue #254)
+### Profitability Checks
 
 Before claiming and executing a task, the bot evaluates:
 
@@ -40,7 +38,24 @@ Net Profit = Gross Reward - (claim fee + execute fee + withdraw fee)
 
 If net profit ≤ 0, the task is skipped — no point paying to lose money.
 
-The profitability check uses the **actual adaptive fee** about to be paid, not a hardcoded assumption, so fees and profitability always stay in sync.
+### Alerting System
+
+Production-grade alerting with:
+
+- **Missed Execution Detection**: Alerts when claimed tasks are not executed within lock window
+- **RPC Error Tracking**: Detects consecutive RPC failures
+- **Balance Monitoring**: Warns when keeper balance is stagnant despite activity
+- **Pluggable Transports**: Webhook, Slack, PagerDuty, or custom implementations
+
+### Metrics Collection
+
+Track operational health with:
+
+- Claimed/executed task counts
+- Profit metrics and fee statistics
+- RPC error rates
+- Balance changes
+- Concurrency metrics
 
 ## Setup
 
@@ -66,7 +81,7 @@ npm install
    cp .env.example .env
    ```
 
-2. Edit `.env` and set your keeper account and fee preferences:
+2. Edit `.env` and set your keeper account and preferences:
 
    ```env
    KEEPER_SECRET_KEY=S...  # Your keeper's secret key
@@ -83,6 +98,8 @@ npm install
 npm run build
 ```
 
+Compiles TypeScript to `dist/` directory.
+
 ### Run Tests
 
 ```bash
@@ -95,11 +112,52 @@ Run tests in watch mode during development:
 npm run test:watch
 ```
 
+### Type Check
+
+```bash
+npm run type-check
+```
+
+Verifies TypeScript types without building.
+
 ### Linting
 
 ```bash
 npm run lint
 ```
+
+Validates code against repository style guidelines.
+
+## Architecture
+
+### Components
+
+- **Profitability Module**: Evaluates task profitability with actual fees
+- **Adaptive Fee Module**: Queries RPC and adjusts fees based on network conditions
+- **Alerting System**: Monitors metrics and sends notifications via pluggable transports
+- **Metrics Collection**: Aggregates operational data for observability
+- **Task Persistence**: Durable state tracking for resilience
+- **Executor**: Pluggable task execution strategies
+
+### Alert Rules
+
+#### 1. MissedExecutionRule
+Detects when a claimed task is not executed within its lock window.
+
+#### 2. ConsecutiveRpcErrorRule
+Detects when consecutive rounds with RPC errors exceed a threshold.
+
+#### 3. StagnantBalanceRule
+Detects when the keeper balance is not growing despite claimed activity.
+
+### Deduplication
+
+The AlertManager ensures exactly one notification per incident:
+
+- Fires on first detection
+- Suppresses duplicates while condition persists
+- Clears incident when condition resolves
+- Can re-fire if condition recurs
 
 ## Usage
 
@@ -108,108 +166,34 @@ npm run lint
 The bot will follow this flow:
 
 1. **Fetch tasks** from the Keeper Registry contract
-2. **Check profitability** using actual adaptive fees
-3. **Skip unprofitable tasks** without wasting fees
-4. **Claim and execute** profitable tasks with network-adapted fees
-5. **Persist state** across restarts for resilience
-
-## Architecture
-
-### Modules
-
-- **fees.ts**: Adaptive fee calculation, RPC integration, profitability checks
-- **config.ts**: Environment variable loading and validation
-- *(future)* **executor.ts**: Pluggable task execution strategies
-- *(future)* **state.ts**: Persistent state schema and storage
-- *(future)* **keeper.ts**: Main orchestration loop
-
-### Key Interfaces
-
-```typescript
-// From fees.ts
-export interface FeeConfig {
-  feeCeilingStroops: number;
-  feePercentile?: "p10" | "p50" | "p90" | "p99";
-  feeMultiplier?: number;
-}
-
-export interface FeeEstimate {
-  recommendedFee: number;
-  adaptedFromNetwork: boolean;
-  networkFeeRaw?: number;
-  ceilingApplied: boolean;
-}
-
-// Query fees and check profitability
-const estimate = await getAdaptiveFee(server, config);
-const isProfitable = isOperationProfitable(grossProfit, estimate);
-```
-
-## Fee Configuration Guidance
-
-### Conservative (Testnet, Low-Risk)
-
-```env
-FEE_CEILING_STROOPS=1000
-FEE_PERCENTILE=p50
-FEE_MULTIPLIER=1.0
-```
-
-- Aims for median fee
-- Lowest cost, moderate inclusion probability
-- Good for testing on testnet
-
-### Balanced (Production, Recommended)
-
-```env
-FEE_CEILING_STROOPS=10000
-FEE_PERCENTILE=p90
-FEE_MULTIPLIER=1.1
-```
-
-- Aims for 90th percentile with 10% safety margin
-- Reliable inclusion, reasonable cost
-- Recommended for most operators
-
-### Aggressive (High-Value Tasks, Testnet Spikes)
-
-```env
-FEE_CEILING_STROOPS=50000
-FEE_PERCENTILE=p99
-FEE_MULTIPLIER=1.5
-```
-
-- Aims for 99th percentile with 50% safety margin
-- Highest inclusion probability, higher cost
-- Use only for high-value tasks or during congestion
+2. **Collect metrics** on current operational state
+3. **Check profitability** using actual adaptive fees
+4. **Skip unprofitable tasks** without wasting fees
+5. **Claim and execute** profitable tasks with network-adapted fees
+6. **Evaluate alerts** based on metrics
+7. **Persist state** across restarts for resilience
 
 ## Roadmap
 
 - [x] Adaptive fee module with RPC integration
 - [x] Profitability check integration
+- [x] Alerting system with webhook transport
+- [x] Metrics collection framework
 - [ ] Executor plugin interface
 - [ ] Persistent task state schema
 - [ ] Multi-account support for parallelization
 - [ ] Concurrent task processing
 - [ ] CLI for administration and monitoring
-- [ ] Metrics and observability (Prometheus, etc.)
+- [ ] Slack/PagerDuty/Datadog transports
 
-## Issues and Related Work
+## Related Issues
 
-This implementation addresses:
-
-- **Issue #260**: [Adapt submitted fees to current network conditions](../../.github/backlog/issues/0260-bot-v2-fee-market-adaptation.md)
-- **Issue #254**: [Profitability check before claiming](../../.github/backlog/issues/0254-bot-v2-profitability-check.md)
-
-Related future work:
-
-- Issue #251: Keeper-bot-v2 scaffolding
-- Issue #252: Persistent task-state schema
-- Issue #253: Concurrent task processing
-- Issue #255: Multi-account support
-- Issue #256: Executor plugin interface
-
-See [.github/backlog/README.md](../../.github/backlog/README.md) for the full issue index.
+- **Issue #260**: Adapt submitted fees to current network conditions
+- **Issue #254**: Profitability check before claiming
+- **Issue #252**: Persistent task-state schema
+- **Issue #253**: Concurrent task processing
+- **Issue #257**: Metrics collection endpoint
+- **Issue #258**: Alerting system with webhook transport
 
 ## Testing
 
@@ -217,10 +201,11 @@ The test suite covers:
 
 - ✓ Adaptive fee calculation with various network conditions
 - ✓ Fee ceiling enforcement during extreme congestion
-- ✓ Percentile selection (p10, p50, p90, p99)
-- ✓ RPC fallback behavior
 - ✓ Profitability checks with actual fees
+- ✓ Alert rule detection and deduplication
+- ✓ Metrics collection and aggregation
 - ✓ Configuration loading and validation
+- ✓ Transport error handling and timeouts
 
 Run `npm test` to see the full output.
 
