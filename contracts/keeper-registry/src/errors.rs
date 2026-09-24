@@ -77,4 +77,52 @@ pub enum KeeperError {
     /// The sum of a batch's rewards exceeded the caller-supplied
     /// `max_total_reward` ceiling. Zero transfers occurred.
     BatchRewardCeilingExceeded = 23,
+
+    // ─── E06 — Staking & Slashing (docs/STAKING_DESIGN.md) ─────────────
+    // New staking/slashing errors go here.
+    /// `slash` or `initiate_unbond` was asked for more than the keeper's
+    /// current stake.
+    InsufficientStake = 25,
+    /// `withdraw_stake` called before the pending request's
+    /// `unlock_ledger` has been reached.
+    UnbondNotReady = 26,
+    /// `initiate_unbond` called while a prior request for the same keeper
+    /// has not yet been withdrawn.
+    UnbondAlreadyPending = 27,
+    /// `withdraw_stake` called with no `UnbondRequest` on file for the
+    /// keeper.
+    NoPendingUnbond = 28,
+    /// `claim_task` rejected a keeper whose current stake is below the
+    /// configured `MinStake` floor.
+    MinStakeNotMet = 29,
+    /// `raise_slash_appeal` / `resolve_slash_appeal` given a `slash_id`
+    /// with no matching `Slash` record.
+    SlashNotFound = 30,
+    /// `raise_slash_appeal` called after `DISPUTE_WINDOW_LEDGERS` has
+    /// elapsed since the slash it references.
+    AppealWindowClosed = 31,
+    /// A second `raise_slash_appeal` for a `slash_id` that already has one.
+    AppealAlreadyRaised = 32,
+    /// `raise_slash_appeal` called by an address other than the slash
+    /// record's own `keeper` — only the slashed keeper has standing to
+    /// dispute its own slash.
+    NotSlashedKeeper = 33,
+
+    // ─── E06 — Execution dispute window (docs/STAKING_DESIGN.md §4.2) ──
+    /// `dispute_execution` given a `task_id` with no matching
+    /// `PendingCredit` for the caller-named keeper — either the task was
+    /// never executed by that keeper, its credit already finalized (the
+    /// dispute window closed), or it was already disputed/resolved.
+    NoPendingCredit = 34,
+    /// A second `dispute_execution` for a `task_id` whose credit is
+    /// already marked disputed.
+    ExecutionAlreadyDisputed = 35,
+    /// `dispute_execution` called after the credit's `unlock_ledger` has
+    /// already passed — once a credit is eligible to finalize, disputing
+    /// it is too late; `finalize_rewards` (called by `withdraw_rewards`)
+    /// may have already moved it into the ordinary, withdrawable balance.
+    DisputeWindowClosed = 36,
+    /// `resolve_execution_dispute` given a `task_id` with no disputed
+    /// `PendingCredit` on file (never disputed, or already resolved).
+    NoDisputedCredit = 37,
 }
