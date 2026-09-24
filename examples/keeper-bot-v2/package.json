@@ -1,7 +1,7 @@
 {
   "name": "soroban-keeper-bot-v2",
   "version": "0.1.0",
-  "description": "Advanced off-chain keeper bot for the Soroban Keeper Network with profitability prioritization, concurrency, and persistent state",
+  "description": "Advanced off-chain keeper bot for the Soroban Keeper Network with profitability prioritization, adaptive fees, and persistent state",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -44,6 +44,7 @@
     "automation",
     "defi",
     "profitability",
+    "adaptive-fees",
     "bot"
   ],
   "license": "Apache-2.0",
