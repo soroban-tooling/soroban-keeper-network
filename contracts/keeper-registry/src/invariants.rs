@@ -35,12 +35,49 @@ use soroban_sdk::{Address, Env};
 use crate::{KeeperRegistryClient, TaskStatus};
 
 /// I-1 — Solvency: the registry's token balance always equals open task
-/// escrow plus credited keeper balances plus accrued fees.
+/// escrow plus credited keeper balances plus accrued fees plus staked
+/// collateral (bonded or mid-unbond) plus rewards still within their
+/// execution dispute window (see docs/STAKING_DESIGN.md).
 ///
 /// `token_balance` is the reward token's `balance()` for the registry's own
 /// contract address, read by the caller via a `token::Client` (this module
 /// doesn't hardcode a token client since the token address is
 /// contract-specific test/fuzz setup, not part of the registry ABI).
+///
+/// ## E06 extension (issue 0294 / #422)
+///
+/// Two additions, both already inside the contract's token balance but not
+/// previously counted:
+///
+/// - **Stake escrow**: `keeper_stake(keeper)` only reflects a keeper's
+///   still-bonded amount — `initiate_unbond` moves the requested amount out
+///   of that figure immediately (docs/STAKING_DESIGN.md §3), even though
+///   the tokens themselves have not left the contract yet. Both must be
+///   counted: bonded stake via `keeper_stake`, and anything mid-unbond via
+///   `pending_unbond`'s `UnbondRequest.amount`. A slash
+///   (docs/STAKING_DESIGN.md §5) transfers tokens out to a treasury in the
+///   same call that reduces `keeper_stake`, so a completed slash never
+///   breaks this equation.
+/// - **Pending execution-dispute credits**: when the dispute window is
+///   enabled (docs/STAKING_DESIGN.md §4.2), an `execute_task` credit sits
+///   in `pending_reward(keeper)` rather than `keeper_balance(keeper)` until
+///   it finalizes — the tokens' *share* was already carved out of the
+///   task's escrow at execution time (the task moved to `Executed`, and
+///   `open_escrow` above no longer counts it), so a pending credit's
+///   `net_reward` must be counted here or it disappears from both sides of
+///   the equation. A resolved-and-upheld dispute
+///   (`resolve_execution_dispute`, `uphold_dispute: true`) removes the
+///   credit without ever crediting `KeeperReward` — the reward is
+///   deliberately never paid to the keeper — but the forfeited
+///   `net_reward` is credited to `fees_accrued` in the same call (see that
+///   function's doc comment), so it remains fully accounted for start to
+///   finish: `pending_reward` while the dispute is open, `fees_accrued`
+///   the instant it resolves upheld. This assertion caught the original,
+///   unfixed version of that path (an upheld dispute that dropped the
+///   credit with no token destination at all, silently stranding it) as a
+///   genuine I-1 violation while property-testing this extension, which is
+///   what prompted the `resolve_execution_dispute` fix rather than a
+///   workaround here.
 pub fn assert_solvent(
     env: &Env,
     registry: &KeeperRegistryClient,
@@ -61,10 +98,32 @@ pub fn assert_solvent(
     }
 
     let mut keeper_balances: i128 = 0;
+    let mut keeper_stakes: i128 = 0;
+    let mut pending_unbonds: i128 = 0;
+    let mut pending_credits: i128 = 0;
     for keeper in known_keepers {
         keeper_balances = keeper_balances
             .checked_add(registry.keeper_balance(keeper))
             .ok_or("keeper_balances overflowed while summing balances")?;
+        keeper_stakes = keeper_stakes
+            .checked_add(registry.keeper_stake(keeper))
+            .ok_or("keeper_stakes overflowed while summing stakes")?;
+        if let Some(request) = registry.pending_unbond(keeper) {
+            pending_unbonds = pending_unbonds
+                .checked_add(request.amount)
+                .ok_or("pending_unbonds overflowed while summing unbond requests")?;
+        }
+        // Upheld-and-resolved disputes intentionally leave their net_reward
+        // uncounted here (see the doc comment above) — every credit still
+        // in `pending_reward` at the time this is called, disputed or not,
+        // represents tokens the contract still holds against a real,
+        // outstanding credit record, so all of them are summed regardless
+        // of `disputed`.
+        for credit in registry.pending_reward(keeper).iter() {
+            pending_credits = pending_credits
+                .checked_add(credit.net_reward)
+                .ok_or("pending_credits overflowed while summing pending execution credits")?;
+        }
     }
 
     let fees_accrued = registry.fees_accrued();
@@ -72,12 +131,20 @@ pub fn assert_solvent(
     let owed = open_escrow
         .checked_add(keeper_balances)
         .and_then(|sum| sum.checked_add(fees_accrued))
-        .ok_or("owed total overflowed (open_escrow + keeper_balances + fees_accrued)")?;
+        .and_then(|sum| sum.checked_add(keeper_stakes))
+        .and_then(|sum| sum.checked_add(pending_unbonds))
+        .and_then(|sum| sum.checked_add(pending_credits))
+        .ok_or(
+            "owed total overflowed (open_escrow + keeper_balances + fees_accrued \
+             + keeper_stakes + pending_unbonds + pending_credits)",
+        )?;
 
     if token_balance != owed {
         return Err(format!(
             "I-1 solvency violated: token_balance={token_balance} but owed={owed} \
-             (open_escrow={open_escrow}, keeper_balances={keeper_balances}, fees_accrued={fees_accrued})"
+             (open_escrow={open_escrow}, keeper_balances={keeper_balances}, \
+             fees_accrued={fees_accrued}, keeper_stakes={keeper_stakes}, \
+             pending_unbonds={pending_unbonds}, pending_credits={pending_credits})"
         ));
     }
 

@@ -21,4 +21,6 @@ pub use events::{
 pub use network::{CustomNetworkConfig, Network, NetworkConfig, FUTURENET, MAINNET, TESTNET};
 pub use retry::{default_classify, ErrorClass, RetryPolicy, RpcCallError, TransportError};
 pub use signing::{KeypairSigner, SignerError, TransactionSigner};
-pub use types::{BatchTaskParams, Task, TaskStatus, TaskType};
+pub use types::{
+    BatchTaskParams, PendingCredit, SlashRecord, Task, TaskStatus, TaskType, UnbondRequest,
+};
