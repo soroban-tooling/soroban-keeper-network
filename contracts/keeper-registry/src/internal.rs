@@ -8,7 +8,10 @@ use soroban_sdk::{token, Address, Env};
 
 use crate::constants::*;
 use crate::errors::KeeperError;
-use crate::types::{DataKey, Task};
+use crate::types::{DataKey, SlashHistory, Task};
+
+// ─── E06 — Keeper Staking & Slashing ────────────────────────────────────
+// See `docs/STAKING_DESIGN.md`.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
@@ -193,6 +196,85 @@ pub(crate) fn credit_keeper(e: &Env, keeper: &Address, amount: i128) -> Result<(
         &key,
         KEEPER_BALANCE_BUMP_THRESHOLD,
         KEEPER_BALANCE_BUMP_LEDGERS,
+    );
+    Ok(())
+}
+
+/// Reads a keeper's current bonded stake (0 if never deposited).
+///
+/// Named `read_keeper_stake` (not `keeper_stake`) to avoid colliding with
+/// the `#[contractimpl]` entry point of the same name in `staking.rs` — the
+/// two are in scope together via `use crate::internal::*`, and Rust would
+/// otherwise resolve calls inside that entry point to itself.
+///
+/// TTL note: mirrors `keeper_balance`'s policy — this is a read used by both
+/// state-mutating entry points and views, so it deliberately never renews
+/// the entry's TTL itself. Callers that write the stake value renew TTL as
+/// part of that write (see `write_keeper_stake`).
+pub(crate) fn read_keeper_stake(e: &Env, keeper: &Address) -> i128 {
+    e.storage()
+        .persistent()
+        .get(&DataKey::KeeperStake(keeper.clone()))
+        .unwrap_or(0)
+}
+
+/// Overwrites a keeper's bonded stake and renews the entry's TTL. Shared by
+/// every staking entry point that changes the stored amount
+/// (`stake_deposit`, `initiate_unbond`, `slash`), so the TTL-renewal policy
+/// lives in one place, the same reasoning `credit_keeper` documents for
+/// `KeeperReward`.
+pub(crate) fn write_keeper_stake(e: &Env, keeper: &Address, amount: i128) {
+    let key = DataKey::KeeperStake(keeper.clone());
+    e.storage().persistent().set(&key, &amount);
+    e.storage().persistent().extend_ttl(
+        &key,
+        KEEPER_STAKE_BUMP_THRESHOLD,
+        KEEPER_STAKE_BUMP_LEDGERS,
+    );
+}
+
+/// Reads a keeper's aggregate slash history (zero/zero if never slashed).
+/// See `read_keeper_stake`'s doc comment for why this is not named
+/// `slash_history` (avoiding a collision with the `#[contractimpl]` entry
+/// point of that name in `staking.rs`).
+pub(crate) fn read_slash_history(e: &Env, keeper: &Address) -> SlashHistory {
+    e.storage()
+        .persistent()
+        .get(&DataKey::SlashHistory(keeper.clone()))
+        .unwrap_or(SlashHistory {
+            count: 0,
+            total_slashed: 0,
+        })
+}
+
+/// Increments a keeper's slash count and total-slashed figure by one
+/// incident of `amount`, renewing the entry's TTL (#425). Called only from
+/// `slash`, after its own amount/incident checks already passed, so the
+/// `checked_add`s here are defensive rather than expected to ever trip in
+/// practice (a keeper's total_slashed can never exceed what it could ever
+/// have staked, which is itself bounded by the reward token's own supply).
+pub(crate) fn write_slash_history(
+    e: &Env,
+    keeper: &Address,
+    amount: i128,
+) -> Result<(), KeeperError> {
+    let current = read_slash_history(e, keeper);
+    let updated = SlashHistory {
+        count: current
+            .count
+            .checked_add(1)
+            .ok_or(KeeperError::ArithmeticOverflow)?,
+        total_slashed: current
+            .total_slashed
+            .checked_add(amount)
+            .ok_or(KeeperError::ArithmeticOverflow)?,
+    };
+    let key = DataKey::SlashHistory(keeper.clone());
+    e.storage().persistent().set(&key, &updated);
+    e.storage().persistent().extend_ttl(
+        &key,
+        KEEPER_STAKE_BUMP_THRESHOLD,
+        KEEPER_STAKE_BUMP_LEDGERS,
     );
     Ok(())
 }

@@ -252,14 +252,146 @@ A complete run using the signature verifier:
 
 ---
 
+## Keeper staking walkthrough
+
+Epic E06 adds keeper collateral: a keeper posts stake, an admin may slash it
+for off-chain-adjudicated misbehavior, and a keeper can withdraw it back out
+after a fixed unbonding delay. See [`docs/STAKING_DESIGN.md`](STAKING_DESIGN.md)
+for the full design and the trade-offs behind each decision (why slashing is
+admin-triggered rather than automatic or dispute-based, why unbonding has a
+delay, why a slash is rejected outright rather than clamped) — this section
+only walks through using it.
+
+> **Note:** This walkthrough uses the same testnet contract ID and accounts
+> as the trace above. Amounts are in stroops (1 XLM = 10,000,000 stroops),
+> matching the rest of this document.
+
+### Step 1: Deposit stake
+
+```bash
+stellar contract invoke \
+  --id CDJOYHBS7C2PVJS47BTRDLGBNG2YOE43VX6Y3EWIZPPPKOPRNYQQ54U4 \
+  --source keeper --network testnet \
+  -- stake_deposit \
+  --keeper GD7DLCT74C2BM2J3CPWVIBK6TCRSIV5OEY56KBJ5P4TM7HEMCCOSW46K \
+  --amount 50000000
+```
+
+This escrows 5.0 XLM from the keeper into the contract and emits
+`StakeDeposited` (topics `("deposit", "stake")`). Reading it back:
+
+```bash
+stellar contract invoke \
+  --id CDJOYHBS7C2PVJS47BTRDLGBNG2YOE43VX6Y3EWIZPPPKOPRNYQQ54U4 \
+  --source keeper --network testnet \
+  -- keeper_stake \
+  --keeper GD7DLCT74C2BM2J3CPWVIBK6TCRSIV5OEY56KBJ5P4TM7HEMCCOSW46K
+```
+
+**Result:** `keeper_stake` returns `50000000`. This is entirely separate
+storage from the keeper's task-reward balance (`keeper_balance`) — staking,
+claiming, and executing tasks never interfere with each other.
+
+### Step 2: Start unbonding
+
+A keeper who wants their stake back first calls `initiate_unbond`, which
+starts a fixed delay (`UNBOND_DELAY_LEDGERS`, ~1 day) rather than releasing
+funds immediately:
+
+```bash
+stellar contract invoke \
+  --id CDJOYHBS7C2PVJS47BTRDLGBNG2YOE43VX6Y3EWIZPPPKOPRNYQQ54U4 \
+  --source keeper --network testnet \
+  -- initiate_unbond \
+  --keeper GD7DLCT74C2BM2J3CPWVIBK6TCRSIV5OEY56KBJ5P4TM7HEMCCOSW46K \
+  --amount 20000000
+```
+
+**Result:** returns the ledger sequence at which the 2.0 XLM becomes
+withdrawable. No tokens move yet, and `keeper_stake` is unchanged at
+`50000000` — the requested amount stays escrowed (and still slashable)
+until it's actually withdrawn. Checking the pending request:
+
+```bash
+stellar contract invoke \
+  --id CDJOYHBS7C2PVJS47BTRDLGBNG2YOE43VX6Y3EWIZPPPKOPRNYQQ54U4 \
+  --source keeper --network testnet \
+  -- unbonding_status \
+  --keeper GD7DLCT74C2BM2J3CPWVIBK6TCRSIV5OEY56KBJ5P4TM7HEMCCOSW46K
+```
+
+returns `Some((20000000, <release_ledger>))`.
+
+### Step 3: Withdraw once the delay elapses
+
+Calling `withdraw_stake` before `release_ledger` fails with
+`KeeperError::UnbondNotReady`. Once the ledger sequence reaches it:
+
+```bash
+stellar contract invoke \
+  --id CDJOYHBS7C2PVJS47BTRDLGBNG2YOE43VX6Y3EWIZPPPKOPRNYQQ54U4 \
+  --source keeper --network testnet \
+  -- withdraw_stake \
+  --keeper GD7DLCT74C2BM2J3CPWVIBK6TCRSIV5OEY56KBJ5P4TM7HEMCCOSW46K
+```
+
+**Result:** transfers 2.0 XLM back to the keeper, clears the pending
+request, and `keeper_stake` drops to `30000000`. `StakeWithdrawn` is
+emitted with the amount actually released.
+
+### Step 4: A slash
+
+Slashing is admin-triggered only (`docs/STAKING_DESIGN.md` §1) — there is
+no automatic or dispute-based path in this version. The admin supplies a
+stable `incident_id` so the same incident can never be slashed twice:
+
+```bash
+stellar contract invoke \
+  --id CDJOYHBS7C2PVJS47BTRDLGBNG2YOE43VX6Y3EWIZPPPKOPRNYQQ54U4 \
+  --source owner --network testnet \
+  -- slash \
+  --admin GB24ZVDX4IAKY53EJCM2PZW4OKQWKFOO4WXABRN2VPBP5BOSQK5U53DM \
+  --keeper GD7DLCT74C2BM2J3CPWVIBK6TCRSIV5OEY56KBJ5P4TM7HEMCCOSW46K \
+  --amount 10000000 \
+  --reason fraud \
+  --incident_id 0000000000000000000000000000000000000000000000000000000000000a \
+  --treasury GB24ZVDX4IAKY53EJCM2PZW4OKQWKFOO4WXABRN2VPBP5BOSQK5U53DM
+```
+
+**Result:** 1.0 XLM moves from the keeper's stake to `treasury`, and
+`keeper_stake` drops to `20000000`. A slash for more than the keeper's
+current stake is rejected outright (`KeeperError::SlashExceedsStake`)
+rather than silently reduced to what remains — the admin always knows
+exactly what happened. Repeating the same `--incident_id` fails with
+`KeeperError::DuplicateSlashIncident`. The keeper's aggregate track record
+is readable without replaying events:
+
+```bash
+stellar contract invoke \
+  --id CDJOYHBS7C2PVJS47BTRDLGBNG2YOE43VX6Y3EWIZPPPKOPRNYQQ54U4 \
+  --source keeper --network testnet \
+  -- slash_history \
+  --keeper GD7DLCT74C2BM2J3CPWVIBK6TCRSIV5OEY56KBJ5P4TM7HEMCCOSW46K
+```
+
+returns `(1, 10000000)` — one incident, 1.0 XLM total slashed.
+
+---
+
 ## Further reading
 
 - **[`docs/VERIFIER_DESIGN.md`](VERIFIER_DESIGN.md)** — the `IKeeperVerifier`
   interface, failure semantics, resource budget model, and trust model.
 - **[`docs/VERIFIERS.md`](VERIFIERS.md)** — integration guide and measured
   resource cost deltas for each reference verifier.
+- **[`docs/STAKING_DESIGN.md`](STAKING_DESIGN.md)** — the staking and slashing
+  design: trigger model, storage layout, unbonding delay, and the decisions
+  behind each (epic E06).
 - **Backlog issues:**
   - **0071** — verifier design document
   - **0077** — signature-based reference verifier (used in this walkthrough)
   - **0078** — oracle-based reference verifier
   - **0079** — transaction-inclusion reference verifier
+  - **0289** — stake storage and `stake_deposit`
+  - **0290** — unbonding: `initiate_unbond` / `withdraw_stake`
+  - **0291** — `slash` and its authorization model

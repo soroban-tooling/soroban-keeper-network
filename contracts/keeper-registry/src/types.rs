@@ -1,6 +1,6 @@
 //! Storage keys and the domain types they hold.
 
-use soroban_sdk::{contracttype, Address, Bytes};
+use soroban_sdk::{contracttype, Address, Bytes, BytesN};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Storage Keys
@@ -23,6 +23,42 @@ pub enum DataKey {
     /// Minimum reward a task may be registered with. Guards against dust-spam
     /// tasks that would cost keepers more in fees than they pay out. Default 0.
     MinReward,
+    /// A keeper's current bonded stake (E06, `docs/STAKING_DESIGN.md`). Kept
+    /// under its own key, never conflated with `KeeperReward`, mirroring the
+    /// separation already kept between `FeesAccrued` and task escrow.
+    KeeperStake(Address),
+    /// At most one in-flight unbonding request per keeper. A second
+    /// `initiate_unbond` call while one is already pending replaces it,
+    /// using the new total — see `docs/STAKING_DESIGN.md` §3.
+    UnbondRequest(Address),
+    /// Presence-only marker: this slash incident id has already been
+    /// slashed once. See `docs/STAKING_DESIGN.md` §6.
+    SlashIncident(BytesN<32>),
+    /// Running slash count and total-slashed figure for a keeper (#425).
+    /// Kept separate from `SlashIncident`, which records duplicate-incident
+    /// protection per id, not an aggregate a dashboard can read directly.
+    SlashHistory(Address),
+}
+
+/// A keeper's pending stake withdrawal, started by `initiate_unbond` and
+/// only releasable once `e.ledger().sequence() >= release_ledger`. See
+/// `docs/STAKING_DESIGN.md` §3.
+#[contracttype]
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct UnbondRequest {
+    pub amount: i128,
+    pub release_ledger: u32,
+}
+
+/// A keeper's aggregate slash history, updated by every successful `slash`
+/// call against that keeper (#425). Read by `slash_history` so a dashboard
+/// or keeper bot can see a keeper's track record without replaying every
+/// `Slashed` event.
+#[contracttype]
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct SlashHistory {
+    pub count: u32,
+    pub total_slashed: i128,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

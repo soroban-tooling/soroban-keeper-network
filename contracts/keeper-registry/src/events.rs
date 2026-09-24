@@ -4,7 +4,7 @@
 //! consumers can filter without decoding the payload. The README event table
 //! is the published contract for these shapes.
 
-use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env};
+use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Symbol};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Events — emitted for off-chain keeper bots to consume
@@ -154,5 +154,51 @@ pub fn emit_verifier_updated(
     e.events().publish(
         (symbol_short!("vupdate"), symbol_short!("task")),
         (task_id, old_verifier, new_verifier),
+    );
+}
+
+// ─── E06 — Keeper Staking & Slashing ────────────────────────────────────
+// See `docs/STAKING_DESIGN.md`.
+
+pub fn emit_stake_deposited(e: &Env, keeper: &Address, amount: i128, new_total: i128) {
+    e.events().publish(
+        (symbol_short!("deposit"), symbol_short!("stake")),
+        (keeper.clone(), amount, new_total),
+    );
+}
+
+pub fn emit_unbond_initiated(e: &Env, keeper: &Address, amount: i128, release_ledger: u32) {
+    e.events().publish(
+        (symbol_short!("unbond"), symbol_short!("stake")),
+        (keeper.clone(), amount, release_ledger),
+    );
+}
+
+pub fn emit_stake_withdrawn(e: &Env, keeper: &Address, amount: i128) {
+    e.events().publish(
+        (symbol_short!("wdraw"), symbol_short!("stake")),
+        (keeper.clone(), amount),
+    );
+}
+
+/// `reason` is a bounded `Symbol` (9-char limit), not an arbitrary string —
+/// see `docs/STAKING_DESIGN.md`'s entry-point signature note.
+pub fn emit_slashed(
+    e: &Env,
+    keeper: &Address,
+    amount: i128,
+    reason: Symbol,
+    incident_id: &BytesN<32>,
+    treasury: &Address,
+) {
+    e.events().publish(
+        (symbol_short!("slash"), symbol_short!("stake")),
+        (
+            keeper.clone(),
+            amount,
+            reason,
+            incident_id.clone(),
+            treasury.clone(),
+        ),
     );
 }

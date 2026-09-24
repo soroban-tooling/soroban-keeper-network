@@ -35,12 +35,19 @@ use soroban_sdk::{Address, Env};
 use crate::{KeeperRegistryClient, TaskStatus};
 
 /// I-1 — Solvency: the registry's token balance always equals open task
-/// escrow plus credited keeper balances plus accrued fees.
+/// escrow plus credited keeper balances plus accrued fees plus total bonded
+/// stake (E06, `docs/STAKING_DESIGN.md`).
 ///
 /// `token_balance` is the reward token's `balance()` for the registry's own
 /// contract address, read by the caller via a `token::Client` (this module
 /// doesn't hardcode a token client since the token address is
 /// contract-specific test/fuzz setup, not part of the registry ABI).
+///
+/// `known_keepers`' stake is summed via `keeper_stake`, which includes any
+/// amount currently mid-unbond (`initiate_unbond` never transfers tokens out
+/// — only `withdraw_stake` does, once the delay elapses), so this remains
+/// correct across every staking entry point without a separate "unbonding"
+/// term.
 pub fn assert_solvent(
     env: &Env,
     registry: &KeeperRegistryClient,
@@ -61,10 +68,14 @@ pub fn assert_solvent(
     }
 
     let mut keeper_balances: i128 = 0;
+    let mut stake_total: i128 = 0;
     for keeper in known_keepers {
         keeper_balances = keeper_balances
             .checked_add(registry.keeper_balance(keeper))
             .ok_or("keeper_balances overflowed while summing balances")?;
+        stake_total = stake_total
+            .checked_add(registry.keeper_stake(keeper))
+            .ok_or("stake_total overflowed while summing stakes")?;
     }
 
     let fees_accrued = registry.fees_accrued();
@@ -72,12 +83,16 @@ pub fn assert_solvent(
     let owed = open_escrow
         .checked_add(keeper_balances)
         .and_then(|sum| sum.checked_add(fees_accrued))
-        .ok_or("owed total overflowed (open_escrow + keeper_balances + fees_accrued)")?;
+        .and_then(|sum| sum.checked_add(stake_total))
+        .ok_or(
+            "owed total overflowed (open_escrow + keeper_balances + fees_accrued + stake_total)",
+        )?;
 
     if token_balance != owed {
         return Err(format!(
             "I-1 solvency violated: token_balance={token_balance} but owed={owed} \
-             (open_escrow={open_escrow}, keeper_balances={keeper_balances}, fees_accrued={fees_accrued})"
+             (open_escrow={open_escrow}, keeper_balances={keeper_balances}, \
+             fees_accrued={fees_accrued}, stake_total={stake_total})"
         ));
     }
 
@@ -209,6 +224,12 @@ pub fn assert_fee_bounded(
 /// never change any task's escrow or any keeper's credited balance.
 /// Callers snapshot the relevant balances before and after the admin call
 /// and pass both snapshots here.
+///
+/// **Deliberately excludes `slash` and keeper stake (E06).** `slash` is an
+/// admin-triggered action whose entire purpose is to move a keeper's stake —
+/// an isolation invariant that included stake would be actively wrong for
+/// it, not merely an untested gap. This exclusion is intentional and
+/// recorded here rather than left implicit; see `docs/STAKING_DESIGN.md`.
 pub fn assert_admin_action_isolated(
     task_rewards_before: &[(u64, i128)],
     task_rewards_after: &[(u64, i128)],
