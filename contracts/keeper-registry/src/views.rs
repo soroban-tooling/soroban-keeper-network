@@ -108,4 +108,30 @@ impl KeeperRegistry {
     pub fn version(_e: Env) -> u32 {
         VERSION
     }
+    /// Read-only: a keeper's currently-bonded stake (E06,
+    /// docs/STAKING_DESIGN.md). Excludes anything mid-unbond — see
+    /// [`KeeperRegistry::pending_unbond`]. Mirrors `keeper_balance`'s shape
+    /// and TTL policy (not renewed on read).
+    pub fn keeper_stake(e: Env, keeper: Address) -> i128 {
+        e.storage()
+            .persistent()
+            .get(&DataKey::KeeperStake(keeper))
+            .unwrap_or(0i128)
+    }
+    /// Read-only: a keeper's pending unbond request, if any.
+    pub fn pending_unbond(e: Env, keeper: Address) -> Option<crate::types::UnbondRequest> {
+        e.storage()
+            .persistent()
+            .get(&DataKey::UnbondRequest(keeper))
+    }
+    /// Minimum bonded stake `claim_task` requires (0 if unset — no
+    /// requirement). See docs/STAKING_DESIGN.md §6.
+    pub fn min_stake(e: Env) -> i128 {
+        min_stake_floor(&e)
+    }
+    /// Read-only: a specific slash record by id, if it still exists (a
+    /// resolved appeal removes its record — see `resolve_slash_appeal`).
+    pub fn get_slash(e: Env, slash_id: u64) -> Option<crate::types::SlashRecord> {
+        e.storage().persistent().get(&DataKey::Slash(slash_id))
+    }
 }

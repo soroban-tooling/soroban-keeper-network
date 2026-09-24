@@ -210,6 +210,15 @@ impl KeeperRegistry {
         require_not_paused(&e)?;
         keeper.require_auth();
 
+        // E06 (docs/STAKING_DESIGN.md §6): opt-in minimum stake to claim.
+        // Defaults to 0 (no requirement) until an admin configures
+        // otherwise via `set_min_stake`, mirroring `min_reward`'s posture
+        // on the task side.
+        let min_stake = min_stake_floor(&e);
+        if min_stake > 0 && keeper_stake_of(&e, &keeper) < min_stake {
+            return Err(KeeperError::MinStakeNotMet);
+        }
+
         let mut task = load_task(&e, task_id)?;
 
         if e.ledger().timestamp() >= task.deadline {
