@@ -7,7 +7,7 @@ import { MAX_PROOF_LEN } from "../constants.js";
 import type { ContractCaller, SignedCallOptions } from "../core/caller.js";
 import type { IntegerInput } from "../core/scval.js";
 import { addressArg, bytesArg, u64Arg } from "../core/scval.js";
-import { KeeperContractError, KeeperErrorCode, KeeperSdkError } from "../errors.js";
+import { KeeperContractError, KeeperErrorCode, KeeperSdkError, isKeeperError } from "../errors.js";
 
 /**
  * Accepted proof representations.
@@ -36,6 +36,37 @@ export interface ExecuteTaskParams extends SignedCallOptions {
 }
 
 /**
+ * The outcome of an execute attempt.
+ *
+ * Similar to {@link ClaimTaskOutcome}, certain simulation failures during
+ * execute_task are routine and expected in a competitive environment, not
+ * exceptional:
+ *
+ * - `invalid_task_status` -- the task moved out of `Claimed` status before this
+ *   keeper could execute it. This happens when another keeper executes or
+ *   cancels the task, or when the task expires. Move on and try another task.
+ * - `not_task_claimer` -- another keeper's lock claim is now active, usually
+ *   because the previous claimer's lock lapsed and a competitor reclaimed.
+ * - `deadline_passed` -- the task's deadline expired. The task is dead.
+ * - `verification_failed` -- an attached verifier rejected this keeper's proof.
+ *   The keeper may want to retry with different parameters or move on.
+ *
+ * Every other failure still rejects, since authorization errors, contract
+ * pauses, or other system-level issues should propagate up and surface to the
+ * operator, not be silently skipped.
+ *
+ * Note: simulation failures are treated as pre-submission skips, not
+ * as fee-paying transactions. The calling bot must not submit a transaction
+ * for any outcome other than `{ status: "executed" }`.
+ */
+export type ExecuteTaskOutcome =
+  | { status: "executed" }
+  | { status: "invalid_task_status" }
+  | { status: "not_task_claimer" }
+  | { status: "deadline_passed" }
+  | { status: "verification_failed" };
+
+/**
  * Submits proof of execution for a task this keeper has claimed.
  *
  * The proof is length-checked locally against {@link MAX_PROOF_LEN} before any
@@ -45,19 +76,26 @@ export interface ExecuteTaskParams extends SignedCallOptions {
  * constant is kept in sync with it per the versioning policy (backlog issue
  * 0192).
  *
- * Rejects with a `KeeperContractError` carrying, among others:
- * - `ProofTooLarge` when the proof exceeds `MAX_PROOF_LEN`; `error.local` is
- *   `true` when this SDK caught it before submitting,
- * - `NotTaskClaimer` when another keeper currently holds the claim,
- * - `InvalidTaskStatus` when the task is not in `Claimed`,
- * - `DeadlinePassed` when the deadline elapsed before execution,
- * - `VerificationFailed` when an attached verifier rejects the proof (once
- *   epic E04's verifier work lands; the code is reserved and decoded already).
+ * Returns one of several routine outcomes:
+ *
+ * - `{ status: "executed" }` means the proof was accepted and the keeper is
+ *   credited. The transaction is submitted.
+ * - Other outcomes indicate the task cannot currently be executed (task moved
+ *   status, another keeper holds it, deadline passed, or verifier rejected the
+ *   proof). These are determined during simulation without submitting a
+ *   transaction or spending a fee.
+ *
+ * Every other failure (authorization errors, contract paused, invalid proof
+ * format) still rejects as a thrown error.
+ *
+ * @returns which of the five routine outcomes occurred. See
+ *   {@link ExecuteTaskOutcome} for why competitive failures are return values
+ *   here and not thrown exceptions.
  */
 export async function executeTask(
   caller: ContractCaller,
   params: ExecuteTaskParams,
-): Promise<void> {
+): Promise<ExecuteTaskOutcome> {
   const { keeper, taskId, proof, signer } = params;
   const bytes = toProofBytes(proof);
 
@@ -69,12 +107,33 @@ export async function executeTask(
     );
   }
 
-  await caller.invoke<void>({
-    method: "execute_task",
-    source: keeper,
-    args: [addressArg(keeper, "keeper"), u64Arg(taskId, "taskId"), bytesArg(bytes)],
-    ...(signer ? { signer } : {}),
-  });
+  try {
+    await caller.invoke<void>({
+      method: "execute_task",
+      source: keeper,
+      args: [addressArg(keeper, "keeper"), u64Arg(taskId, "taskId"), bytesArg(bytes)],
+      ...(signer ? { signer } : {}),
+    });
+    return { status: "executed" };
+  } catch (error) {
+    // These are routine outcomes in a competitive environment; return them
+    // rather than throwing, so the caller can skip the task without logging
+    // an error.
+    if (isKeeperError(error, KeeperErrorCode.InvalidTaskStatus)) {
+      return { status: "invalid_task_status" };
+    }
+    if (isKeeperError(error, KeeperErrorCode.NotTaskClaimer)) {
+      return { status: "not_task_claimer" };
+    }
+    if (isKeeperError(error, KeeperErrorCode.DeadlinePassed)) {
+      return { status: "deadline_passed" };
+    }
+    if (isKeeperError(error, KeeperErrorCode.VerificationFailed)) {
+      return { status: "verification_failed" };
+    }
+    // Everything else is unexpected and should propagate.
+    throw error;
+  }
 }
 
 /** Normalises any {@link ProofInput} to the bytes the contract expects. */

@@ -12,7 +12,32 @@ export interface WithdrawRewardsParams extends SignedCallOptions {
 }
 
 /**
- * Withdraws the keeper's full accrued balance and returns the amount moved.
+ * The outcome of a withdraw attempt.
+ *
+ * - `{ status: "withdrawn", amount: bigint }` means the withdrawal succeeded
+ *   and the amount shown was moved. The transaction is submitted.
+ * - `{ status: "no_rewards_available", amount: 0n }` means the balance was
+ *   zero. This is determined during a free pre-submission balance check
+ *   without spending a fee on a doomed transaction.
+ *
+ * Every other failure (authorization errors, contract paused, etc.) still
+ * rejects as a thrown error.
+ */
+export type WithdrawRewardsOutcome =
+  | { status: "withdrawn"; amount: bigint }
+  | { status: "no_rewards_available"; amount: 0n };
+
+/**
+ * Checks the keeper's current balance and withdraws it if non-zero.
+ *
+ * Unlike the earlier {@link withdrawRewards} function, this uses a
+ * pre-submission check to avoid spending a fee when there are no rewards to
+ * collect. It first reads the keeper's balance (free) and only submits a
+ * transaction if the balance is non-zero.
+ *
+ * This follows the same pattern as issue #0034's pre-check for claim_task:
+ * filtering out doomed transactions before submission saves fees in the
+ * common case where a keeper has accumulated no rewards.
  *
  * The return type is `bigint` because the contract returns `i128`, which can
  * exceed `Number.MAX_SAFE_INTEGER`; this follows the SDK-wide numeric
@@ -20,18 +45,39 @@ export interface WithdrawRewardsParams extends SignedCallOptions {
  * produces for `i128`. The value is in the reward token's own units -- stroops
  * for XLM.
  *
- * Rejects with a `KeeperContractError` whose `code` is
- * `KeeperErrorCode.NoRewardsAvailable` when the balance is zero. That is an
- * expected outcome for a bot that withdraws on a timer rather than on a
- * balance check, so callers can branch on it without matching error text --
- * see {@link tryWithdrawRewards} for the ready-made version.
+ * @returns the withdrawal outcome. If successful, the amount is provided; if
+ *   no balance was available, a zero-balance outcome is returned without
+ *   submitting a transaction or spending a fee.
  */
 export async function withdrawRewards(
   caller: ContractCaller,
   params: WithdrawRewardsParams,
-): Promise<bigint> {
+): Promise<WithdrawRewardsOutcome> {
   const { keeper, signer } = params;
 
+  // Pre-check: read the balance (free, no submission).
+  // If zero, return early without submitting a fee-paying transaction.
+  let balance: bigint;
+  try {
+    balance = await caller.read<bigint>("keeper_balance", [addressArg(keeper, "keeper")]);
+  } catch (error) {
+    // A read failure is unexpected and should propagate.
+    throw error;
+  }
+
+  if (typeof balance !== "bigint") {
+    // Type safety check: the contract should always return an i128.
+    throw new TypeError(
+      `keeper_balance returned ${String(balance)} instead of an i128; the deployed contract may not be a keeper-registry.`,
+    );
+  }
+
+  if (balance === 0n) {
+    // No balance; skip the submission.
+    return { status: "no_rewards_available", amount: 0n };
+  }
+
+  // Balance is non-zero; proceed to submission.
   const withdrawn = await caller.invoke<bigint>({
     method: "withdraw_rewards",
     source: keeper,
@@ -47,27 +93,29 @@ export async function withdrawRewards(
       `withdraw_rewards returned ${String(withdrawn)} instead of an i128 amount; the deployed contract may not be a keeper-registry.`,
     );
   }
-  return withdrawn;
+
+  return { status: "withdrawn", amount: withdrawn };
 }
 
 /**
- * {@link withdrawRewards}, with the empty-balance case folded into the return
- * value: resolves to `0n` instead of rejecting when there is nothing to
- * withdraw.
+ * {@link withdrawRewards}, now that it performs a pre-check, is the recommended
+ * function and this wrapper exists only for backward compatibility.
+ *
+ * **Deprecated:** Use {@link withdrawRewards} instead. It now returns an
+ * outcome type and performs the zero-balance check before submission, making
+ * this wrapper unnecessary.
  *
  * A keeper bot polling on a timer hits `NoRewardsAvailable` as its normal
  * steady state, not as an incident, and should not have to wrap every call in a
  * try/catch just to keep that out of its error log. Every other contract
  * rejection still propagates.
+ *
+ * @deprecated Use {@link withdrawRewards} instead.
  */
 export async function tryWithdrawRewards(
   caller: ContractCaller,
   params: WithdrawRewardsParams,
 ): Promise<bigint> {
-  try {
-    return await withdrawRewards(caller, params);
-  } catch (error) {
-    if (isKeeperError(error, KeeperErrorCode.NoRewardsAvailable)) return 0n;
-    throw error;
-  }
+  const outcome = await withdrawRewards(caller, params);
+  return outcome.amount;
 }
