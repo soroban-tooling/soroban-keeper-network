@@ -29,3 +29,15 @@ npm run lint
 The initial package intentionally contains no keeper loop. Runtime features are
 added as independently tested modules while the package foundation stays
 strict, buildable, and linted from its first revision.
+
+## Metrics
+
+`KeeperMetrics` publishes Prometheus text at `/metrics` through a dedicated HTTP
+server. The default bind is `127.0.0.1:9464`. The scrape handler only reads the
+in-memory registry; it does not call RPC or wait for the keeper loop.
+
+The endpoint exposes last-completed-round task counts, separate skip labels for
+`not_claimable`, `unprofitable`, `no_executor`, and `other`, the current keeper
+balance, last-round duration, and cumulative RPC errors labeled by type. A
+round builds its counts privately and publishes them together on `finish()`, so
+a scrape never observes a partially updated round.
