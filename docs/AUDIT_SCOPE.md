@@ -15,6 +15,7 @@ to be extended, not treated as final, once E19 kicks off.
 | Admin controls (pause, fee, sweep, transfer-admin, upgrade) | [`docs/ARCHITECTURE.md`](ARCHITECTURE.md)'s trust model, `contracts/keeper-registry/src/admin.rs` | Shipped |
 | Batch registration | [`docs/BATCH_OPERATIONS.md`](BATCH_OPERATIONS.md), `contracts/keeper-registry/src/batch.rs` | Shipped |
 | TTL / archival | [`docs/ARCHITECTURE.md`](ARCHITECTURE.md#ttl--archival-strategy), `contracts/keeper-registry/src/internal.rs` | Shipped |
+| Staking, unbonding, slashing, and dispute windows (epic E06) | [`docs/STAKING_DESIGN.md`](STAKING_DESIGN.md) for design intent, [`docs/STAKING_SECURITY_REVIEW.md`](STAKING_SECURITY_REVIEW.md) for the completed security review (issue #439), `contracts/keeper-registry/src/staking.rs` | Shipped; security review complete (three findings fixed, two confirmed not to apply — one open recommendation for a stronger authorization gate on `slash` specifically before a mainnet deployment carrying meaningful value, see the review's Finding 4) |
 | **Verifier integration (epic E04)** | See below | **Proposed — not yet implemented** |
 
 ## Verifier surface (epic E04)

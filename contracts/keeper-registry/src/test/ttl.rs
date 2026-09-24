@@ -1,12 +1,15 @@
 //! Instance-storage TTL renewal.
 
 use soroban_sdk::{
-    testutils::{Address as _, Deployer as _, Events as _},
-    Address,
+    testutils::{storage::Persistent as _, Address as _, Deployer as _, Events as _},
+    token, Address,
 };
 
 use super::common::*;
-use crate::{KeeperError, INSTANCE_BUMP_LEDGERS, INSTANCE_BUMP_THRESHOLD};
+use crate::{
+    DataKey, KeeperError, INSTANCE_BUMP_LEDGERS, INSTANCE_BUMP_THRESHOLD,
+    KEEPER_BALANCE_BUMP_LEDGERS, KEEPER_BALANCE_BUMP_THRESHOLD,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Instance TTL renewal
@@ -87,6 +90,137 @@ fn test_instance_ttl_lapses_when_registry_is_fully_idle_past_bump_window() {
         .env
         .deployer()
         .get_contract_instance_ttl(&s.registry.address);
+}
+
+// Issue #440: every new staking entry point (epic E06) must call
+// bump_instance and extend the TTL of any persistent-scoped stake entry it
+// touches, from its first version — mirroring credit_keeper's pattern for
+// KeeperReward, and the same test shape issue 0015's original regression
+// test (above) used for instance TTL. This proves it for the persistent
+// KeeperStake entry specifically: without stake_deposit's extend_ttl call,
+// the entry would archive during the first advance below, and reading it
+// back via `initiate_unbond` (which calls `keeper_stake_of`) would panic on
+// an archived-entry access rather than returning a typed error.
+#[test]
+fn test_keeper_stake_ttl_renewed_by_staking_action_stays_alive_past_initial_window() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let stake_token = token::StellarAssetClient::new(&s.env, &s.token_id);
+    stake_token.mint(&keeper, &1_000_000i128);
+
+    s.registry.stake_deposit(&keeper, &500_000i128);
+    let stake_key = DataKey::KeeperStake(keeper.clone());
+
+    let ttl_after_deposit = s.env.as_contract(&s.registry.address, || {
+        s.env.storage().persistent().get_ttl(&stake_key)
+    });
+    assert!(ttl_after_deposit > KEEPER_BALANCE_BUMP_THRESHOLD);
+
+    // Advance far enough that the entry's remaining TTL drops below its own
+    // renewal threshold, but not so far that it would have archived from
+    // this deposit's renewal alone.
+    advance(
+        &s.env,
+        KEEPER_BALANCE_BUMP_LEDGERS - KEEPER_BALANCE_BUMP_THRESHOLD + 1_000,
+        0,
+    );
+    let ttl_before_mutation = s.env.as_contract(&s.registry.address, || {
+        s.env.storage().persistent().get_ttl(&stake_key)
+    });
+    assert!(
+        ttl_before_mutation < KEEPER_BALANCE_BUMP_THRESHOLD,
+        "test setup should cross the renewal threshold"
+    );
+
+    // A staking action that touches this same key renews its TTL back up to
+    // ~KEEPER_BALANCE_BUMP_LEDGERS from the current ledger.
+    s.registry.initiate_unbond(&keeper, &100_000i128);
+    let ttl_after_mutation = s.env.as_contract(&s.registry.address, || {
+        s.env.storage().persistent().get_ttl(&stake_key)
+    });
+    assert!(ttl_after_mutation > KEEPER_BALANCE_BUMP_LEDGERS - 1_000);
+
+    // Advance well past where the *original* TTL window (from the initial
+    // deposit) would have archived the entry — total ledgers advanced now
+    // exceeds KEEPER_BALANCE_BUMP_LEDGERS. Without the interim renewal
+    // above, `keeper_stake` below would panic on an archived-entry read.
+    advance(&s.env, KEEPER_BALANCE_BUMP_LEDGERS - 1_000, 0);
+
+    // The contract remains fully usable: the stake entry is still readable
+    // (proving it didn't archive), and admin actions against the registry
+    // still succeed. Deliberately avoids a further token-moving call here
+    // (stake_deposit/withdraw_stake) — the separately-deployed token
+    // contract's own instance TTL is a different concern with no renewal
+    // mechanism this test (or the code under test) controls, and is not
+    // what this regression test is pinning.
+    assert_eq!(s.registry.keeper_stake(&keeper), 400_000i128);
+    s.registry.set_min_stake(&s.admin, &0i128);
+    assert_eq!(s.registry.min_stake(), 0i128);
+}
+
+// Security review finding (docs/STAKING_SECURITY_REVIEW.md, "Appeal never
+// renews TTL"): raise_slash_appeal is a state-mutating entry point that
+// previously called neither bump_instance nor extend_ttl on the Slash record
+// it updates. A slash's original TTL bump (from `slash` itself) only lasts
+// KEEPER_BALANCE_BUMP_LEDGERS from the slash, and there is no deadline on
+// how long an admin may take to call resolve_slash_appeal once an appeal is
+// raised — so a real appeal, raised well within the dispute window, could
+// still have its resolution blocked by the whole instance archiving before
+// the admin acts, with nothing about the appeal itself keeping the contract
+// alive in the interim.
+#[test]
+fn test_raise_slash_appeal_renews_ttl_so_resolution_survives_a_slow_admin() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let treasury = Address::generate(&s.env);
+    let stake_token = token::StellarAssetClient::new(&s.env, &s.token_id);
+    stake_token.mint(&keeper, &1_000i128);
+    s.registry.stake_deposit(&keeper, &1_000i128);
+
+    let slash_id = s.registry.slash(
+        &s.admin,
+        &keeper,
+        &500i128,
+        &soroban_sdk::symbol_short!("test"),
+        &treasury,
+    );
+
+    // Appeal raised near the end of the (~3-day, 51_840-ledger) dispute
+    // window, but critically *after* the instance TTL from `slash`'s own
+    // bump_instance call has already dropped below INSTANCE_BUMP_THRESHOLD
+    // (50_000) — `extend_ttl` is a documented no-op above that threshold
+    // (see test_instance_ttl_renewed_by_mutation_stays_alive_past_initial_
+    // window above), so raising the appeal any earlier than this wouldn't
+    // actually exercise raise_slash_appeal's own renewal at all.
+    advance(&s.env, 50_500, 0);
+    s.registry.raise_slash_appeal(&keeper, &slash_id);
+
+    // The admin is slow: advance well past where the *original* slash-time
+    // TTL bump would have archived the registry and the Slash record
+    // (ledger 100_000), with no other contract activity in between. Without
+    // raise_slash_appeal's own renewal (from ledger 50_500, extending both
+    // to ~150_500), the registry itself and the Slash record lookup below
+    // would panic on an archived-entry access at this point.
+    //
+    // Rejects (uphold_appeal: false) rather than upholds, deliberately: an
+    // upheld appeal's refund path separately reads and writes KeeperStake,
+    // whose own TTL is governed by docs/ARCHITECTURE.md's documented,
+    // accepted "known asymmetric case" (a persistent balance entry not
+    // touched by its own subsequent activity can independently archive,
+    // same as KeeperReward) — a different, already-accepted tradeoff this
+    // test isn't about. Rejecting exercises the record-removal path this
+    // fix is actually pinning without also depending on that separate
+    // entry's liveness.
+    advance(&s.env, 60_000, 0); // now at ledger 110_500
+
+    let result = s
+        .registry
+        .try_resolve_slash_appeal(&s.admin, &slash_id, &false);
+    assert!(
+        result.is_ok(),
+        "expected resolve_slash_appeal to succeed: {:?}",
+        result
+    );
 }
 
 // Regression test for issue #18: `upgrade` previously emitted no event at

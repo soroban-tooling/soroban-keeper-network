@@ -30,6 +30,7 @@ impl KeeperRegistry {
     // this contract uses.
 
     pub fn stake_deposit(e: Env, keeper: Address, amount: i128) -> Result<(), KeeperError> {
+        require_initialized(&e)?;
         require_not_paused(&e)?;
         if amount <= 0 {
             return Err(KeeperError::InvalidReward);
@@ -65,6 +66,7 @@ impl KeeperRegistry {
     // withdraw the first before starting another.
 
     pub fn initiate_unbond(e: Env, keeper: Address, amount: i128) -> Result<(), KeeperError> {
+        require_initialized(&e)?;
         require_not_paused(&e)?;
         if amount <= 0 {
             return Err(KeeperError::InvalidReward);
@@ -122,6 +124,7 @@ impl KeeperRegistry {
     // boundary convention. Returns the amount withdrawn.
 
     pub fn withdraw_stake(e: Env, keeper: Address) -> Result<i128, KeeperError> {
+        require_initialized(&e)?;
         require_not_paused(&e)?;
         keeper.require_auth();
 
@@ -152,11 +155,27 @@ impl KeeperRegistry {
     //
     // Admin-authorized (docs/STAKING_DESIGN.md §4-5 — dispute-based, not
     // automatic: E04's verifier work never landed, so there is no on-chain
-    // check to trigger this from). Moves `amount` of `keeper`'s current
-    // stake to `treasury`, exactly the destination pattern `sweep_fees`
-    // already uses for protocol fees. `amount` can never exceed the
-    // keeper's current stake. Returns a `slash_id` for later reference by
+    // check to trigger this from). Moves `amount` of `keeper`'s collateral
+    // to `treasury`, exactly the destination pattern `sweep_fees` already
+    // uses for protocol fees. `amount` can never exceed the keeper's total
+    // slashable exposure. Returns a `slash_id` for later reference by
     // `raise_slash_appeal`.
+    //
+    // Slashable exposure is `KeeperStake` *plus* any amount sitting in a
+    // pending `UnbondRequest`, not `KeeperStake` alone (security review
+    // finding, docs/STAKING_SECURITY_REVIEW.md "Unbonding as a slash-evasion
+    // path"): `initiate_unbond` moves funds out of `KeeperStake` and into
+    // `UnbondRequest` immediately, well before `UNBOND_DELAY_LEDGERS`
+    // elapses, so treating only `KeeperStake` as slashable let a keeper
+    // evade a slash entirely by front-running it with an unbond call — the
+    // funds are still fully within this contract's custody and have not
+    // become withdrawable, so slashing them is not "taking a stake that no
+    // longer applies," it is closing exactly the gap collateral exists to
+    // close. Drawn from `KeeperStake` first, then from the pending unbond
+    // amount for any remainder still needed; a fully-consumed unbond
+    // request is removed, a partially-consumed one has its amount reduced
+    // (its `unlock_ledger` is untouched — slashing does not change when the
+    // rest becomes withdrawable).
 
     pub fn slash(
         e: Env,
@@ -171,24 +190,64 @@ impl KeeperRegistry {
         if amount <= 0 {
             return Err(KeeperError::InvalidReward);
         }
+
+        let stake_key = DataKey::KeeperStake(keeper.clone());
         let current_stake = keeper_stake_of(&e, &keeper);
-        if amount > current_stake {
+
+        let unbond_key = DataKey::UnbondRequest(keeper.clone());
+        let pending_unbond: Option<UnbondRequest> = e.storage().persistent().get(&unbond_key);
+        let pending_unbond_amount = pending_unbond.as_ref().map_or(0, |r| r.amount);
+
+        let total_slashable = current_stake
+            .checked_add(pending_unbond_amount)
+            .ok_or(KeeperError::ArithmeticOverflow)?;
+        if amount > total_slashable {
             return Err(KeeperError::InsufficientStake);
         }
 
         bump_instance(&e);
 
-        // Effects before interaction.
-        let stake_key = DataKey::KeeperStake(keeper.clone());
-        let remaining = current_stake
-            .checked_sub(amount)
+        // Effects before interaction. Draw from KeeperStake first...
+        let from_stake = amount.min(current_stake);
+        let remaining_stake = current_stake
+            .checked_sub(from_stake)
             .ok_or(KeeperError::ArithmeticOverflow)?;
-        e.storage().persistent().set(&stake_key, &remaining);
+        e.storage().persistent().set(&stake_key, &remaining_stake);
         e.storage().persistent().extend_ttl(
             &stake_key,
             KEEPER_BALANCE_BUMP_THRESHOLD,
             KEEPER_BALANCE_BUMP_LEDGERS,
         );
+
+        // ...then whatever remainder is still needed from the pending
+        // unbond, if any (from_unbond is 0, and this block a no-op, in the
+        // common case where KeeperStake alone covers the slash).
+        let from_unbond = amount
+            .checked_sub(from_stake)
+            .ok_or(KeeperError::ArithmeticOverflow)?;
+        if from_unbond > 0 {
+            // from_unbond > 0 implies total_slashable > current_stake, which
+            // implies pending_unbond_amount > 0, which implies pending_unbond
+            // is Some — but per issue #441's no-panicking-expects discipline,
+            // this still returns a typed error rather than asserting it,
+            // exactly like dispute_execution's credits.get(index) above.
+            let mut request = pending_unbond.ok_or(KeeperError::ArithmeticOverflow)?;
+            let remaining_unbond = request
+                .amount
+                .checked_sub(from_unbond)
+                .ok_or(KeeperError::ArithmeticOverflow)?;
+            if remaining_unbond == 0 {
+                e.storage().persistent().remove(&unbond_key);
+            } else {
+                request.amount = remaining_unbond;
+                e.storage().persistent().set(&unbond_key, &request);
+                e.storage().persistent().extend_ttl(
+                    &unbond_key,
+                    KEEPER_BALANCE_BUMP_THRESHOLD,
+                    KEEPER_BALANCE_BUMP_LEDGERS,
+                );
+            }
+        }
 
         let slash_id = next_slash_id(&e);
         let record = SlashRecord {
@@ -261,8 +320,26 @@ impl KeeperRegistry {
             return Err(KeeperError::AppealWindowClosed);
         }
 
+        // Security review finding (docs/STAKING_SECURITY_REVIEW.md, "Appeal
+        // never renews TTL"): this state-mutating write previously called
+        // neither bump_instance nor extend_ttl on the Slash record it just
+        // updated, unlike every other staking entry point that mutates
+        // persistent state. A prompt appeal (well within
+        // DISPUTE_WINDOW_LEDGERS of the slash) relied entirely on the
+        // original `slash` call's TTL bump to keep both the instance and
+        // this record alive until resolve_slash_appeal ran — with no
+        // deadline on how long the admin may take to resolve an appeal,
+        // that original bump could lapse first, archiving the whole
+        // registry (not just this record) and leaving a legitimately-raised
+        // appeal permanently unresolvable.
+        bump_instance(&e);
         record.appealed = true;
         e.storage().persistent().set(&record_key, &record);
+        e.storage().persistent().extend_ttl(
+            &record_key,
+            KEEPER_BALANCE_BUMP_THRESHOLD,
+            KEEPER_BALANCE_BUMP_LEDGERS,
+        );
 
         emit_slash_appeal_raised(&e, slash_id, &keeper);
         Ok(())
@@ -374,12 +451,31 @@ impl KeeperRegistry {
             .iter()
             .position(|c| c.task_id == task_id)
             .ok_or(KeeperError::NoPendingCredit)?;
-        let mut credit = credits.get(index as u32).unwrap();
+        // `index` came directly from `.position()` on this same `credits`
+        // Vec, so `.get(index)` can never actually miss — but issue #441's
+        // no-panicking-expects discipline treats every unwrap as one to
+        // remove regardless of whether it's currently provably unreachable,
+        // so this still returns a typed error rather than asserting it away.
+        let mut credit = credits
+            .get(index as u32)
+            .ok_or(KeeperError::NoPendingCredit)?;
 
         if credit.disputed {
             return Err(KeeperError::ExecutionAlreadyDisputed);
         }
-        if e.ledger().sequence() > credit.unlock_ledger {
+        // `>=`, not `>`: security review finding
+        // (docs/STAKING_SECURITY_REVIEW.md, "Dispute-window boundary
+        // mismatch"). `finalize_rewards` (via `withdraw_rewards`) considers
+        // a credit finalizable once `now >= credit.unlock_ledger` —
+        // mirroring `lock_expired`'s established "has this delay window
+        // elapsed" convention — so a credit sitting at exactly
+        // `unlock_ledger` was simultaneously still disputable under the old
+        // `>` check here and already finalizable there: whichever
+        // transaction actually landed first within that one ledger decided
+        // the outcome, rather than a deterministic rule. Closing the
+        // dispute window at the same boundary finalization opens at removes
+        // that race entirely.
+        if e.ledger().sequence() >= credit.unlock_ledger {
             return Err(KeeperError::DisputeWindowClosed);
         }
 

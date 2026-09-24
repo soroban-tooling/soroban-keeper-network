@@ -1,6 +1,6 @@
 //! Every entry point requiring configured state must return NotInitialized.
 
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 
 use super::common::*;
 use crate::{DataKey, KeeperError, KeeperRegistry, KeeperRegistryClient, TaskType};
@@ -234,4 +234,94 @@ fn test_require_admin_distinguishes_not_initialized_from_wrong_caller() {
         s.registry.try_pause(&stranger),
         Err(Ok(KeeperError::Unauthorized))
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Staking entry points (epic E06) — the same discipline the original entry
+// points already have, extended to stake_deposit, initiate_unbond,
+// withdraw_stake, and slash. See docs/STAKING_DESIGN.md.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_stake_deposit_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let keeper = Address::generate(&env);
+
+    assert_eq!(
+        registry.try_stake_deposit(&keeper, &100i128),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_initiate_unbond_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let keeper = Address::generate(&env);
+
+    // Without the explicit NotInitialized check, this would otherwise
+    // surface InsufficientStake (an uninitialized registry has no stake for
+    // anyone) — a misleading answer for a registry that was never
+    // configured at all.
+    assert_eq!(
+        registry.try_initiate_unbond(&keeper, &50i128),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_withdraw_stake_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let keeper = Address::generate(&env);
+
+    // Without the explicit NotInitialized check, this would otherwise
+    // surface NoPendingUnbond — technically true, but not the most useful
+    // answer for a registry that was never configured at all.
+    assert_eq!(
+        registry.try_withdraw_stake(&keeper),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_slash_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let admin = Address::generate(&env);
+    let keeper = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    assert_eq!(
+        registry.try_slash(&admin, &keeper, &100i128, &symbol_short!("bad"), &treasury),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_stake_deposit_before_init_writes_no_state() {
+    // Regression guard for the ordering bug this issue's fix corrects:
+    // stake_deposit used to write the updated KeeperStake balance to
+    // persistent storage *before* discovering (via reward_token) that the
+    // registry was never initialized, leaving a stray balance behind for a
+    // contract that should have no state at all. require_initialized now
+    // runs first, so the call fails before touching storage.
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let keeper = Address::generate(&env);
+
+    let _ = registry.try_stake_deposit(&keeper, &100i128);
+
+    env.as_contract(&registry.address, || {
+        assert!(!env
+            .storage()
+            .persistent()
+            .has(&DataKey::KeeperStake(keeper)));
+    });
 }

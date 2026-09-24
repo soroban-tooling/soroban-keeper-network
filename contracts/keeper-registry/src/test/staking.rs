@@ -288,6 +288,119 @@ fn test_slash_never_exceeds_current_stake() {
     );
 }
 
+// Security review finding (docs/STAKING_SECURITY_REVIEW.md, "Unbonding as a
+// slash-evasion path"): before the fix, initiate_unbond removed funds from
+// KeeperStake immediately (well before UNBOND_DELAY_LEDGERS elapses), and
+// slash only ever looked at KeeperStake — so a keeper could unbond their
+// entire stake the moment they suspected a slash was coming and leave slash
+// with nothing to act on, even though the funds were still fully within the
+// contract's custody and nowhere near withdrawable yet. This is the exact
+// regression test for that gap: slash must still succeed by drawing on the
+// pending unbond amount.
+#[test]
+fn test_slash_draws_on_pending_unbond_when_keeper_stake_is_insufficient() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let treasury = Address::generate(&s.env);
+    stake(&s, &keeper, 1_000);
+
+    // Keeper unbonds everything, leaving KeeperStake at 0.
+    s.registry.initiate_unbond(&keeper, &1_000);
+    assert_eq!(s.registry.keeper_stake(&keeper), 0);
+
+    let token = token::Client::new(&s.env, &s.token_id);
+    let treasury_before = token.balance(&treasury);
+
+    // The admin's slash still succeeds, drawing from the pending unbond.
+    let slash_id = s.registry.slash(
+        &s.admin,
+        &keeper,
+        &600,
+        &symbol_short!("evasion"),
+        &treasury,
+    );
+    assert_eq!(slash_id, 1);
+    assert_eq!(token.balance(&treasury), treasury_before + 600);
+
+    // The unbond request survives, reduced by exactly the slashed amount;
+    // its unlock_ledger is unaffected.
+    let remaining_unbond = s.registry.pending_unbond(&keeper).unwrap();
+    assert_eq!(remaining_unbond.amount, 400);
+}
+
+#[test]
+fn test_slash_fully_consumes_and_removes_pending_unbond() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let treasury = Address::generate(&s.env);
+    stake(&s, &keeper, 1_000);
+    s.registry.initiate_unbond(&keeper, &1_000);
+
+    s.registry.slash(
+        &s.admin,
+        &keeper,
+        &1_000,
+        &symbol_short!("evasion"),
+        &treasury,
+    );
+
+    // Fully consumed: the unbond request is gone, not left at amount = 0.
+    assert!(s.registry.pending_unbond(&keeper).is_none());
+
+    // And it is genuinely gone, not just reported as such: a subsequent
+    // withdraw_stake call (which would succeed against a live-but-empty
+    // request) correctly fails with NoPendingUnbond instead.
+    advance(&s.env, UNBOND_DELAY_LEDGERS, 0);
+    assert_eq!(
+        s.registry.try_withdraw_stake(&keeper),
+        Err(Ok(KeeperError::NoPendingUnbond))
+    );
+}
+
+#[test]
+fn test_slash_draws_from_keeper_stake_before_pending_unbond() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let treasury = Address::generate(&s.env);
+    stake(&s, &keeper, 1_000);
+    s.registry.initiate_unbond(&keeper, &300); // stake: 700, unbond: 300
+
+    // A slash that KeeperStake alone can cover must not touch the pending
+    // unbond at all.
+    s.registry
+        .slash(&s.admin, &keeper, &500, &symbol_short!("fraud"), &treasury);
+
+    assert_eq!(s.registry.keeper_stake(&keeper), 200);
+    let unbond = s.registry.pending_unbond(&keeper).unwrap();
+    assert_eq!(
+        unbond.amount, 300,
+        "an unrelated pending unbond must be untouched"
+    );
+}
+
+#[test]
+fn test_slash_still_rejects_amount_exceeding_stake_plus_pending_unbond() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let treasury = Address::generate(&s.env);
+    stake(&s, &keeper, 1_000);
+    s.registry.initiate_unbond(&keeper, &1_000); // total exposure: 1_000
+
+    assert_eq!(
+        s.registry.try_slash(
+            &s.admin,
+            &keeper,
+            &1_001,
+            &symbol_short!("fraud"),
+            &treasury
+        ),
+        Err(Ok(KeeperError::InsufficientStake))
+    );
+    // Rejected atomically: neither KeeperStake nor the pending unbond changed.
+    assert_eq!(s.registry.keeper_stake(&keeper), 0);
+    assert_eq!(s.registry.pending_unbond(&keeper).unwrap().amount, 1_000);
+}
+
 #[test]
 fn test_slash_emits_event_with_reconstructable_reason() {
     let s = setup();
@@ -747,19 +860,37 @@ fn test_dispute_execution_rejects_after_window_closed() {
     );
 }
 
+// Security review finding (docs/STAKING_SECURITY_REVIEW.md, "Dispute-window
+// boundary mismatch"): this test used to assert the opposite — that a
+// dispute at exactly unlock_ledger was still accepted, explicitly relying on
+// dispute_execution "winning the race" against finalize_rewards' `>=`
+// finalization boundary at that same ledger. That was a real,
+// transaction-ordering-dependent race, not a deterministic rule. The fix
+// closes the dispute window at the same boundary finalization opens at
+// (both now `>=`), so the outcome at exactly unlock_ledger no longer depends
+// on which call happens to land first.
 #[test]
-fn test_dispute_execution_boundary_exactly_at_unlock_ledger_still_allowed() {
+fn test_dispute_execution_boundary_exactly_at_unlock_ledger_is_too_late() {
     let s = setup();
     let (id, _keeper) = executed_task_with_dispute_window(&s, 1_000);
 
     advance(&s.env, 1_000, 0);
 
-    // Inclusive boundary: exactly at unlock_ledger, a dispute is still
-    // accepted (it is finalize_rewards' `>=` that treats this ledger as
-    // eligible to finalize — dispute_execution must win the race if it is
-    // the call that actually lands).
+    assert_eq!(
+        s.registry.try_dispute_execution(&s.admin, &id),
+        Err(Ok(KeeperError::DisputeWindowClosed))
+    );
+}
+
+#[test]
+fn test_dispute_execution_boundary_one_ledger_before_unlock_is_still_allowed() {
+    let s = setup();
+    let (id, keeper) = executed_task_with_dispute_window(&s, 1_000);
+
+    advance(&s.env, 999, 0);
+
     s.registry.dispute_execution(&s.admin, &id);
-    assert!(s.registry.pending_reward(&_keeper).get(0).unwrap().disputed);
+    assert!(s.registry.pending_reward(&keeper).get(0).unwrap().disputed);
 }
 
 #[test]

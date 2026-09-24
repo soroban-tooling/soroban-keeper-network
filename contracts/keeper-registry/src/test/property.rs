@@ -496,6 +496,80 @@ proptest! {
         }
     }
 
+    // Issue #441 — no panic reachable through any combination of staking
+    // calls. Unlike property_i1_solvency_holds_with_stake_unbond_slash_and_
+    // dispute_window (which only ever drives staking through
+    // already-valid, in-range amounts derived from the keeper's current
+    // state), this property deliberately throws adversarial and
+    // out-of-range inputs at every staking entry point — negative amounts,
+    // amounts far exceeding any stake or minted supply, unbonding/
+    // withdrawing/appealing/resolving with no prior state, and a slash_id
+    // that was never issued — in arbitrary order. The only assertion is
+    // that the property test itself completes: every call must return a
+    // typed Result (Ok or a KeeperError), never a host panic from an
+    // unchecked arithmetic operation, an unwrap, or an out-of-bounds
+    // access. A prop_assert failure here would mean the harness itself
+    // detected a panic (proptest reports the panicking input as a
+    // regression case), not a mismatched value.
+    #[test]
+    fn property_no_panic_reachable_through_staking_calls(
+        steps in prop::collection::vec(0u8..7, 1..20),
+        // Includes negative values and values far exceeding anything ever
+        // minted, deliberately outside every entry point's valid range.
+        amounts in prop::collection::vec(-1_000_000_i128..2_000_000_000_i128, 1..20),
+        slash_ids in prop::collection::vec(0u64..10, 1..20),
+    ) {
+        let s = setup();
+        let stake_token = token::StellarAssetClient::new(&s.env, &s.token_id);
+        let keeper = Address::generate(&s.env);
+        let treasury = Address::generate(&s.env);
+
+        // Minted once, generously, so a positive-but-large amount in the
+        // range above at least has a chance of being fundable rather than
+        // every large deposit failing on the token transfer itself before
+        // ever reaching the staking logic under test.
+        stake_token.mint(&keeper, &2_000_000_000i128);
+
+        for ((step, amount), slash_id) in steps.iter().zip(amounts.iter()).zip(slash_ids.iter()) {
+            match step % 7 {
+                0 => {
+                    let _ = s.registry.try_stake_deposit(&keeper, amount);
+                }
+                1 => {
+                    let _ = s.registry.try_initiate_unbond(&keeper, amount);
+                }
+                2 => {
+                    let _ = s.registry.try_withdraw_stake(&keeper);
+                }
+                3 => {
+                    let _ = s.registry.try_slash(
+                        &s.admin,
+                        &keeper,
+                        amount,
+                        &symbol_short!("test"),
+                        &treasury,
+                    );
+                }
+                4 => {
+                    let _ = s.registry.try_raise_slash_appeal(&keeper, slash_id);
+                }
+                5 => {
+                    let _ = s.registry.try_resolve_slash_appeal(
+                        &s.admin,
+                        slash_id,
+                        &(amount % 2 == 0),
+                    );
+                }
+                _ => {
+                    let _ = s.registry.try_set_min_stake(&s.admin, amount);
+                }
+            }
+        }
+
+        // Reaching here at all is the property: no step above panicked.
+        prop_assert!(true);
+    }
+
     // I-9 — Instance TTL liveness under randomized, bounded-gap traffic
     // (issue 0122, generalizing issue 0015's hand-written
     // `test_instance_ttl_renewed_by_mutation_stays_alive_past_initial_window`).

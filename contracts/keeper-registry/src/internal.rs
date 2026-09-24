@@ -39,6 +39,22 @@ pub(crate) fn require_not_paused(e: &Env) -> Result<(), KeeperError> {
     }
 }
 
+/// Whether `initialize` has ever been called, checked against the same
+/// `DataKey::Admin` presence `require_admin` already uses as the
+/// initialized/not-initialized signal. Entry points that don't otherwise
+/// touch a key only `initialize` sets (unlike `register_task`, which gets
+/// this for free via `reward_token`'s own `NotInitialized` check) must call
+/// this explicitly, and before any storage mutation — an uninitialized
+/// registry must fail with no side effects, not partially write state and
+/// then fail on a later step.
+pub(crate) fn require_initialized(e: &Env) -> Result<(), KeeperError> {
+    if e.storage().instance().has(&DataKey::Admin) {
+        Ok(())
+    } else {
+        Err(KeeperError::NotInitialized)
+    }
+}
+
 pub(crate) fn require_admin(e: &Env, caller: &Address) -> Result<(), KeeperError> {
     // An admin key that hasn't been set yet means `initialize` was never
     // called — that's a different failure than an authenticated caller who
