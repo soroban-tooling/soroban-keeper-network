@@ -7,7 +7,9 @@
 
 use soroban_sdk::{contractimpl, Address, BytesN, Env, Symbol};
 
-use crate::constants::{KEEPER_STAKE_BUMP_LEDGERS, KEEPER_STAKE_BUMP_THRESHOLD, UNBOND_DELAY_LEDGERS};
+use crate::constants::{
+    KEEPER_STAKE_BUMP_LEDGERS, KEEPER_STAKE_BUMP_THRESHOLD, UNBOND_DELAY_LEDGERS,
+};
 use crate::errors::KeeperError;
 use crate::events::*;
 use crate::internal::*;
@@ -83,9 +85,11 @@ impl KeeperRegistry {
                 release_ledger,
             },
         );
-        e.storage()
-            .persistent()
-            .extend_ttl(&key, KEEPER_STAKE_BUMP_THRESHOLD, KEEPER_STAKE_BUMP_LEDGERS);
+        e.storage().persistent().extend_ttl(
+            &key,
+            KEEPER_STAKE_BUMP_THRESHOLD,
+            KEEPER_STAKE_BUMP_LEDGERS,
+        );
 
         emit_unbond_initiated(&e, &keeper, amount, release_ledger);
         Ok(release_ledger)

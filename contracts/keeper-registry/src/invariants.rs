@@ -84,7 +84,9 @@ pub fn assert_solvent(
         .checked_add(keeper_balances)
         .and_then(|sum| sum.checked_add(fees_accrued))
         .and_then(|sum| sum.checked_add(stake_total))
-        .ok_or("owed total overflowed (open_escrow + keeper_balances + fees_accrued + stake_total)")?;
+        .ok_or(
+            "owed total overflowed (open_escrow + keeper_balances + fees_accrued + stake_total)",
+        )?;
 
     if token_balance != owed {
         return Err(format!(

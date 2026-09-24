@@ -12,8 +12,8 @@ use soroban_sdk::{
 
 use super::common::*;
 use crate::mocks::{
-    ReentrantToken, ReentrantTokenClient, NO_ERROR_CODE, POINT_BEFORE_BALANCE_UPDATE,
-    TARGET_SLASH, TARGET_STAKE_DEPOSIT, TARGET_WITHDRAW_STAKE,
+    ReentrantToken, ReentrantTokenClient, NO_ERROR_CODE, POINT_BEFORE_BALANCE_UPDATE, TARGET_SLASH,
+    TARGET_STAKE_DEPOSIT, TARGET_WITHDRAW_STAKE,
 };
 use crate::KeeperError;
 
@@ -117,7 +117,10 @@ fn test_stake_deposit_emits_event_with_running_total() {
             }
         }
     }
-    assert!(found, "StakeDeposited event with the running total not found");
+    assert!(
+        found,
+        "StakeDeposited event with the running total not found"
+    );
 }
 
 /// #419's own acceptance criterion — staking, executing tasks, and
@@ -382,7 +385,10 @@ fn test_views_update_correctly_across_deposit_unbond_and_slash() {
     // Unbond part of it.
     let release_ledger = s.registry.initiate_unbond(&keeper, &100_000i128);
     assert_eq!(s.registry.keeper_stake(&keeper), 500_000i128); // still counted until withdrawn
-    assert_eq!(s.registry.unbonding_status(&keeper), Some((100_000i128, release_ledger)));
+    assert_eq!(
+        s.registry.unbonding_status(&keeper),
+        Some((100_000i128, release_ledger))
+    );
 
     // Slash while the unbond is still pending.
     s.registry.slash(
@@ -398,7 +404,10 @@ fn test_views_update_correctly_across_deposit_unbond_and_slash() {
     // The pending unbond request itself is untouched by the slash — only
     // withdraw_stake's own defensive amount.min(current_stake) clamp
     // reconciles the two, at withdrawal time.
-    assert_eq!(s.registry.unbonding_status(&keeper), Some((100_000i128, release_ledger)));
+    assert_eq!(
+        s.registry.unbonding_status(&keeper),
+        Some((100_000i128, release_ledger))
+    );
 }
 
 #[test]
@@ -444,13 +453,24 @@ fn test_slash_duplicate_incident_fails() {
     let treasury = Address::generate(&s.env);
     let id = incident_id(&s.env, 7);
 
-    s.registry
-        .slash(&s.admin, &keeper, &50_000i128, &symbol_short!("fraud"), &id, &treasury);
+    s.registry.slash(
+        &s.admin,
+        &keeper,
+        &50_000i128,
+        &symbol_short!("fraud"),
+        &id,
+        &treasury,
+    );
     assert!(s.registry.is_slash_incident_recorded(&id));
 
-    let result = s
-        .registry
-        .try_slash(&s.admin, &keeper, &50_000i128, &symbol_short!("fraud"), &id, &treasury);
+    let result = s.registry.try_slash(
+        &s.admin,
+        &keeper,
+        &50_000i128,
+        &symbol_short!("fraud"),
+        &id,
+        &treasury,
+    );
     assert_eq!(result, Err(Ok(KeeperError::DuplicateSlashIncident)));
     // The second (rejected) attempt did not reduce stake again.
     assert_eq!(s.registry.keeper_stake(&keeper), 450_000i128);
@@ -482,7 +502,10 @@ fn test_slash_different_incidents_both_succeed() {
     );
 
     assert_eq!(s.registry.keeper_stake(&keeper), 420_000i128);
-    assert_eq!(token::Client::new(&s.env, &s.token_id).balance(&treasury), 80_000i128);
+    assert_eq!(
+        token::Client::new(&s.env, &s.token_id).balance(&treasury),
+        80_000i128
+    );
 }
 
 #[test]
@@ -492,8 +515,14 @@ fn test_slash_emits_event_with_full_payload() {
     let treasury = Address::generate(&s.env);
     let id = incident_id(&s.env, 3);
 
-    s.registry
-        .slash(&s.admin, &keeper, &75_000i128, &symbol_short!("fraud"), &id, &treasury);
+    s.registry.slash(
+        &s.admin,
+        &keeper,
+        &75_000i128,
+        &symbol_short!("fraud"),
+        &id,
+        &treasury,
+    );
 
     let mut found = false;
     for (contract, topics, data) in s.env.events().all().iter() {
@@ -630,7 +659,8 @@ fn test_reentrant_token_withdraw() {
     holders.push_back(keeper.clone());
     mock_token.extend_ttl_for_test(&holders, &(release_ledger + 1));
 
-    env.ledger().with_mut(|li| li.sequence_number = release_ledger);
+    env.ledger()
+        .with_mut(|li| li.sequence_number = release_ledger);
 
     // Arm the token: the withdrawal's own transfer back to `keeper`
     // re-calls withdraw_stake for the same keeper before this transfer's

@@ -253,10 +253,17 @@ pub(crate) fn read_slash_history(e: &Env, keeper: &Address) -> SlashHistory {
 /// `checked_add`s here are defensive rather than expected to ever trip in
 /// practice (a keeper's total_slashed can never exceed what it could ever
 /// have staked, which is itself bounded by the reward token's own supply).
-pub(crate) fn write_slash_history(e: &Env, keeper: &Address, amount: i128) -> Result<(), KeeperError> {
+pub(crate) fn write_slash_history(
+    e: &Env,
+    keeper: &Address,
+    amount: i128,
+) -> Result<(), KeeperError> {
     let current = read_slash_history(e, keeper);
     let updated = SlashHistory {
-        count: current.count.checked_add(1).ok_or(KeeperError::ArithmeticOverflow)?,
+        count: current
+            .count
+            .checked_add(1)
+            .ok_or(KeeperError::ArithmeticOverflow)?,
         total_slashed: current
             .total_slashed
             .checked_add(amount)

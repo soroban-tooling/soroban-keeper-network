@@ -86,9 +86,7 @@ impl ReentrantToken {
     /// extends entries that already exist (a `holder` with no balance entry
     /// yet is left alone).
     pub fn extend_ttl_for_test(env: Env, holders: soroban_sdk::Vec<Address>, to_ledger: u32) {
-        env.storage()
-            .instance()
-            .extend_ttl(to_ledger, to_ledger);
+        env.storage().instance().extend_ttl(to_ledger, to_ledger);
         for holder in holders.iter() {
             let key = DataKey::Balance(holder);
             if env.storage().persistent().has(&key) {
@@ -293,11 +291,7 @@ fn reenter(env: &Env) {
         TARGET_SLASH => {
             let keeper: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
             let admin: Address = env.storage().instance().get(&DataKey::Keeper).unwrap();
-            let treasury: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::TriggerTo)
-                .unwrap();
+            let treasury: Address = env.storage().instance().get(&DataKey::TriggerTo).unwrap();
             // The reentrant call's own incident id — deliberately the same
             // fixed value `test_reentrant_token_slash` uses for the outer
             // call, so a correct CEI ordering (incident recorded before the
