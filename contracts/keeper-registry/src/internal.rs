@@ -278,3 +278,34 @@ pub(crate) fn lock_expired(e: &Env, task: &Task) -> bool {
         None => true,
     }
 }
+
+// ─── E06 — Staking & Slashing (docs/STAKING_DESIGN.md) ─────────────────
+
+/// Reads a keeper's currently-bonded stake (0 if it has never staked).
+pub(crate) fn keeper_stake_of(e: &Env, keeper: &Address) -> i128 {
+    e.storage()
+        .persistent()
+        .get(&DataKey::KeeperStake(keeper.clone()))
+        .unwrap_or(0)
+}
+
+/// Reads the configured minimum stake `claim_task` enforces (0 if unset —
+/// no requirement, mirroring `min_reward_floor`'s default).
+pub(crate) fn min_stake_floor(e: &Env) -> i128 {
+    e.storage().instance().get(&DataKey::MinStake).unwrap_or(0)
+}
+
+/// Allocates the next `slash_id` and advances the counter, mirroring
+/// `next_task_id`'s pattern.
+pub(crate) fn next_slash_id(e: &Env) -> u64 {
+    let id: u64 = e
+        .storage()
+        .instance()
+        .get(&DataKey::SlashCounter)
+        .unwrap_or(0u64);
+    // Unreachable in practice, for the same reason `next_task_id` treats
+    // exhausting a u64 counter as unreachable.
+    let next = id.checked_add(1).expect("slash id counter exhausted");
+    e.storage().instance().set(&DataKey::SlashCounter, &next);
+    next
+}

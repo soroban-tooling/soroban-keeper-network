@@ -6,6 +6,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — staking and slashing (E06)
+
+- Contract `VERSION` bumped `4` → `5`. This is an additive change: no
+  existing entry point's signature changed, so integrators do not need a
+  v2-family contract upgrade just to keep existing functionality working.
+- New entry points: `stake_deposit`, `initiate_unbond`, `withdraw_stake`,
+  admin `slash`, `set_min_stake`, `raise_slash_appeal`,
+  `resolve_slash_appeal`. See `docs/STAKING_DESIGN.md` for the full design
+  (slashing is dispute-based, not automatic — E04's on-chain verifier work
+  never landed, so there is nothing to trigger a slash from automatically)
+  and exact semantics.
+- New read-only views: `keeper_stake`, `pending_unbond`, `min_stake`,
+  `get_slash`.
+- New events: `StakeDeposited`, `UnbondInitiated`, `StakeWithdrawn`,
+  `Slashed`, `MinStakeUpdated`, `SlashAppealRaised`, `SlashAppealResolved`.
+  See the README events table.
+- New error variants: `InsufficientStake`, `UnbondNotReady`,
+  `UnbondAlreadyPending`, `NoPendingUnbond`, `MinStakeNotMet`,
+  `SlashNotFound`, `AppealWindowClosed`, `AppealAlreadyRaised`,
+  `NotSlashedKeeper`.
+- `claim_task` gains an opt-in minimum-stake gate: rejects with
+  `MinStakeNotMet` when an admin has configured `set_min_stake` above zero
+  and the calling keeper's current bonded stake (excluding anything
+  mid-unbond) is below it. Defaults to no requirement, matching
+  `min_reward`'s existing opt-in posture on the task side.
+- New fuzz target `staking` (`fuzz/fuzz_targets/staking.rs`) exercising
+  `stake_deposit`/`initiate_unbond`/`slash` across the full `i128` range,
+  including the partial-unbond-then-over-slash boundary.
+- **Not yet done, tracked separately**: I-1 (solvency, `docs/ARCHITECTURE.md`)
+  is not yet extended to cover stake escrow — `assert_solvent` still checks
+  only open task escrow, keeper balances, and accrued fees against the
+  token balance, so it does not yet account for bonded stake or amounts
+  mid-unbond. That extension is backlog issue 0294, scoped separately.
+
 ### Added — indexer service scaffold (E14)
 
 - New workspace member `indexer/` (`keeper-indexer`): the runnable, empty
