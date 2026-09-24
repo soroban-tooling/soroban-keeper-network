@@ -213,6 +213,30 @@ async function validateAndLoadConfig() {
       parse: (v) => v.toLowerCase() === "true",
       fallback: false,
     }),
+    // ── E06 staking (see STAKE_CHECK below and docs/STAKING_DESIGN.md) ──
+    //
+    // The deployed contract does not enforce any minimum stake to
+    // claim_task today (backlog 0292 — the issue that would decide and
+    // enforce one — is a separate, not-yet-landed follow-up). autoStake
+    // therefore has nothing to react to and STAKE_CHECK is a documented
+    // no-op: it logs the keeper's current stake each round for
+    // operational visibility, but never blocks claiming and never
+    // deposits anything on the keeper's behalf. See STAKE_CHECK's own doc
+    // comment for exactly what activates once a real minimum exists.
+    autoStakeEnabled: requireEnv("AUTO_STAKE_ENABLED", {
+      parse: (v) => v.toLowerCase() === "true",
+      fallback: false,
+    }),
+    autoStakeAmount: requireEnv("AUTO_STAKE_AMOUNT", {
+      parse: BigInt,
+      validate: { fn: (v) => v > 0n, reason: "must be > 0" },
+      fallback: 0n,
+    }),
+    autoStakeCeiling: requireEnv("AUTO_STAKE_CEILING", {
+      parse: BigInt,
+      validate: { fn: (v) => v >= 0n, reason: "must be >= 0" },
+      fallback: 0n,
+    }),
   };
 }
 
@@ -698,6 +722,95 @@ async function executeTaskOffChain(task, ctx, simulateExecution) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// E06 — Keeper staking (see docs/STAKING_DESIGN.md)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The deployed contract has no on-chain minimum stake to claim_task — this
+// is a real decision (docs/STAKING_DESIGN.md §5: "no different treatment"
+// for a staked keeper in v1), not a gap this bot works around. `checkStake`
+// therefore cannot compare the keeper's stake against a configured floor,
+// because there is no floor to read from the contract; `keeper_stake` (0289)
+// exists as a view, but a *minimum* view/config value does not (that is
+// backlog 0292 and 0309's job, both explicitly out of this pass's scope —
+// see docs/STAKING_DESIGN.md's "Scope of this implementation").
+//
+// What this DOES do, matching the issue's "startup and periodic stake
+// checks" requirement without inventing enforcement the contract doesn't
+// have: reads and logs the keeper's current stake every round, and — only
+// if the operator has explicitly opted in via AUTO_STAKE_ENABLED — deposits
+// a fixed, operator-configured AUTO_STAKE_AMOUNT once if the keeper has
+// never staked at all (stake === 0n), capped by AUTO_STAKE_CEILING so a
+// misconfigured bot can never auto-deposit an unbounded amount. This is
+// deliberately NOT "top up to a minimum" (there is no minimum to top up
+// to) — it is "get a brand-new keeper some stake on-chain if the operator
+// wants that, once, opt-in." Once 0292/0309 land a real minimum, this
+// function is the one place that needs a second read (the minimum view)
+// and a comparison against it to become real enforcement — everything
+// else (the auto-deposit path, the ceiling, the logging) is already here.
+async function checkStake(client, keypair, stakeConfig, ctx = console) {
+  let stake;
+  try {
+    const raw = await client.read("keeper_stake", [
+      nativeToScVal(keypair.publicKey(), { type: "address" }),
+    ]);
+    stake = BigInt(raw || 0);
+  } catch (err) {
+    ctx.warn(`  Stake check failed: ${err.message}`);
+    return;
+  }
+
+  ctx.log(`  Current bonded stake: ${stake} stroops`);
+
+  if (!stakeConfig.autoStakeEnabled) {
+    return;
+  }
+  if (stake !== 0n) {
+    // Already staked something — never top up automatically beyond the
+    // keeper's own explicit stake_deposit calls, since there is no
+    // minimum this bot could be topping up TOWARD.
+    return;
+  }
+  if (stakeConfig.autoStakeAmount === 0n) {
+    ctx.warn(
+      "  AUTO_STAKE_ENABLED is true but AUTO_STAKE_AMOUNT is unset (0) — nothing to deposit."
+    );
+    return;
+  }
+  if (
+    stakeConfig.autoStakeCeiling > 0n &&
+    stakeConfig.autoStakeAmount > stakeConfig.autoStakeCeiling
+  ) {
+    ctx.warn(
+      `  AUTO_STAKE_AMOUNT (${stakeConfig.autoStakeAmount}) exceeds AUTO_STAKE_CEILING ` +
+        `(${stakeConfig.autoStakeCeiling}) — refusing to deposit rather than silently ` +
+        "depositing more than the configured ceiling allows."
+    );
+    return;
+  }
+
+  try {
+    ctx.log(
+      `  Auto-staking ${stakeConfig.autoStakeAmount} stroops (first stake for this keeper)...`
+    );
+    // Not wrapped in withRetry, matching the existing withdraw_rewards call
+    // just below this function's own call site: both are one-shot,
+    // state-mutating actions inside the periodic round, not on the
+    // task-claiming hot path retry.test.js's coverage targets.
+    await client.invoke({
+      method: "stake_deposit",
+      args: [
+        nativeToScVal(keypair.publicKey(), { type: "address" }),
+        nativeToScVal(stakeConfig.autoStakeAmount, { type: "i128" }),
+      ],
+      source: keypair.publicKey(),
+    });
+    ctx.log("  Auto-stake deposit complete.");
+  } catch (err) {
+    ctx.warn(`  Auto-stake deposit failed: ${err.message}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main keeper loop
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -904,6 +1017,15 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
     console.warn(`  Balance check failed: ${err.message}`);
     summary.errors.push(err);
   }
+
+  // Periodic stake check/visibility (E06, #429) — see checkStake's own doc
+  // comment for exactly what this does and does not do today.
+  await checkStake(client, keypair, {
+    autoStakeEnabled: CONFIG.autoStakeEnabled,
+    autoStakeAmount: CONFIG.autoStakeAmount,
+    autoStakeCeiling: CONFIG.autoStakeCeiling,
+  });
+
   return { summary, emptyRounds: newEmptyRounds };
 }
 
@@ -938,6 +1060,9 @@ async function main() {
     console.log(`  Poll     : every ${CONFIG.pollIntervalMs / 1000}s`);
   }
   console.log(`  Withdraw : when balance ≥ ${CONFIG.withdrawThreshold} stroops`);
+  console.log(
+    `  Staking  : ${CONFIG.autoStakeEnabled ? `auto-stake ${CONFIG.autoStakeAmount} stroops once (ceiling ${CONFIG.autoStakeCeiling || "none"})` : "visibility only (no minimum enforced on-chain — AUTO_STAKE_ENABLED=false)"}`
+  );
   console.log("");
 
   // Verify connectivity
@@ -1043,6 +1168,7 @@ module.exports = {
   simulatedExecutor,
   ESTIMATED_CLAIM_FEE_STROOPS,
   ESTIMATED_EXECUTE_BASE_FEE_STROOPS,
+  checkStake,
 };
 
 // Only run main() when executed directly, not when imported for testing

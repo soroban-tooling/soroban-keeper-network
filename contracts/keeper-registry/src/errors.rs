@@ -77,4 +77,29 @@ pub enum KeeperError {
     /// The sum of a batch's rewards exceeded the caller-supplied
     /// `max_total_reward` ceiling. Zero transfers occurred.
     BatchRewardCeilingExceeded = 23,
+
+    // ─── E06 — Keeper Staking & Slashing ────────────────────────────────
+    // New stake/unbond/slash errors go here. See `docs/STAKING_DESIGN.md`.
+    /// `initiate_unbond` or `slash` asked for more than the keeper's
+    /// current bonded stake.
+    InsufficientStake = 25,
+    /// `slash` asked for more than the keeper's current stake. Distinct
+    /// from `InsufficientStake` (used by the keeper-initiated unbond path)
+    /// so an admin-triggered rejection is never confused with a keeper's
+    /// own mistaken withdrawal request. Returned rather than silently
+    /// clamped — see `docs/STAKING_DESIGN.md`'s "Slash bounds decision".
+    SlashExceedsStake = 26,
+    /// `slash` was called with an `incident_id` that has already been
+    /// slashed once. Each incident may only ever reduce a keeper's stake
+    /// a single time.
+    DuplicateSlashIncident = 27,
+    /// `withdraw_stake` was called before the unbonding delay elapsed for
+    /// the keeper's pending request.
+    UnbondNotReady = 28,
+    /// `withdraw_stake` was called with no pending `UnbondRequest` for the
+    /// keeper.
+    NoUnbondRequest = 29,
+    /// A non-positive `amount` was passed to `stake_deposit`,
+    /// `initiate_unbond`, or `slash`.
+    InvalidStakeAmount = 30,
 }

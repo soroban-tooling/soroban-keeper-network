@@ -141,3 +141,21 @@ pub(crate) const TTL_SAFETY_MARGIN_LEDGERS: u32 = 17_280; // ~1 day
 /// and defaulting to charging one on a contract whose configuration is
 /// unknown is the more surprising of the two failure modes.
 pub const DEFAULT_FEE_BPS: u32 = 0;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// E06 — Keeper Staking & Slashing (see `docs/STAKING_DESIGN.md`)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Ledgers a keeper's requested stake withdrawal must wait before
+/// `withdraw_stake` will release it. Matches `TTL_SAFETY_MARGIN_LEDGERS`'s
+/// existing ~1-day precedent — long enough that an admin has a realistic
+/// window to notice misbehavior and call `slash` before the stake that
+/// would back it leaves the contract. See `docs/STAKING_DESIGN.md` §3.
+pub(crate) const UNBOND_DELAY_LEDGERS: u32 = 17_280; // ~1 day
+
+/// Ledgers of persistent-storage lifetime requested for a keeper's stake
+/// entry each time it is written. Mirrors [`KEEPER_BALANCE_BUMP_LEDGERS`].
+pub(crate) const KEEPER_STAKE_BUMP_LEDGERS: u32 = 100_000;
+/// Renew a keeper stake entry only once fewer than this many ledgers
+/// remain. Mirrors [`KEEPER_BALANCE_BUMP_THRESHOLD`].
+pub(crate) const KEEPER_STAKE_BUMP_THRESHOLD: u32 = 50_000;

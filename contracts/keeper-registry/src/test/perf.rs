@@ -1,6 +1,6 @@
 //! CPU-instruction regression ceilings.
 
-use soroban_sdk::{testutils::Address as _, Address, Bytes};
+use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Bytes};
 
 use super::common::*;
 
@@ -58,5 +58,104 @@ fn test_execute_task_cpu_instructions_within_ceiling() {
         consumed < EXECUTE_TASK_CPU_INSN_CEILING,
         "execute_task consumed {consumed} CPU instructions, exceeding the regression \
          ceiling of {EXECUTE_TASK_CPU_INSN_CEILING}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// E06 — Keeper Staking & Slashing (#431). Same rationale and methodology as
+// the two ceilings above: measured via `cost_estimate().budget()` at the
+// time these tests were written, set at roughly 3x each measured value.
+// Measured baselines: stake_deposit ~227,095, initiate_unbond ~93,890,
+// withdraw_stake ~264,395, slash ~273,553. Confirmed these have teeth the
+// same way: temporarily setting a ceiling to 1 during development made the
+// corresponding test fail with the exact measured instruction count in the
+// message, not an opaque error.
+const STAKE_DEPOSIT_CPU_INSN_CEILING: u64 = 700_000;
+const INITIATE_UNBOND_CPU_INSN_CEILING: u64 = 300_000;
+const WITHDRAW_STAKE_CPU_INSN_CEILING: u64 = 800_000;
+const SLASH_CPU_INSN_CEILING: u64 = 850_000;
+
+#[test]
+fn test_stake_deposit_cpu_instructions_within_ceiling() {
+    use soroban_sdk::token;
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    token::StellarAssetClient::new(&s.env, &s.token_id).mint(&keeper, &10_000_000i128);
+
+    s.env.cost_estimate().budget().reset_default();
+    s.registry.stake_deposit(&keeper, &500_000i128);
+    let consumed = s.env.cost_estimate().budget().cpu_instruction_cost();
+
+    assert!(
+        consumed < STAKE_DEPOSIT_CPU_INSN_CEILING,
+        "stake_deposit consumed {consumed} CPU instructions, exceeding the regression \
+         ceiling of {STAKE_DEPOSIT_CPU_INSN_CEILING}"
+    );
+}
+
+#[test]
+fn test_initiate_unbond_cpu_instructions_within_ceiling() {
+    use soroban_sdk::token;
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    token::StellarAssetClient::new(&s.env, &s.token_id).mint(&keeper, &10_000_000i128);
+    s.registry.stake_deposit(&keeper, &500_000i128);
+
+    s.env.cost_estimate().budget().reset_default();
+    s.registry.initiate_unbond(&keeper, &200_000i128);
+    let consumed = s.env.cost_estimate().budget().cpu_instruction_cost();
+
+    assert!(
+        consumed < INITIATE_UNBOND_CPU_INSN_CEILING,
+        "initiate_unbond consumed {consumed} CPU instructions, exceeding the regression \
+         ceiling of {INITIATE_UNBOND_CPU_INSN_CEILING}"
+    );
+}
+
+#[test]
+fn test_withdraw_stake_cpu_instructions_within_ceiling() {
+    use soroban_sdk::token;
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    token::StellarAssetClient::new(&s.env, &s.token_id).mint(&keeper, &10_000_000i128);
+    s.registry.stake_deposit(&keeper, &500_000i128);
+    let release_ledger = s.registry.initiate_unbond(&keeper, &200_000i128);
+    s.env.ledger().with_mut(|li| li.sequence_number = release_ledger);
+
+    s.env.cost_estimate().budget().reset_default();
+    s.registry.withdraw_stake(&keeper);
+    let consumed = s.env.cost_estimate().budget().cpu_instruction_cost();
+
+    assert!(
+        consumed < WITHDRAW_STAKE_CPU_INSN_CEILING,
+        "withdraw_stake consumed {consumed} CPU instructions, exceeding the regression \
+         ceiling of {WITHDRAW_STAKE_CPU_INSN_CEILING}"
+    );
+}
+
+#[test]
+fn test_slash_cpu_instructions_within_ceiling() {
+    use soroban_sdk::token;
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    token::StellarAssetClient::new(&s.env, &s.token_id).mint(&keeper, &10_000_000i128);
+    s.registry.stake_deposit(&keeper, &500_000i128);
+    let treasury = Address::generate(&s.env);
+
+    s.env.cost_estimate().budget().reset_default();
+    s.registry.slash(
+        &s.admin,
+        &keeper,
+        &50_000i128,
+        &soroban_sdk::symbol_short!("fraud"),
+        &soroban_sdk::BytesN::from_array(&s.env, &[1u8; 32]),
+        &treasury,
+    );
+    let consumed = s.env.cost_estimate().budget().cpu_instruction_cost();
+
+    assert!(
+        consumed < SLASH_CPU_INSN_CEILING,
+        "slash consumed {consumed} CPU instructions, exceeding the regression \
+         ceiling of {SLASH_CPU_INSN_CEILING}"
     );
 }

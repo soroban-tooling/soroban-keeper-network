@@ -10,6 +10,9 @@ use crate::constants::*;
 use crate::errors::KeeperError;
 use crate::types::{DataKey, Task};
 
+// ─── E06 — Keeper Staking & Slashing ────────────────────────────────────
+// See `docs/STAKING_DESIGN.md`.
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -195,6 +198,39 @@ pub(crate) fn credit_keeper(e: &Env, keeper: &Address, amount: i128) -> Result<(
         KEEPER_BALANCE_BUMP_LEDGERS,
     );
     Ok(())
+}
+
+/// Reads a keeper's current bonded stake (0 if never deposited).
+///
+/// Named `read_keeper_stake` (not `keeper_stake`) to avoid colliding with
+/// the `#[contractimpl]` entry point of the same name in `staking.rs` — the
+/// two are in scope together via `use crate::internal::*`, and Rust would
+/// otherwise resolve calls inside that entry point to itself.
+///
+/// TTL note: mirrors `keeper_balance`'s policy — this is a read used by both
+/// state-mutating entry points and views, so it deliberately never renews
+/// the entry's TTL itself. Callers that write the stake value renew TTL as
+/// part of that write (see `write_keeper_stake`).
+pub(crate) fn read_keeper_stake(e: &Env, keeper: &Address) -> i128 {
+    e.storage()
+        .persistent()
+        .get(&DataKey::KeeperStake(keeper.clone()))
+        .unwrap_or(0)
+}
+
+/// Overwrites a keeper's bonded stake and renews the entry's TTL. Shared by
+/// every staking entry point that changes the stored amount
+/// (`stake_deposit`, `initiate_unbond`, `slash`), so the TTL-renewal policy
+/// lives in one place, the same reasoning `credit_keeper` documents for
+/// `KeeperReward`.
+pub(crate) fn write_keeper_stake(e: &Env, keeper: &Address, amount: i128) {
+    let key = DataKey::KeeperStake(keeper.clone());
+    e.storage().persistent().set(&key, &amount);
+    e.storage().persistent().extend_ttl(
+        &key,
+        KEEPER_STAKE_BUMP_THRESHOLD,
+        KEEPER_STAKE_BUMP_LEDGERS,
+    );
 }
 
 /// Adds `amount` to the swept-able protocol fee accumulator (instance storage).
