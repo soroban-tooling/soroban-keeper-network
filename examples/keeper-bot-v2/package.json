@@ -1,0 +1,31 @@
+{
+  "name": "soroban-keeper-bot-v2",
+  "version": "0.1.0",
+  "description": "Production-grade keeper bot for the Soroban Keeper Network — aimed at operators competing for rewards, not at newcomers (see examples/keeper-bot for the beginner-friendly single-file version).",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test",
+    "lint": "eslint ."
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "keeper",
+    "automation",
+    "defi"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@soroban-keeper-network/sdk": "file:../../packages/sdk-ts",
+    "@stellar/stellar-sdk": "^16.2.0",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0",
+    "globals": "^17.8.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

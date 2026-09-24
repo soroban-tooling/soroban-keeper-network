@@ -86,6 +86,92 @@ async function loadSdk() {
 let CONFIG; // Initialized in main() after validation
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Dry-run decision recording types and utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Structured record of a keeper decision (claim or skip).
+ * Used for deterministic logging and comparison across dry-run executions.
+ *
+ * @typedef {object} DecisionRecord
+ * @property {string} timestamp - ISO 8601 timestamp when decision was made
+ * @property {number} taskId - Task ID
+ * @property {string} decision - "claim" | "skip"
+ * @property {string} reason - Human-readable reason for the decision
+ * @property {object} [profitability] - Profitability evaluation (when applicable)
+ * @property {bigint} [profitability.reward] - Task reward in stroops
+ * @property {bigint} [profitability.estimatedFee] - Estimated total fees in stroops
+ * @property {bigint} [profitability.netProfit] - Net profit after fees in stroops
+ * @property {boolean} [profitability.profitable] - Whether the task is profitable
+ * @property {string} [profitability.profitMargin] - Configured minimum margin (string for JSON compatibility)
+ * @property {object} [taskMetadata] - Task evaluation metadata
+ * @property {string} [taskMetadata.taskType] - Task type (e.g., "TtlExtension")
+ * @property {string} [taskMetadata.verifier] - Verifier contract ID (if any)
+ * @property {number} [taskMetadata.deadline] - Task deadline in seconds
+ * @property {number} [evaluationPhase] - Which phase of evaluation led to skip
+ *   (1=deadline, 2=verifier_support, 3=proof_generation, 4=profitability)
+ */
+
+/**
+ * Creates a DecisionRecord for a skip decision.
+ *
+ * @param {number} taskId
+ * @param {string} reason
+ * @param {object} [options]
+ * @returns {DecisionRecord}
+ */
+function createSkipDecision(taskId, reason, options = {}) {
+  return {
+    timestamp: new Date().toISOString(),
+    taskId,
+    decision: "skip",
+    reason,
+    evaluationPhase: options.evaluationPhase,
+    taskMetadata: options.taskMetadata,
+    profitability: options.profitability,
+  };
+}
+
+/**
+ * Creates a DecisionRecord for a claim decision.
+ *
+ * @param {number} taskId
+ * @param {object} [options]
+ * @returns {DecisionRecord}
+ */
+function createClaimDecision(taskId, options = {}) {
+  return {
+    timestamp: new Date().toISOString(),
+    taskId,
+    decision: "claim",
+    reason: options.reason || "Task passed all profitability and eligibility checks",
+    taskMetadata: options.taskMetadata,
+    profitability: options.profitability,
+  };
+}
+
+/**
+ * Outputs a DecisionRecord as structured JSON (one per line for machine parsing).
+ * In dry-run mode, each decision is logged this way for easy comparison across runs.
+ *
+ * @param {DecisionRecord} record
+ */
+function logDecisionRecord(record) {
+  // Convert bigint fields to strings for JSON serialization
+  const serializable = {
+    ...record,
+    profitability: record.profitability ? {
+      ...record.profitability,
+      reward: String(record.profitability.reward),
+      estimatedFee: String(record.profitability.estimatedFee),
+      netProfit: String(record.profitability.netProfit),
+      profitMargin: String(record.profitability.profitMargin || "0"),
+    } : undefined,
+  };
+  console.log(JSON.stringify(serializable));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Configuration validation
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -136,13 +222,23 @@ async function validateAndLoadConfig() {
     },
   });
 
-  const secretKey = requireEnv("KEEPER_SECRET_KEY", {
-    secret: true,
-    validate: {
-      fn: StrKey.isValidEd25519SecretSeed,
-      reason: "must be a valid secret key (starts with S...)",
-    },
-  });
+  // Check if dry-run mode is enabled before requiring signing key
+  const dryRun = process.env.DRY_RUN ? process.env.DRY_RUN.toLowerCase() === "true" : false;
+
+  // Signing key is required for live mode only
+  let secretKey;
+  if (!dryRun) {
+    secretKey = requireEnv("KEEPER_SECRET_KEY", {
+      secret: true,
+      validate: {
+        fn: StrKey.isValidEd25519SecretSeed,
+        reason: "must be a valid secret key (starts with S...)",
+      },
+    });
+  } else {
+    // In dry-run mode, signing key is optional. Use a placeholder if provided.
+    secretKey = process.env.KEEPER_SECRET_KEY;
+  }
 
   // After validating the required string values, we can create the server
   // connection and use it to validate the contract's existence on the network.
@@ -167,6 +263,7 @@ async function validateAndLoadConfig() {
     network,
     registryContractId,
     secretKey,
+    dryRun,
     once: process.argv.includes("--once") || process.env.RUN_ONCE === "true",
     pollIntervalMs: requireEnv("POLL_INTERVAL_MS", {
       parse: (v) => parseInt(v, 10),
@@ -210,6 +307,13 @@ async function validateAndLoadConfig() {
     // unset and no real executor registered for a task type simply skips
     // that task rather than fabricating a proof.
     simulateExecution: requireEnv("SIMULATE_EXECUTION", {
+      parse: (v) => v.toLowerCase() === "true",
+      fallback: false,
+    }),
+    // Dry-run mode: execute the complete evaluation pipeline without submitting
+    // transactions. All decisions (claims, skips) are logged in structured format
+    // but no state-changing calls are made. Signing key is not required.
+    dryRun: requireEnv("DRY_RUN", {
       parse: (v) => v.toLowerCase() === "true",
       fallback: false,
     }),
@@ -707,13 +811,18 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
   // other unexpected error, is a failure.
   // Note: a round that finds no tasks is a success. Losing a claim race to
   // another keeper is also a success, as this is normal competitive behaviour.
-  const summary = { processed: 0, errors: [] };
+  const summary = { processed: 0, errors: [], decisions: [] };
   let newEmptyRounds = emptyRounds;
   const server = client.getServer();
 
   try {
     const nowSeconds = Math.floor(Date.now() / 1000);
-    console.log(`\nKeeper round at ${new Date().toISOString()}`);
+    const isLiveMode = !CONFIG.dryRun;
+    if (CONFIG.dryRun) {
+      console.log(`\nKeeper round (DRY-RUN mode) at ${new Date().toISOString()}`);
+    } else {
+      console.log(`\nKeeper round at ${new Date().toISOString()}`);
+    }
 
     const latestLedger = await server.getLatestLedger();
     const startLedger = Math.max(1, latestLedger.sequence - 1000);
@@ -742,13 +851,24 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
       if (summary.processed >= CONFIG.maxTasksPerRound) break;
 
       if (task.deadline <= nowSeconds) {
+        if (CONFIG.dryRun) {
+          const decision = createSkipDecision(
+            task.taskId,
+            "Task is past deadline",
+            { evaluationPhase: 1, taskMetadata: { deadline: task.deadline } }
+          );
+          summary.decisions.push(decision);
+          logDecisionRecord(decision);
+        }
         if (CONFIG.expireStaleTasks) {
           try {
-            await withRetry(`expire_task ${task.taskId}`, () =>
-              client.invoke("expire_task", [
-                nativeToScVal(task.taskId, { type: "u64" }),
-              ])
-            );
+            if (!CONFIG.dryRun) {
+              await withRetry(`expire_task ${task.taskId}`, () =>
+                client.invoke("expire_task", [
+                  nativeToScVal(task.taskId, { type: "u64" }),
+                ])
+              );
+            }
             console.log(
               `  Task ${task.taskId} expired — escrow refunded to owner`
             );
@@ -803,6 +923,22 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
           CONFIG.simulateExecution
         );
         if (!support.supported) {
+          if (CONFIG.dryRun) {
+            const decision = createSkipDecision(
+              task.taskId,
+              `Unsupported verifier/executor — ${support.reason}`,
+              {
+                evaluationPhase: 2,
+                taskMetadata: {
+                  taskType: taskTypeName,
+                  verifier: verifier,
+                  deadline: task.deadline,
+                },
+              }
+            );
+            summary.decisions.push(decision);
+            logDecisionRecord(decision);
+          }
           console.log(
             `  Skipping task ${task.taskId}: unsupported verifier/executor — ${support.reason}`
           );
@@ -824,6 +960,22 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
         );
 
         if (candidateProof === null || candidateProof === undefined) {
+          if (CONFIG.dryRun) {
+            const decision = createSkipDecision(
+              task.taskId,
+              `Could not generate valid proof for ${taskTypeName}`,
+              {
+                evaluationPhase: 3,
+                taskMetadata: {
+                  taskType: taskTypeName,
+                  verifier: verifier,
+                  deadline: task.deadline,
+                },
+              }
+            );
+            summary.decisions.push(decision);
+            logDecisionRecord(decision);
+          }
           console.log(
             `  Skipping task ${task.taskId} (${taskTypeName}): could not generate valid proof before claim.`
           );
@@ -841,6 +993,29 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
         });
 
         if (!profitCheck.profitable) {
+          if (CONFIG.dryRun) {
+            const decision = createSkipDecision(
+              task.taskId,
+              profitCheck.reason,
+              {
+                evaluationPhase: 4,
+                taskMetadata: {
+                  taskType: taskTypeName,
+                  verifier: verifier,
+                  deadline: task.deadline,
+                },
+                profitability: {
+                  reward: BigInt(task.reward),
+                  estimatedFee: profitCheck.estimatedFee,
+                  netProfit: profitCheck.netProfit,
+                  profitable: false,
+                  profitMargin: CONFIG.minProfitMarginStroops,
+                },
+              }
+            );
+            summary.decisions.push(decision);
+            logDecisionRecord(decision);
+          }
           console.log(
             `  Skipping task ${task.taskId}: unprofitable — ${profitCheck.reason}`
           );
@@ -850,22 +1025,47 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
         console.log(
           `  Attempting to claim task ${task.taskId} (reward: ${task.reward}, est net profit: ${profitCheck.netProfit} stroops)...`
         );
-        await withRetry(`claim_task ${task.taskId}`, () =>
-          client.claimTask({ keeper: keypair.publicKey(), taskId: task.taskId })
-        );
-        console.log(`  Task ${task.taskId} claimed!`);
 
-        await withRetry(`execute_task ${task.taskId}`, () =>
-          client.executeTask({
-            keeper: keypair.publicKey(),
-            taskId: task.taskId,
-            proof: candidateProof,
-          })
-        );
-        console.log(
-          `  Task ${task.taskId} executed! Proof: ${candidateProof.toString("hex").slice(0, 20)}...`
-        );
-        summary.processed++;
+        if (CONFIG.dryRun) {
+          // In dry-run mode: log the claim decision but don't actually claim
+          const decision = createClaimDecision(task.taskId, {
+            reason: `Task passed all profitability and eligibility checks (est net profit: ${profitCheck.netProfit} stroops)`,
+            taskMetadata: {
+              taskType: taskTypeName,
+              verifier: verifier,
+              deadline: task.deadline,
+            },
+            profitability: {
+              reward: BigInt(task.reward),
+              estimatedFee: profitCheck.estimatedFee,
+              netProfit: profitCheck.netProfit,
+              profitable: true,
+              profitMargin: CONFIG.minProfitMarginStroops,
+            },
+          });
+          summary.decisions.push(decision);
+          logDecisionRecord(decision);
+          console.log(`  [DRY-RUN] Task ${task.taskId} would be claimed (proof: ${candidateProof.toString("hex").slice(0, 20)}...)`);
+          summary.processed++;
+        } else {
+          // Live mode: actually claim and execute
+          await withRetry(`claim_task ${task.taskId}`, () =>
+            client.claimTask({ keeper: keypair.publicKey(), taskId: task.taskId })
+          );
+          console.log(`  Task ${task.taskId} claimed!`);
+
+          await withRetry(`execute_task ${task.taskId}`, () =>
+            client.executeTask({
+              keeper: keypair.publicKey(),
+              taskId: task.taskId,
+              proof: candidateProof,
+            })
+          );
+          console.log(
+            `  Task ${task.taskId} executed! Proof: ${candidateProof.toString("hex").slice(0, 20)}...`
+          );
+          summary.processed++;
+        }
       } catch (err) {
         console.warn(
           `  Failed to process task ${task.taskId}: ${err.message}`
@@ -893,12 +1093,16 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
 
     if (balance >= CONFIG.withdrawThreshold) {
       console.log(`  Withdrawing ${balance} stroops...`);
-      // withdraw_rewards mutates state, so it still goes through the
-      // submitting path.
-      await client.invoke("withdraw_rewards", [
-        nativeToScVal(keypair.publicKey(), { type: "address" }),
-      ]);
-      console.log(`  Withdrawal complete!`);
+      if (CONFIG.dryRun) {
+        console.log(`  [DRY-RUN] Withdrawal would be submitted (${balance} stroops)`);
+      } else {
+        // withdraw_rewards mutates state, so it still goes through the
+        // submitting path.
+        await client.invoke("withdraw_rewards", [
+          nativeToScVal(keypair.publicKey(), { type: "address" }),
+        ]);
+        console.log(`  Withdrawal complete!`);
+      }
     }
   } catch (err) {
     console.warn(`  Balance check failed: ${err.message}`);
@@ -916,14 +1120,31 @@ async function main() {
 
   const { NETWORK_PRESETS, KeeperRegistryClient, keypairSigner } = await loadSdk();
   const { rpcUrl, networkPassphrase } = NETWORK_PRESETS[CONFIG.network];
-  const keypair = Keypair.fromSecret(CONFIG.secretKey);
+  
+  let keypair;
+  if (CONFIG.dryRun && !CONFIG.secretKey) {
+    // In dry-run mode without a signing key, generate a temporary keypair for address purposes
+    keypair = Keypair.random();
+    console.log(`[DRY-RUN] Using temporary keypair for read operations`);
+  } else {
+    keypair = Keypair.fromSecret(CONFIG.secretKey);
+  }
+
   const server = createServer(rpcUrl);
-  const client = new KeeperRegistryClient({
+  
+  // In dry-run mode without signing key, we don't pass a signer to the client
+  // since no transactions will be submitted anyway
+  const clientOptions = {
     contractId: CONFIG.registryContractId,
     rpcUrl,
     networkPassphrase,
-    signer: keypairSigner(keypair),
-  });
+  };
+  
+  if (!CONFIG.dryRun || CONFIG.secretKey) {
+    clientOptions.signer = keypairSigner(keypair);
+  }
+
+  const client = new KeeperRegistryClient(clientOptions);
 
   console.log("");
   console.log("Soroban Keeper Network — Keeper Bot v0.1.0          ");
@@ -932,7 +1153,9 @@ async function main() {
   console.log(`  RPC URL  : ${rpcUrl}`);
   console.log(`  Keeper   : ${keypair.publicKey()}`);
   console.log(`  Registry : ${CONFIG.registryContractId}`);
-  if (CONFIG.once) {
+  if (CONFIG.dryRun) {
+    console.log("  Mode     : DRY-RUN (decisions logged, no transactions submitted)");
+  } else if (CONFIG.once) {
     console.log("  Mode     : --once (single run)");
   } else {
     console.log(`  Poll     : every ${CONFIG.pollIntervalMs / 1000}s`);
@@ -1043,6 +1266,10 @@ module.exports = {
   simulatedExecutor,
   ESTIMATED_CLAIM_FEE_STROOPS,
   ESTIMATED_EXECUTE_BASE_FEE_STROOPS,
+  // Dry-run decision recording
+  createSkipDecision,
+  createClaimDecision,
+  logDecisionRecord,
 };
 
 // Only run main() when executed directly, not when imported for testing
