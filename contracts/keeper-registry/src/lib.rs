@@ -69,7 +69,7 @@ mod views;
 pub use constants::*;
 pub use errors::KeeperError;
 pub use events::*;
-pub use types::{BatchTaskParams, DataKey, Task, TaskStatus, TaskType, UnbondRequest};
+pub use types::{BatchTaskParams, DataKey, SlashHistory, Task, TaskStatus, TaskType, UnbondRequest};
 pub use verifier::{IKeeperVerifier, KeeperVerifierClient};
 
 // Re-exported for the test and fuzz harnesses, which assert on the reward

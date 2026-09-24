@@ -34,6 +34,10 @@ pub enum DataKey {
     /// Presence-only marker: this slash incident id has already been
     /// slashed once. See `docs/STAKING_DESIGN.md` §6.
     SlashIncident(BytesN<32>),
+    /// Running slash count and total-slashed figure for a keeper (#425).
+    /// Kept separate from `SlashIncident`, which records duplicate-incident
+    /// protection per id, not an aggregate a dashboard can read directly.
+    SlashHistory(Address),
 }
 
 /// A keeper's pending stake withdrawal, started by `initiate_unbond` and
@@ -44,6 +48,17 @@ pub enum DataKey {
 pub struct UnbondRequest {
     pub amount: i128,
     pub release_ledger: u32,
+}
+
+/// A keeper's aggregate slash history, updated by every successful `slash`
+/// call against that keeper (#425). Read by `slash_history` so a dashboard
+/// or keeper bot can see a keeper's track record without replaying every
+/// `Slashed` event.
+#[contracttype]
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct SlashHistory {
+    pub count: u32,
+    pub total_slashed: i128,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

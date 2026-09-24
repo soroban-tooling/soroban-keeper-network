@@ -169,11 +169,12 @@ impl KeeperRegistry {
         }
 
         bump_instance(&e);
-        // Effects before interaction: record the incident and the reduced
-        // stake before the token ever leaves the contract, so a reentrant
-        // call (from a malicious reward-token `transfer`) sees the incident
-        // already recorded and the stake already reduced — it cannot slash
-        // the same incident twice or double-count the reduction.
+        // Effects before interaction: record the incident, the slash
+        // history, and the reduced stake before the token ever leaves the
+        // contract, so a reentrant call (from a malicious reward-token
+        // `transfer`) sees all three already updated — it cannot slash the
+        // same incident twice, double-count the history, or double-count
+        // the stake reduction.
         e.storage().persistent().set(&incident_key, &());
         e.storage().persistent().extend_ttl(
             &incident_key,
@@ -181,6 +182,7 @@ impl KeeperRegistry {
             KEEPER_STAKE_BUMP_LEDGERS,
         );
         write_keeper_stake(&e, &keeper, current_stake - amount);
+        write_slash_history(&e, &keeper, amount)?;
 
         reward_token(&e)?.transfer(&e.current_contract_address(), &treasury, &amount);
 
@@ -213,5 +215,14 @@ impl KeeperRegistry {
         e.storage()
             .persistent()
             .has(&DataKey::SlashIncident(incident_id))
+    }
+
+    /// A keeper's aggregate slash history: `(count, total_slashed)`, both
+    /// zero if the keeper has never been slashed (#425). Lets a dashboard
+    /// or keeper bot read a keeper's track record without replaying every
+    /// `Slashed` event.
+    pub fn slash_history(e: Env, keeper: Address) -> (u32, i128) {
+        let history = read_slash_history(&e, &keeper);
+        (history.count, history.total_slashed)
     }
 }

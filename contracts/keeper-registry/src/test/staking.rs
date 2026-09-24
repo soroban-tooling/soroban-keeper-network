@@ -305,6 +305,102 @@ fn test_slash_valid_reduces_stake_and_pays_treasury() {
     assert_eq!(token.balance(&s.registry.address), 350_000i128);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// slash_history (#425)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_slash_history_starts_at_zero_for_a_never_slashed_keeper() {
+    let s = setup();
+    let keeper = staked_keeper(&s, 500_000);
+    assert_eq!(s.registry.slash_history(&keeper), (0u32, 0i128));
+}
+
+#[test]
+fn test_slash_history_accumulates_count_and_total_across_multiple_slashes() {
+    let s = setup();
+    let keeper = staked_keeper(&s, 500_000);
+    let treasury = Address::generate(&s.env);
+
+    s.registry.slash(
+        &s.admin,
+        &keeper,
+        &50_000i128,
+        &symbol_short!("fraud"),
+        &incident_id(&s.env, 1),
+        &treasury,
+    );
+    assert_eq!(s.registry.slash_history(&keeper), (1u32, 50_000i128));
+
+    s.registry.slash(
+        &s.admin,
+        &keeper,
+        &30_000i128,
+        &symbol_short!("fraud2"),
+        &incident_id(&s.env, 2),
+        &treasury,
+    );
+    assert_eq!(s.registry.slash_history(&keeper), (2u32, 80_000i128));
+}
+
+#[test]
+fn test_slash_history_is_per_keeper_not_shared() {
+    let s = setup();
+    let keeper_a = staked_keeper(&s, 500_000);
+    let keeper_b = staked_keeper(&s, 500_000);
+    let treasury = Address::generate(&s.env);
+
+    s.registry.slash(
+        &s.admin,
+        &keeper_a,
+        &50_000i128,
+        &symbol_short!("fraud"),
+        &incident_id(&s.env, 1),
+        &treasury,
+    );
+
+    assert_eq!(s.registry.slash_history(&keeper_a), (1u32, 50_000i128));
+    assert_eq!(s.registry.slash_history(&keeper_b), (0u32, 0i128));
+}
+
+/// #425's own acceptance criterion: each view's value updates correctly
+/// across a deposit, an unbond, and a slash, exercised together as one
+/// realistic lifecycle rather than three isolated snapshots.
+#[test]
+fn test_views_update_correctly_across_deposit_unbond_and_slash() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    token::StellarAssetClient::new(&s.env, &s.token_id).mint(&keeper, &10_000_000i128);
+    let treasury = Address::generate(&s.env);
+
+    // Deposit.
+    s.registry.stake_deposit(&keeper, &500_000i128);
+    assert_eq!(s.registry.keeper_stake(&keeper), 500_000i128);
+    assert!(s.registry.unbonding_status(&keeper).is_none());
+    assert_eq!(s.registry.slash_history(&keeper), (0u32, 0i128));
+
+    // Unbond part of it.
+    let release_ledger = s.registry.initiate_unbond(&keeper, &100_000i128);
+    assert_eq!(s.registry.keeper_stake(&keeper), 500_000i128); // still counted until withdrawn
+    assert_eq!(s.registry.unbonding_status(&keeper), Some((100_000i128, release_ledger)));
+
+    // Slash while the unbond is still pending.
+    s.registry.slash(
+        &s.admin,
+        &keeper,
+        &50_000i128,
+        &symbol_short!("fraud"),
+        &incident_id(&s.env, 1),
+        &treasury,
+    );
+    assert_eq!(s.registry.keeper_stake(&keeper), 450_000i128);
+    assert_eq!(s.registry.slash_history(&keeper), (1u32, 50_000i128));
+    // The pending unbond request itself is untouched by the slash — only
+    // withdraw_stake's own defensive amount.min(current_stake) clamp
+    // reconciles the two, at withdrawal time.
+    assert_eq!(s.registry.unbonding_status(&keeper), Some((100_000i128, release_ledger)));
+}
+
 #[test]
 fn test_slash_zero_amount_fails() {
     let s = setup();
