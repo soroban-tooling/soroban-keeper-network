@@ -70,7 +70,19 @@ pub(crate) const KEEPER_BALANCE_BUMP_THRESHOLD: u32 = 50_000;
 ///   `execute_task` calls before crediting the keeper, and the
 ///   `VerificationFailed` error / `TaskVerificationFailed` event. See
 ///   `docs/VERIFIER_DESIGN.md`.
-pub const VERSION: u32 = 4;
+/// - `5` — staking and slashing: `stake_deposit`, `initiate_unbond`/
+///   `withdraw_stake`, admin `slash` with `raise_slash_appeal`/
+///   `resolve_slash_appeal`, and the opt-in `set_min_stake` floor
+///   `claim_task` now enforces when configured above zero. Adds the
+///   `InsufficientStake` / `UnbondNotReady` / `UnbondAlreadyPending` /
+///   `NoPendingUnbond` / `MinStakeNotMet` / `SlashNotFound` /
+///   `AppealWindowClosed` / `AppealAlreadyRaised` / `NotSlashedKeeper`
+///   error variants, the `KeeperStake`/`UnbondRequest`/`Slash` events, and
+///   the `keeper_stake`/`pending_unbond`/`min_stake`/`get_slash` views.
+///   Additive only — no existing entry point's signature changed, so a
+///   v2-family contract upgrade is not required just to keep existing
+///   functionality working. See `docs/STAKING_DESIGN.md`.
+pub const VERSION: u32 = 5;
 
 /// Maximum `calldata` length, in bytes. Sized to hold an encoded contract
 /// call — a target address, a function symbol, and a handful of scalar or
@@ -141,3 +153,35 @@ pub(crate) const TTL_SAFETY_MARGIN_LEDGERS: u32 = 17_280; // ~1 day
 /// and defaulting to charging one on a contract whose configuration is
 /// unknown is the more surprising of the two failure modes.
 pub const DEFAULT_FEE_BPS: u32 = 0;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Staking (E06) — see docs/STAKING_DESIGN.md
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Ledgers a keeper must wait after `initiate_unbond` before `withdraw_stake`
+/// will release the requested amount (~5 days at 5s/ledger). Deliberately
+/// longer than [`DISPUTE_WINDOW_LEDGERS`] so a dispute raised against recent
+/// behavior always has time to be filed and a slash applied before the stake
+/// backing that behavior becomes withdrawable, and deliberately kept below
+/// [`INSTANCE_BUMP_LEDGERS`] (~6 days): an unbonding delay longer than the
+/// instance-TTL renewal window would mean a single keeper's unbond request,
+/// with no other contract traffic in between, could outlive the instance's
+/// own storage TTL — this bound keeps that scenario impossible regardless of
+/// how much (or little) other activity the registry sees while a request is
+/// pending. See docs/STAKING_DESIGN.md §3.
+pub const UNBOND_DELAY_LEDGERS: u32 = 86_400; // ~5 days
+
+/// Ledgers a slashed keeper has to call `raise_slash_appeal` after a `slash`
+/// before the slash becomes final (~3 days at 5s/ledger). See
+/// docs/STAKING_DESIGN.md §4.1.
+pub const DISPUTE_WINDOW_LEDGERS: u32 = 51_840; // ~3 days
+
+/// Ceiling `set_dispute_window` enforces on the admin-configured
+/// execution-dispute hold (issue 0293 / #421, docs/STAKING_DESIGN.md §4.2).
+/// Deliberately below [`INSTANCE_BUMP_LEDGERS`]/[`KEEPER_BALANCE_BUMP_LEDGERS`]
+/// for the same reason [`UNBOND_DELAY_LEDGERS`] is bounded below them: a
+/// per-credit hold longer than the storage-TTL renewal window could let a
+/// single pending credit, with no other contract traffic touching that
+/// keeper's `PendingReward` entry in the meantime, outlive its own storage
+/// TTL before it is ever finalized.
+pub const MAX_EXECUTION_DISPUTE_WINDOW_LEDGERS: u32 = 86_400; // ~5 days

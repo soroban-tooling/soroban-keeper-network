@@ -6,6 +6,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — staking and slashing (E06)
+
+- Contract `VERSION` bumped `4` → `5`. This is an additive change: no
+  existing entry point's signature changed, so integrators do not need a
+  v2-family contract upgrade just to keep existing functionality working.
+- New entry points: `stake_deposit`, `initiate_unbond`, `withdraw_stake`,
+  admin `slash`, `set_min_stake`, `raise_slash_appeal`,
+  `resolve_slash_appeal`. See `docs/STAKING_DESIGN.md` for the full design
+  (slashing is dispute-based, not automatic — E04's on-chain verifier work
+  never landed, so there is nothing to trigger a slash from automatically)
+  and exact semantics.
+- New read-only views: `keeper_stake`, `pending_unbond`, `min_stake`,
+  `get_slash`.
+- New events: `StakeDeposited`, `UnbondInitiated`, `StakeWithdrawn`,
+  `Slashed`, `MinStakeUpdated`, `SlashAppealRaised`, `SlashAppealResolved`.
+  See the README events table.
+- New error variants: `InsufficientStake`, `UnbondNotReady`,
+  `UnbondAlreadyPending`, `NoPendingUnbond`, `MinStakeNotMet`,
+  `SlashNotFound`, `AppealWindowClosed`, `AppealAlreadyRaised`,
+  `NotSlashedKeeper`.
+- `claim_task` gains an opt-in minimum-stake gate: rejects with
+  `MinStakeNotMet` when an admin has configured `set_min_stake` above zero
+  and the calling keeper's current bonded stake (excluding anything
+  mid-unbond) is below it. Defaults to no requirement, matching
+  `min_reward`'s existing opt-in posture on the task side.
+- New fuzz target `staking` (`fuzz/fuzz_targets/staking.rs`) exercising
+  `stake_deposit`/`initiate_unbond`/`slash` across the full `i128` range,
+  including the partial-unbond-then-over-slash boundary.
+- New entry points (issue 0293 / #421): admin `set_dispute_window`, owner
+  `dispute_execution`, admin `resolve_execution_dispute`. When the admin
+  configures a non-zero dispute window, `execute_task` credits are held as
+  a `PendingCredit` (new read-only views `pending_reward`,
+  `dispute_window`) instead of landing directly in the keeper's
+  withdrawable balance; `withdraw_rewards` finalizes any undisputed credit
+  whose window has elapsed before reading the balance. Disabled (`0`, the
+  default) is byte-identical to the unmodified wave-1 MVP behavior of
+  immediate withdrawability. See `docs/STAKING_DESIGN.md` §4.2. New error
+  variants `NoPendingCredit`, `ExecutionAlreadyDisputed`,
+  `DisputeWindowClosed`, `NoDisputedCredit`. New events
+  `DisputeWindowUpdated`, `ExecutionDisputed`, `ExecutionDisputeResolved`,
+  `RewardsFinalized`.
+- **Fix**: an upheld execution dispute (`resolve_execution_dispute`,
+  `uphold_dispute: true`) now credits the forfeited reward to
+  `fees_accrued` instead of silently dropping it. The credit's
+  `net_reward` was already carved out of the task's escrow at
+  `execute_task` time, and the tokens never leave the contract on an
+  upheld dispute (the keeper is deliberately never paid), so leaving it
+  unrouted would have permanently stranded real token balance that no key
+  could reach again. Caught by the I-1 property test below while
+  extending `assert_solvent`, not observed in production (this contract
+  has not yet been deployed).
+- I-1 (solvency, `docs/ARCHITECTURE.md`) extended (issue 0294 / #422):
+  `assert_solvent` now also sums each keeper's bonded stake
+  (`keeper_stake`), anything mid-unbond (`pending_unbond`), and any
+  not-yet-finalized execution credits (`pending_reward`) against the token
+  balance, alongside the pre-existing open escrow, keeper balances, and
+  accrued fees terms. New property test
+  `property_i1_solvency_holds_with_stake_unbond_slash_and_dispute_window`
+  (`contracts/keeper-registry/src/test/property.rs`) randomizes stake
+  deposits, partial/full unbonds, admin slashes with randomized appeal
+  outcomes, and dispute-window-held executions with randomized dispute
+  outcomes, asserting solvency after every step rather than only at the
+  end.
+- rust-sdk (issue 0299's TypeScript coverage counterpart, issue 0206's
+  argument-type discipline / #428): `KeeperClient` gains one method per
+  staking and dispute-window entry point and view (`stake_deposit`,
+  `initiate_unbond`, `withdraw_stake`, `slash`, `raise_slash_appeal`,
+  `resolve_slash_appeal`, `set_min_stake`, `set_dispute_window`,
+  `dispute_execution`, `resolve_execution_dispute`, `keeper_stake`,
+  `pending_unbond`, `min_stake`, `get_slash`, `dispute_window`,
+  `pending_reward`), all on the existing `KeeperClient` struct (no separate
+  staking client type) and routed through the existing
+  `ClientError::ContractError` path, so every new `KeeperError` variant
+  this epic introduced is reachable exactly like any pre-existing one.
+  New integration test file `rust-sdk/tests/staking.rs` covering stake,
+  unbond/withdraw, slash plus both appeal outcomes, the min-stake gate,
+  and the dispute window plus both dispute-resolution outcomes.
+
 ### Added — indexer service scaffold (E14)
 
 - New workspace member `indexer/` (`keeper-indexer`): the runnable, empty

@@ -9,12 +9,16 @@
 extern crate std;
 
 use soroban_sdk::{
+    symbol_short,
     testutils::{Address as _, Deployer as _},
     token, Address, Bytes,
 };
 
 use super::common::*;
-use crate::{split_reward, KeeperError, TaskType, INSTANCE_BUMP_THRESHOLD, MIN_TTL_LEDGERS};
+use crate::{
+    split_reward, KeeperError, TaskType, INSTANCE_BUMP_THRESHOLD, MIN_TTL_LEDGERS,
+    UNBOND_DELAY_LEDGERS,
+};
 
 use crate::invariants::{
     assert_admin_action_isolated, assert_fee_bounded, assert_lapsed_claim_is_expirable,
@@ -150,6 +154,162 @@ proptest! {
         assert_solvent(&s.env, &s.registry, &task_ids, &[keeper], balance).expect(
             "I-1 solvency must hold across a mix of none/approve/reject verifier outcomes",
         );
+    }
+
+    // I-1 (E06 extension) — issue #422 / backlog 0294. Extends I-1 to cover
+    // the staking/unbonding/slashing surface (docs/STAKING_DESIGN.md §3, §5)
+    // and the execution dispute window (§4.2): `assert_solvent` now also
+    // sums `keeper_stake` + `pending_unbond` + `pending_reward` per keeper
+    // (see the doc comment on `assert_solvent` for why each is necessary).
+    // This property mixes ordinary task execution with stake deposits,
+    // partial/full unbonds, admin slashes (with a randomized appeal
+    // upheld/rejected outcome), and dispute-window-held execution credits
+    // (with a randomized dispute upheld/rejected outcome) in one randomized
+    // sequence, and checks solvency holds after every step, not just at the
+    // end, so a step that transiently breaks the invariant can't hide behind
+    // a later step that happens to restore the final balance sum.
+    //
+    // `setup()` only mints 10_000_000 to `admin`; stakes are minted directly
+    // to the keeper via `token::StellarAssetClient` (mirroring
+    // `test/staking.rs`'s `stake` helper) rather than drawn from admin's
+    // supply, so task rewards and stake amounts don't compete for the same
+    // minted pool.
+    #[test]
+    fn property_i1_solvency_holds_with_stake_unbond_slash_and_dispute_window(
+        steps in prop::collection::vec(0u8..6, 1..10),
+        amounts in prop::collection::vec(1_i128..500_000, 1..10),
+    ) {
+        let s = setup();
+        let token = token::Client::new(&s.env, &s.token_id);
+        let stake_token = token::StellarAssetClient::new(&s.env, &s.token_id);
+        let keeper = Address::generate(&s.env);
+        let mut task_ids: std::vec::Vec<u64> = std::vec::Vec::new();
+
+        // A short, always-on dispute window so the dispute-window path is
+        // actually exercised by this property, not just the disabled
+        // (default 0) case already covered by
+        // `property_i1_solvency_holds_across_random_task_outcomes`.
+        s.registry.set_dispute_window(&s.admin, &500u32);
+
+        for (step, amount) in steps.iter().zip(amounts.iter()) {
+            match step % 6 {
+                0 => {
+                    // Stake deposit.
+                    stake_token.mint(&keeper, amount);
+                    s.registry.stake_deposit(&keeper, amount);
+                }
+                1 => {
+                    // Partial (bounded by current stake) or no-op unbond.
+                    let bonded = s.registry.keeper_stake(&keeper);
+                    if bonded > 0 && s.registry.pending_unbond(&keeper).is_none() {
+                        let request = 1 + (*amount % bonded).max(0);
+                        let request = request.min(bonded).max(1).min(bonded);
+                        let _ = s.registry.try_initiate_unbond(&keeper, &request);
+                    }
+                }
+                2 => {
+                    // Complete a pending unbond, if its delay has elapsed.
+                    if s.registry.pending_unbond(&keeper).is_some() {
+                        advance(&s.env, UNBOND_DELAY_LEDGERS, 0);
+                        let _ = s.registry.try_withdraw_stake(&keeper);
+                    }
+                }
+                3 => {
+                    // Admin slash, then randomly appeal and randomly uphold
+                    // or reject that appeal — exercising both the
+                    // funds-stay-slashed and funds-are-restored branches of
+                    // `resolve_slash_appeal`.
+                    let bonded = s.registry.keeper_stake(&keeper);
+                    if bonded > 0 {
+                        let slash_amount = 1 + (*amount % bonded).max(0);
+                        let slash_amount = slash_amount.min(bonded).max(1);
+                        let treasury = Address::generate(&s.env);
+                        if let Ok(Ok(slash_id)) = s.registry.try_slash(
+                            &s.admin,
+                            &keeper,
+                            &slash_amount,
+                            &symbol_short!("test"),
+                            &treasury,
+                        ) {
+                            if amount % 2 == 0 {
+                                let _ = s.registry.try_raise_slash_appeal(&keeper, &slash_id);
+                                let uphold = amount % 4 == 0;
+                                let _ = s.registry.try_resolve_slash_appeal(
+                                    &s.admin, &slash_id, &uphold,
+                                );
+                            }
+                        }
+                    }
+                }
+                4 => {
+                    // Register, claim, and execute a task; its reward lands
+                    // in `pending_reward` (not `keeper_balance`) because the
+                    // dispute window above is enabled.
+                    //
+                    // Uses an explicit, generous `ttl_ledgers` rather than
+                    // `register_reward_task`'s shared `DEFAULT_TTL_LEDGERS`
+                    // (18_000): this test's unbond-completion step (case 2)
+                    // advances the ledger by a full `UNBOND_DELAY_LEDGERS`
+                    // (86_400) at a time, up to 9 times, so a task registered
+                    // with the default TTL could archive mid-sequence and
+                    // turn `assert_solvent`'s `try_get_task` read of it into
+                    // an unrecoverable host panic (Soroban escalates an
+                    // archived-entry access even through `try_`) rather than
+                    // a catchable error — a test-harness artifact of TTL
+                    // outliving unrelated to I-1 itself, which this ttl_ledgers
+                    // choice avoids by staying comfortably above the worst
+                    // case (9 * 86_400 = 777_600).
+                    let reward = 1 + (*amount % 400_000);
+                    let deadline = s.env.ledger().timestamp() + 3_600;
+                    let id = s.registry.register_task(
+                        &s.admin,
+                        &TaskType::Liquidation,
+                        &calldata(&s.env),
+                        &reward,
+                        &deadline,
+                        &1_000_000u32,
+                        &120u32,
+                        &None,
+                    );
+                    task_ids.push(id);
+                    s.registry.claim_task(&keeper, &id);
+                    s.registry
+                        .execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"p"));
+                }
+                _ => {
+                    // Dispute the oldest still-pending credit, then
+                    // randomly uphold or reject it; if the window has
+                    // already elapsed and nothing is left pending,
+                    // `withdraw_rewards` finalizes it instead — both paths
+                    // must leave solvency intact.
+                    let pending = s.registry.pending_reward(&keeper);
+                    if let Some(credit) = pending.iter().find(|c| !c.disputed) {
+                        let _ = s
+                            .registry
+                            .try_dispute_execution(&s.admin, &credit.task_id);
+                        let uphold = amount % 2 == 0;
+                        let _ = s.registry.try_resolve_execution_dispute(
+                            &s.admin, &credit.task_id, &uphold,
+                        );
+                    } else {
+                        advance(&s.env, 500, 0);
+                        let _ = s.registry.try_withdraw_rewards(&keeper);
+                    }
+                }
+            }
+
+            let balance = token.balance(&s.registry.address);
+            assert_solvent(
+                &s.env,
+                &s.registry,
+                &task_ids,
+                core::slice::from_ref(&keeper),
+                balance,
+            )
+            .expect(
+                "I-1 solvency must hold after every step of a randomized stake/unbond/slash/dispute sequence",
+            );
+        }
     }
 
     // I-2 — Escrow recoverability: a claimed task past its deadline is
@@ -334,6 +494,80 @@ proptest! {
                 "ttl_ledgers that covers the deadline plus safety margin must be accepted"
             );
         }
+    }
+
+    // Issue #441 — no panic reachable through any combination of staking
+    // calls. Unlike property_i1_solvency_holds_with_stake_unbond_slash_and_
+    // dispute_window (which only ever drives staking through
+    // already-valid, in-range amounts derived from the keeper's current
+    // state), this property deliberately throws adversarial and
+    // out-of-range inputs at every staking entry point — negative amounts,
+    // amounts far exceeding any stake or minted supply, unbonding/
+    // withdrawing/appealing/resolving with no prior state, and a slash_id
+    // that was never issued — in arbitrary order. The only assertion is
+    // that the property test itself completes: every call must return a
+    // typed Result (Ok or a KeeperError), never a host panic from an
+    // unchecked arithmetic operation, an unwrap, or an out-of-bounds
+    // access. A prop_assert failure here would mean the harness itself
+    // detected a panic (proptest reports the panicking input as a
+    // regression case), not a mismatched value.
+    #[test]
+    fn property_no_panic_reachable_through_staking_calls(
+        steps in prop::collection::vec(0u8..7, 1..20),
+        // Includes negative values and values far exceeding anything ever
+        // minted, deliberately outside every entry point's valid range.
+        amounts in prop::collection::vec(-1_000_000_i128..2_000_000_000_i128, 1..20),
+        slash_ids in prop::collection::vec(0u64..10, 1..20),
+    ) {
+        let s = setup();
+        let stake_token = token::StellarAssetClient::new(&s.env, &s.token_id);
+        let keeper = Address::generate(&s.env);
+        let treasury = Address::generate(&s.env);
+
+        // Minted once, generously, so a positive-but-large amount in the
+        // range above at least has a chance of being fundable rather than
+        // every large deposit failing on the token transfer itself before
+        // ever reaching the staking logic under test.
+        stake_token.mint(&keeper, &2_000_000_000i128);
+
+        for ((step, amount), slash_id) in steps.iter().zip(amounts.iter()).zip(slash_ids.iter()) {
+            match step % 7 {
+                0 => {
+                    let _ = s.registry.try_stake_deposit(&keeper, amount);
+                }
+                1 => {
+                    let _ = s.registry.try_initiate_unbond(&keeper, amount);
+                }
+                2 => {
+                    let _ = s.registry.try_withdraw_stake(&keeper);
+                }
+                3 => {
+                    let _ = s.registry.try_slash(
+                        &s.admin,
+                        &keeper,
+                        amount,
+                        &symbol_short!("test"),
+                        &treasury,
+                    );
+                }
+                4 => {
+                    let _ = s.registry.try_raise_slash_appeal(&keeper, slash_id);
+                }
+                5 => {
+                    let _ = s.registry.try_resolve_slash_appeal(
+                        &s.admin,
+                        slash_id,
+                        &(amount % 2 == 0),
+                    );
+                }
+                _ => {
+                    let _ = s.registry.try_set_min_stake(&s.admin, amount);
+                }
+            }
+        }
+
+        // Reaching here at all is the property: no step above panicked.
+        prop_assert!(true);
     }
 
     // I-9 — Instance TTL liveness under randomized, bounded-gap traffic
