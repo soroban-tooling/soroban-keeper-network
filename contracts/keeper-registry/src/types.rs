@@ -23,6 +23,10 @@ pub enum DataKey {
     /// Minimum reward a task may be registered with. Guards against dust-spam
     /// tasks that would cost keepers more in fees than they pay out. Default 0.
     MinReward,
+    /// Keeper reputation record in Persistent storage.
+    KeeperReputation(Address),
+    /// Minimum reputation required to claim tasks (Instance storage).
+    MinReputation,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

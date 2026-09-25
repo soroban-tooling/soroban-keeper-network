@@ -6,6 +6,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — keeper reputation tracking and claim eligibility floor (VERSION bumped to 5)
+
+Epic E07's core reputation slice. Full design rationale and retrospective:
+[docs/REPUTATION_DESIGN.md](docs/REPUTATION_DESIGN.md).
+
+- **Reputation tracking & scoring:** Incremental on-chain reputation record
+  (`KeeperReputationRecord`) tracking total successful executions, missed lock
+  windows (re-claims after `lock_ledgers` expired), and last updated ledger.
+  `execute_task` increments successful executions; re-claiming an expired
+  claimed task records a missed lock window against the prior claimer.
+- **Lazy read-time decay:** Reputation decays over elapsed ledgers dynamically
+  at read time based on `last_update_ledger`. Side-effect-free, simulation-safe,
+  and does not bump storage TTL.
+- **Read-only view:** New view `keeper_reputation(keeper: Address) -> KeeperReputationRecord`
+  exposes the full record and decayed effective score without requiring off-chain
+  reconstruction from raw event logs. Returns a zero-initialized default for
+  untracked addresses.
+- **Claim eligibility floor:** Optional admin-configured `min_reputation: u32`
+  (view `min_reputation()`, admin setter `set_min_reputation(min_reputation)`).
+  When enabled (`min_reputation > 0`), `claim_task` rejects callers whose
+  effective reputation is below the threshold with the new `ReputationTooLow`
+  error. Defaults to `0` (disabled).
+- **New event:** `("reputation", "update")` carrying `(keeper: Address, action: Symbol, new_score: u32)`.
+- **New error variant:** `KeeperError::ReputationTooLow` (emitted on eligibility floor rejection).
+- **VERSION bumped from 4 to 5.**
+- **Compatibility & observable behavior:** This release is additive-only in its
+  contract interface—no existing entry point signatures or parameters are modified.
+  Existing behavior is 100% backward-compatible when `min_reputation` is at its
+  default value of `0` (disabled). If the admin configures a non-zero `min_reputation`,
+  `claim_task` gains a new observable rejection condition (`ReputationTooLow`) for
+  callers failing to meet the eligibility floor.
+
 ### Added — indexer service scaffold (E14)
 
 - New workspace member `indexer/` (`keeper-indexer`): the runnable, empty
