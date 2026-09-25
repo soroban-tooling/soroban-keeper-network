@@ -280,7 +280,57 @@ A **shared, permissionless, on-chain coordination layer** where:
 - `upgrade` MUST use `deployer().update_current_contract_wasm`, and MUST
   emit `Upgraded` (admin + new WASM hash) before doing so.
 
-#### FR-8 — Batch Task Registration
+#### FR-8: Stake Deposit
+- `deposit_stake` MUST transfer the caller-specified `amount` into the contract
+  and increase that keeper's stake balance by exactly `amount`.
+- `deposit_stake` MUST reject `amount <= 0` rather than silently no-oping.
+- The stake balance MUST be tracked separately from task reward balances so a
+  keeper's task-escrowed funds and staked collateral remain independently
+  auditable.
+- MUST emit `StakeDeposited` with `(keeper, amount)` or equivalent data that
+  reconstructs the deposit from the event stream.
+
+#### FR-9: Stake Unbonding and Withdrawal
+- `initiate_unbond` MUST require a configured `unbonding_delay` and place the
+  requested amount into a pending unbonding state for that keeper.
+- A keeper MUST NOT be able to withdraw or spend the pending amount as if it
+  were still active collateral before the configured delay elapses.
+- `withdraw_stake` MUST succeed only after the entire requested amount has aged
+  past the unbonding delay; a withdrawal at `delay - 1` MUST revert, while the
+  first ledger at or after `delay` MUST succeed.
+- Once the delay has elapsed, the contract MUST release the eligible amount to
+  the keeper and clear the corresponding pending unbonding record atomically.
+- MUST emit `StakeUnbondingStarted` and `StakeWithdrawn` with enough data to
+  reconstruct the outstanding and released balances from the event history.
+
+#### FR-10: Minimum Stake Requirement
+- If `min_stake` is configured to a non-zero value, `claim_task` MUST reject a
+  keeper whose effective stake is below the configured floor.
+- A keeper exactly equal to the minimum MUST remain eligible; a keeper one unit
+  below MUST be rejected.
+- The effective stake MUST exclude any amount that is currently unbonding and
+  therefore not withdrawable, so a keeper cannot game the requirement by
+  moving funds into a pending unbond state while still claiming tasks.
+- The minimum MUST be admin-configurable and default to `0` when unset.
+- MUST expose a read-only `min_stake()` view mirroring the configuration pattern
+  of the task reward floor, with no pause gate on the view.
+
+#### FR-11: Slash Authorization
+- `slash` MUST only be callable by the authorized slash authority, which MUST be
+  a single explicit party or role defined by the staking design and enforced by
+  the contract.
+- An unauthorized caller MUST revert with the same failure semantics as other
+  auth-gated registry actions; no caller other than the designated authority may
+  reduce a keeper's stake.
+- The slash amount MUST never exceed the keeper's current active stake and MUST
+  apply atomically so a slash cannot partially succeed against stale state.
+- `slash` MUST emit `StakeSlashed` with the keeper, amount, and reason so the
+  event stream alone explains why the collateral changed.
+- If the slash authority is admin-gated, it MUST follow the normal admin auth
+  flow exactly, including successful transfer to a new admin without stale
+  authorization from the previous admin.
+
+#### FR-12 — Batch Task Registration
 
 `batch_register_tasks` is implemented; see
 [docs/BATCH_OPERATIONS.md](docs/BATCH_OPERATIONS.md) for the full design and
@@ -299,7 +349,7 @@ Note that `MAX_BATCH_SIZE` is currently a conservative guard rather than a
 measured ceiling — issue 0104 owns the empirical measurement. Read the live
 value from the `max_batch_size()` view instead of hardcoding it.
 
-#### FR-8: Batch Task Reads
+#### FR-13: Batch Task Reads
 - `get_tasks(ids: Vec<u64>) -> Vec<Option<Task>>` MUST read every requested id
   in a single call, so an indexer or keeper bot does not need one RPC round
   trip per task.
@@ -371,8 +421,13 @@ value from the `max_batch_size()` view instead of hardcoding it.
 | `Paused` | `bool` | Instance | Instance lifetime | `false` |
 | `TaskCounter` | `u64` | Instance | Instance lifetime | `0` |
 | `RewardToken` | `Address` | Instance | Instance lifetime | — |
+| `MinStake` | `i128` | Instance | Instance lifetime | `0` |
+| `UnbondingDelay` | `u64` | Instance | Instance lifetime | `0` |
+| `SlashAuthority` | `Address` | Instance | Instance lifetime | `Admin` |
 | `Task(u64)` | `Task` struct | Persistent | `task.ttl_ledgers` | — |
 | `KeeperReward(Address)` | `i128` | Persistent | ~1 year (6.3M ledgers) | `0` |
+| `Stake(Address)` | `i128` | Persistent | ~1 year (6.3M ledgers) | `0` |
+| `PendingUnbond(Address)` | `PendingUnbond` struct | Persistent | `unbonding_delay` + TTL guard | unset/`0` |
 
 `Task.calldata` is capped at `MAX_CALLDATA_LEN` = 1024 bytes, enforced at
 `register_task`. `save_task` re-writes the whole `Task` struct (including
