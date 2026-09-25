@@ -21,6 +21,7 @@
 | [Architecture](docs/ARCHITECTURE.md) | Components, task lifecycle, storage, money invariants, trust model |
 | [Fuzzing & property testing](docs/FUZZING.md) | Running/adding fuzz targets, the shared invariant module, crash-to-regression convention |
 | [Verifier design (E04)](docs/VERIFIER_DESIGN.md) | `IKeeperVerifier` interface for optional on-chain proof verification |
+| [Reputation design (E07)](docs/REPUTATION_DESIGN.md) | On-chain keeper reputation scoring architecture and epic retrospective |
 | [Indexer design](docs/INDEXER_DESIGN.md) | One instance per deployment, event-shape versioning policy |
 | [Indexer deployment](docs/INDEXER_DEPLOYMENT.md) | Provisioning, backfill, and operating an indexer instance |
 | [Batch operations (E05)](docs/BATCH_OPERATIONS.md) | Proposed `batch_register_tasks` design + integration guide |
@@ -326,6 +327,20 @@ value from the `max_batch_size()` view instead of hardcoding it.
 - Duplicate ids are permitted and each is resolved independently.
 - Both are read-only views and are therefore never gated by `pause`.
 
+#### FR-9: Keeper Reputation Tracking
+- `execute_task` MUST increment the claiming keeper's reputation record upon successful execution (`successful_executions` incremented).
+- Re-claiming a task after `lock_ledgers` has elapsed MUST record a missed lock window against the prior claimer (`missed_locks` incremented).
+- A keeper's reputation record MUST be created upon their first tracked action and updated incrementally.
+- Reputation MUST decay lazily at read time based on ledgers elapsed since the last update ledger; querying reputation via `keeper_reputation` MUST NOT mutate state and MUST NOT bump TTL.
+- Querying reputation for an address with no recorded history MUST return a zero-initialized default record rather than erroring.
+- MUST emit `("reputation", "update")` event carrying `(keeper, action, new_score)` on state-mutating updates.
+
+#### FR-10: Claim Eligibility Floor
+- When the eligibility floor (`min_reputation`) is configured to a non-zero value, `claim_task` MUST reject callers whose decayed reputation is strictly below `min_reputation` with `KeeperError::ReputationTooLow`.
+- `min_reputation` MUST default to `0` (disabled), ensuring existing and new keepers are not gated by default.
+- `set_min_reputation` MUST only be callable by the `Admin`.
+- `min_reputation` MUST NOT gate task registration, task execution, cancellation, expiry, or reward withdrawal.
+
 ---
 
 ### Non-Functional Requirements
@@ -373,6 +388,8 @@ value from the `max_batch_size()` view instead of hardcoding it.
 | `RewardToken` | `Address` | Instance | Instance lifetime | — |
 | `Task(u64)` | `Task` struct | Persistent | `task.ttl_ledgers` | — |
 | `KeeperReward(Address)` | `i128` | Persistent | ~1 year (6.3M ledgers) | `0` |
+| `KeeperReputation(Address)` | `KeeperReputationRecord` struct | Persistent | ~1 year (6.3M ledgers) | `0` score / executions |
+| `MinReputation` | `u32` | Instance | Instance lifetime | `0` (disabled) |
 
 `Task.calldata` is capped at `MAX_CALLDATA_LEN` = 1024 bytes, enforced at
 `register_task`. `save_task` re-writes the whole `Task` struct (including
