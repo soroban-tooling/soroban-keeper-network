@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "contracts/keeper-registry",
+    "contracts/treasury",
     "indexer",
     "rust-sdk",
 ]
