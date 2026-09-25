@@ -1,0 +1,25 @@
+[package]
+name = "treasury"
+version = "0.1.0"
+edition = "2021"
+authors = ["Soroban Keeper Network Contributors"]
+description = "Recipient distribution treasury contract for the Soroban Keeper Network"
+license = "Apache-2.0"
+repository = "https://github.com/soroban-tooling/soroban-keeper-network"
+keywords = ["soroban", "stellar", "treasury", "automation", "defi"]
+categories = ["cryptography::cryptocurrencies"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+testutils = ["soroban-sdk/testutils"]
+
+[dependencies]
+soroban-sdk = { version = "22.0.1" }
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.1", features = ["testutils"] }
+
+# Note: release profile is defined once at the workspace root Cargo.toml.

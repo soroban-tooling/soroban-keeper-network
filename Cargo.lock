@@ -2882,6 +2882,7 @@ dependencies = [
  "soroban-sdk",
  "thiserror 2.0.20",
  "tokio",
+ "treasury",
 ]
 
 [[package]]
@@ -3636,6 +3637,13 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "treasury"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]

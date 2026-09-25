@@ -9,6 +9,7 @@ pub mod events;
 pub mod network;
 pub mod retry;
 pub mod signing;
+pub mod treasury_client;
 pub mod types;
 
 pub use client::{ClientError, KeeperClient};
@@ -21,4 +22,5 @@ pub use events::{
 pub use network::{CustomNetworkConfig, Network, NetworkConfig, FUTURENET, MAINNET, TESTNET};
 pub use retry::{default_classify, ErrorClass, RetryPolicy, RpcCallError, TransportError};
 pub use signing::{KeypairSigner, SignerError, TransactionSigner};
+pub use treasury_client::{Recipient, TreasuryClient};
 pub use types::{BatchTaskParams, Task, TaskStatus, TaskType};
