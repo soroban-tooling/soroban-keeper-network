@@ -123,3 +123,53 @@ fn test_upgrade_by_non_admin_fails() {
         "a rejected non-admin upgrade must not emit an Upgraded event"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reputation persistent TTL renewal (Issue 0332 / #460)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Confirms that every write to a keeper's reputation record renews its persistent
+/// storage TTL appropriately, ensuring active keepers do not see their reputation
+/// records silently archived over time.
+#[test]
+fn test_reputation_ttl_renewed_by_mutation_stays_alive_past_initial_window() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+
+    // Initial write creates the reputation record in Persistent storage.
+    // save_reputation extends persistent TTL to REPUTATION_BUMP_LEDGERS (~100,000 ledgers).
+    s.env.as_contract(&s.registry.address, || {
+        crate::reputation::record_success(&s.env, &keeper);
+    });
+
+    let initial = s.registry.keeper_reputation(&keeper);
+    assert_eq!(initial.successful_executions, 1);
+    assert_eq!(initial.base_score, 1);
+
+    // Advance far enough that remaining TTL drops below the renewal threshold
+    // (100_000 - 50_000 = 50_000 ledgers), but not so far that the entry expires.
+    // Advancing 60_000 ledgers leaves ~40_000 ledgers (< REPUTATION_BUMP_THRESHOLD).
+    advance(&s.env, 60_000, 300_000);
+
+    // A subsequent mutation updates reputation and triggers extend_ttl back
+    // up to REPUTATION_BUMP_LEDGERS (100_000 ledgers) from the current height (60_000).
+    s.env.as_contract(&s.registry.address, || {
+        crate::reputation::record_success(&s.env, &keeper);
+    });
+
+    // Advance well past where the *original* un-renewed window (100_000 ledgers)
+    // would have archived the entry — total ledgers advanced is now 120_000.
+    advance(&s.env, 60_000, 300_000);
+
+    // Without the interim renewal above, the record would have been evicted at ledger 100_000.
+    // Confirm the record is still live, accessible, and retains its accumulated history.
+    let renewed = s.registry.keeper_reputation(&keeper);
+    assert_eq!(renewed.successful_executions, 2);
+    assert_eq!(renewed.base_score, 2);
+
+    // Also confirm the underlying persistent storage key remains present.
+    s.env.as_contract(&s.registry.address, || {
+        let key = crate::types::DataKey::KeeperReputation(keeper);
+        assert!(s.env.storage().persistent().has(&key));
+    });
+}
