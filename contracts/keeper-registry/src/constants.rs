@@ -70,7 +70,13 @@ pub(crate) const KEEPER_BALANCE_BUMP_THRESHOLD: u32 = 50_000;
 ///   `execute_task` calls before crediting the keeper, and the
 ///   `VerificationFailed` error / `TaskVerificationFailed` event. See
 ///   `docs/VERIFIER_DESIGN.md`.
-pub const VERSION: u32 = 4;
+/// - `5` — keeper reputation tracking and optional claim eligibility floor:
+///   incremental updates on `execute_task` (success) and re-claim past
+///   lock windows (missed window penalty), read-only `keeper_reputation` view,
+///   the `("reputation", "update")` event, and the optional admin-configured
+///   `min_reputation` floor gating `claim_task` with `ReputationTooLow`. See
+///   `docs/REPUTATION_DESIGN.md`.
+pub const VERSION: u32 = 5;
 
 /// Maximum `calldata` length, in bytes. Sized to hold an encoded contract
 /// call — a target address, a function symbol, and a handful of scalar or
