@@ -20,6 +20,7 @@ mod perf;
 mod placeholders;
 mod property;
 mod register;
+mod reputation;
 mod resource_report;
 mod reward_split;
 mod ttl;

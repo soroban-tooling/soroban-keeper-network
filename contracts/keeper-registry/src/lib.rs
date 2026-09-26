@@ -50,6 +50,7 @@ mod constants;
 mod errors;
 mod events;
 mod internal;
+mod reputation;
 mod task;
 mod types;
 mod verifier;
@@ -58,6 +59,7 @@ mod views;
 pub use constants::*;
 pub use errors::KeeperError;
 pub use events::*;
+pub use reputation::ReputationRecord;
 pub use types::{BatchTaskParams, DataKey, Task, TaskStatus, TaskType};
 pub use verifier::{IKeeperVerifier, KeeperVerifierClient};
 

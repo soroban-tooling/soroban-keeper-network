@@ -16,6 +16,7 @@ use crate::constants::*;
 use crate::errors::KeeperError;
 use crate::events::*;
 use crate::internal::*;
+use crate::reputation::{record_missed_claim, record_success};
 use crate::types::{DataKey, Task, TaskStatus, TaskType};
 use crate::verifier::KeeperVerifierClient;
 use crate::{KeeperRegistry, KeeperRegistryArgs, KeeperRegistryClient};
@@ -216,18 +217,22 @@ impl KeeperRegistry {
             return Err(KeeperError::DeadlinePassed);
         }
 
-        match task.status {
-            TaskStatus::Pending => {}
+        let missed_claimer = match task.status {
+            TaskStatus::Pending => None,
             TaskStatus::Claimed => {
                 // Only allow a takeover once the current lock has expired.
                 if !lock_expired(&e, &task) {
                     return Err(KeeperError::LockPeriodActive);
                 }
+                task.claimer.clone()
             }
             _ => return Err(KeeperError::InvalidTaskStatus),
-        }
+        };
 
         bump_instance(&e);
+        if let Some(missed) = missed_claimer {
+            record_missed_claim(&e, &missed);
+        }
         task.status = TaskStatus::Claimed;
         task.claimer = Some(keeper.clone());
         task.claim_ledger = Some(e.ledger().sequence());
@@ -312,6 +317,7 @@ impl KeeperRegistry {
         let (keeper_net, fee) = split_reward(task.reward, fee_bps(&e))?;
         credit_keeper(&e, &keeper, keeper_net)?;
         accrue_fee(&e, fee)?;
+        record_success(&e, &keeper);
 
         task.status = TaskStatus::Executed;
         save_task(&e, task_id, &task);
