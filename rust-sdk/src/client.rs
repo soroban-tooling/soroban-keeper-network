@@ -47,6 +47,15 @@ impl<'a, S: TransactionSigner> KeeperClient<'a, S> {
         raw_client.get_tasks_range(&start_id, &limit)
     }
 
+    /// Retrieve a keeper's reputation score.
+    pub fn keeper_reputation(&self, keeper: &Address) -> u32 {
+        self.env.invoke_contract(
+            &self.contract_id,
+            &soroban_sdk::Symbol::new(self.env, "keeper_reputation"),
+            soroban_sdk::vec![self.env, keeper.to_val()],
+        )
+    }
+
     // ── Issue #334: Admin Entry Points ───────────────────────────────────────
 
     /// Initialize the contract with admin address, reward token, and fee basis points.
