@@ -323,6 +323,31 @@ describe("client.keeperBalance", () => {
   });
 });
 
+describe("client.keeperReputation", () => {
+  it("returns a u32 reputation score as a number", async () => {
+    const { client, rpc } = testClient({ results: { keeper_reputation: 95n } });
+
+    const reputation = await client.keeperReputation(KEEPER);
+
+    expect(reputation).toBe(95);
+    expect(typeof reputation).toBe("number");
+    expect(rpc.onlyCall.args).toEqual([KEEPER]);
+  });
+
+  it("returns 0 for an address with no tracked history", async () => {
+    const { client } = testClient({ results: { keeper_reputation: null } });
+
+    await expect(client.keeperReputation(KEEPER)).resolves.toBe(0);
+  });
+
+  it("rejects a malformed address locally", async () => {
+    const { client, rpc } = testClient();
+
+    await expect(client.keeperReputation("not-an-address")).rejects.toThrow(/must be a Stellar/);
+    expect(rpc.calls).toHaveLength(0);
+  });
+});
+
 describe("client.isClaimable", () => {
   it("reports a claimable task as true", async () => {
     const { client, rpc } = testClient({ results: { is_claimable: true } });
