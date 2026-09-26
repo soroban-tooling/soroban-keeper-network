@@ -34,6 +34,7 @@ pub enum EventType {
     FeesSwept,
     Initialized,
     Upgraded,
+    ReputationUpdated,
 }
 
 impl EventType {
@@ -58,6 +59,7 @@ impl EventType {
             Self::FeesSwept => ("sweep", "admin"),
             Self::Initialized => ("init", "admin"),
             Self::Upgraded => ("upgrade", "admin"),
+            Self::ReputationUpdated => ("update", "reputation"),
         }
     }
 
@@ -66,7 +68,7 @@ impl EventType {
     /// Returns `None` for a topic pair the contract does not emit, so an
     /// unrecognised event is skipped rather than mis-parsed as a known one.
     pub fn from_topics(verb: &str, noun: &str) -> Option<Self> {
-        const ALL: [EventType; 15] = [
+        const ALL: [EventType; 16] = [
             EventType::TaskRegistered,
             EventType::TaskClaimed,
             EventType::TaskExecuted,
@@ -82,6 +84,7 @@ impl EventType {
             EventType::FeesSwept,
             EventType::Initialized,
             EventType::Upgraded,
+            EventType::ReputationUpdated,
         ];
         ALL.into_iter().find(|e| e.topics() == (verb, noun))
     }
@@ -104,12 +107,13 @@ impl EventType {
             Self::FeesSwept => "fees_swept",
             Self::Initialized => "initialized",
             Self::Upgraded => "upgraded",
+            Self::ReputationUpdated => "reputation_updated",
         }
     }
 
     /// Parse the wire name produced by [`Self::as_str`].
     pub fn parse(s: &str) -> Option<Self> {
-        const ALL: [EventType; 15] = [
+        const ALL: [EventType; 16] = [
             EventType::TaskRegistered,
             EventType::TaskClaimed,
             EventType::TaskExecuted,
@@ -125,6 +129,7 @@ impl EventType {
             EventType::FeesSwept,
             EventType::Initialized,
             EventType::Upgraded,
+            EventType::ReputationUpdated,
         ];
         ALL.into_iter().find(|e| e.as_str() == s)
     }
@@ -215,6 +220,12 @@ pub enum EventPayload {
         /// Hex-encoded 32-byte wasm hash.
         new_wasm_hash: String,
     },
+    ReputationUpdated {
+        keeper: String,
+        action: String,
+        #[schema(value_type = String)]
+        score: I128,
+    },
 }
 
 impl EventPayload {
@@ -236,6 +247,7 @@ impl EventPayload {
             Self::FeesSwept { .. } => EventType::FeesSwept,
             Self::Initialized { .. } => EventType::Initialized,
             Self::Upgraded { .. } => EventType::Upgraded,
+            Self::ReputationUpdated { .. } => EventType::ReputationUpdated,
         }
     }
 
@@ -366,6 +378,7 @@ mod tests {
             "fees_swept",
             "initialized",
             "upgraded",
+            "reputation_updated",
         ] {
             let ty = EventType::parse(name).expect("known event name");
             let (verb, noun) = ty.topics();
