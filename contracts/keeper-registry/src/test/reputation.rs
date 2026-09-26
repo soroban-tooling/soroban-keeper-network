@@ -56,3 +56,24 @@ fn failed_or_rejected_actions_do_not_update_reputation() {
     assert_eq!(record.missed_claims, 0);
     assert_eq!(record.score_bps, 0);
 }
+
+#[test]
+fn keeper_reputation_returns_stored_record_and_zero_for_new_keeper() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    assert_eq!(
+        s.registry.keeper_reputation(&keeper),
+        crate::ReputationRecord::zero()
+    );
+
+    let task_id = register_default_task(&s);
+    s.registry.claim_task(&keeper, &task_id);
+    s.registry
+        .execute_task(&keeper, &task_id, &Bytes::from_slice(&s.env, b"proof"));
+
+    let before = s.registry.keeper_reputation(&keeper);
+    assert_eq!(before.successes, 1);
+    assert_eq!(before.missed_claims, 0);
+    assert_eq!(before.score_bps, 10_000);
+    assert_eq!(s.registry.keeper_reputation(&keeper), before);
+}

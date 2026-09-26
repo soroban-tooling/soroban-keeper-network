@@ -5,9 +5,10 @@
 //! tracked actions has a zero record. Counts are retained rather than
 //! overwritten so callers can judge the confidence behind the rate.
 
-use soroban_sdk::{contracttype, Address, Env};
+use soroban_sdk::{contractimpl, contracttype, Address, Env};
 
 use crate::constants::{KEEPER_BALANCE_BUMP_LEDGERS, KEEPER_BALANCE_BUMP_THRESHOLD};
+use crate::{KeeperRegistry, KeeperRegistryArgs, KeeperRegistryClient};
 
 /// Stored history for one keeper. `score_bps` is the rate at the time of the
 /// last action. The stored rate does not decay between actions.
@@ -81,4 +82,13 @@ pub(crate) fn stored_record(e: &Env, keeper: &Address) -> ReputationRecord {
         .persistent()
         .get(&ReputationKey::Keeper(keeper.clone()))
         .unwrap_or_else(ReputationRecord::zero)
+}
+
+#[contractimpl]
+impl KeeperRegistry {
+    /// Read-only: returns the stored reputation record, or a zero record if
+    /// this keeper has no tracked actions. This view never renews storage TTL.
+    pub fn keeper_reputation(e: Env, keeper: Address) -> ReputationRecord {
+        stored_record(&e, &keeper)
+    }
 }
