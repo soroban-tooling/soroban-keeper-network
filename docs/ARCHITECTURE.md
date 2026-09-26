@@ -179,6 +179,14 @@ Enforced by:
   if-branch; a failing or panicking verifier prevents state changes but does
   not revert the whole transaction. (I-8)
 
+### Treasury Invariants
+
+The treasury contract introduces its own constraints to ensure funds swept from the protocol are handled safely:
+
+- **T-1 — Conservation.** Distribution never creates or destroys value. (Property test verified, issue 0345).
+- **T-2 — Access-control (Recipients).** Only configured recipients ever receive a distribution.
+- **T-3 — Access-control (Trigger).** Only the admin or automated sweep path can trigger a distribution (issue 0338).
+
 The `test_multi_keeper_end_to_end_conserves_funds` and
 `test_split_reward_invariants` tests guard these invariants with fixed
 scenarios. `contracts/keeper-registry/src/invariants.rs` exposes one

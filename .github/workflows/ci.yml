@@ -119,17 +119,31 @@ jobs:
           key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-wasm-
 
-      - name: Build release WASM
+      - name: Build release WASM (keeper-registry)
         run: |
           cargo build --locked --release \
             --target wasm32-unknown-unknown \
             --package keeper-registry
 
-      - name: Upload WASM artifact
+      - name: Upload keeper-registry WASM artifact
         uses: actions/upload-artifact@v7
         with:
           name: keeper-registry-wasm
           path: target/wasm32-unknown-unknown/release/keeper_registry.wasm
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Build release WASM (treasury)
+        run: |
+          cargo build --locked --release \
+            --target wasm32-unknown-unknown \
+            --package treasury
+
+      - name: Upload treasury WASM artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: treasury-wasm
+          path: target/wasm32-unknown-unknown/release/treasury.wasm
           retention-days: 14
           if-no-files-found: error
 
