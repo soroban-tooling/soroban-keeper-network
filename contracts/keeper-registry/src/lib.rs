@@ -50,6 +50,7 @@ mod constants;
 mod errors;
 mod events;
 mod internal;
+mod reputation;
 mod task;
 mod types;
 mod verifier;
