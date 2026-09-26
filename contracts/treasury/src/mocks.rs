@@ -80,9 +80,7 @@ impl ReentrantToken {
         recipient: Address,
         amount: i128,
     ) {
-        env.storage()
-            .instance()
-            .set(&DataKey::Treasury, &treasury);
+        env.storage().instance().set(&DataKey::Treasury, &treasury);
         env.storage()
             .instance()
             .set(&DataKey::TriggerTo, &trigger_to);

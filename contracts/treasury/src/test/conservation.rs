@@ -41,8 +41,13 @@ use proptest::prelude::*;
 #[derive(Clone, Debug)]
 enum Step {
     Distribute(i128),
-    AddOrReweight { recipient_idx: usize, shares_bps: u32 },
-    Remove { recipient_idx: usize },
+    AddOrReweight {
+        recipient_idx: usize,
+        shares_bps: u32,
+    },
+    Remove {
+        recipient_idx: usize,
+    },
 }
 
 fn step_strategy() -> impl Strategy<Value = Step> {
