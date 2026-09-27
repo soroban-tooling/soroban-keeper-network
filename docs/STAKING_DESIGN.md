@@ -13,6 +13,7 @@ The staking work is intentionally narrow and conservative:
 - batch slash is not part of the shipped surface.
 
 This is the stable layer the reputation and governance epics can rely on.
+This document records the intended stable surface; it does not itself change contract behavior.
 
 ## 1. Original design questions from issue 0288
 
