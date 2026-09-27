@@ -37,6 +37,9 @@ static NEXT_SCHEMA_ID: AtomicU64 = AtomicU64::new(0);
 /// inside the session's `search_path` and torn down explicitly below.
 pub async fn test_client() -> Option<Client> {
     let url = std::env::var("INDEXER_TEST_DATABASE_URL").ok()?;
+    if url.trim().is_empty() {
+        return None;
+    }
 
     let (client, connection) = tokio_postgres::connect(&url, NoTls)
         .await
