@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 soroban-sdk = { workspace = true }
 thiserror = { workspace = true }
 anyhow = "1.0"
-rand = "0.8"
+rand = "0.10"
 keeper-registry = { path = "../contracts/keeper-registry" }
 
 [dev-dependencies]
