@@ -38,6 +38,8 @@ pub enum RankBy {
     Executions,
     /// Total net reward earned, most first.
     Reward,
+    /// Reputation score, highest first.
+    Reputation,
 }
 
 impl RankBy {
@@ -46,6 +48,7 @@ impl RankBy {
         match s {
             "executions" => Some(Self::Executions),
             "reward" => Some(Self::Reward),
+            "reputation" => Some(Self::Reputation),
             _ => None,
         }
     }
@@ -62,6 +65,9 @@ pub struct LeaderboardEntry {
     /// Net reward earned within the window.
     #[schema(value_type = String)]
     pub total_reward: I128,
+    /// Current reputation score.
+    #[schema(value_type = String)]
+    pub reputation: I128,
 }
 
 /// A ranked leaderboard.
@@ -79,6 +85,7 @@ struct Totals {
     keeper: String,
     executions: u32,
     total_reward: i128,
+    reputation: i128,
 }
 
 /// Build a leaderboard over the executions in the store.
@@ -130,7 +137,34 @@ pub async fn leaderboard(
                 keeper,
                 executions: 1,
                 total_reward: net_reward.0,
+                reputation: 0,
             }),
+        }
+    }
+
+    let rep_rows = sqlx::query(
+        "SELECT keeper_address, payload
+         FROM events
+         WHERE event_type = 'reputation_updated'
+           AND keeper_address IS NOT NULL
+         ORDER BY ledger ASC, tx_index ASC, event_index ASC"
+    )
+    .fetch_all(store.pool())
+    .await
+    .context("reading reputation for the leaderboard")?;
+
+    let mut reputations = std::collections::HashMap::new();
+    for row in rep_rows {
+        let keeper: String = row.get("keeper_address");
+        let encoded: String = row.get("payload");
+        if let Ok(EventPayload::ReputationUpdated { score, .. }) = serde_json::from_str(&encoded) {
+            reputations.insert(keeper, score.0);
+        }
+    }
+
+    for t in &mut totals {
+        if let Some(&rep) = reputations.get(&t.keeper) {
+            t.reputation = rep;
         }
     }
 
@@ -150,14 +184,15 @@ fn rank(mut totals: Vec<Totals>, rank_by: RankBy, limit: u32) -> Vec<Leaderboard
         let primary = match rank_by {
             RankBy::Executions => b.executions.cmp(&a.executions),
             RankBy::Reward => b.total_reward.cmp(&a.total_reward),
+            RankBy::Reputation => b.reputation.cmp(&a.reputation),
         };
         primary
             .then_with(|| match rank_by {
                 // The other metric breaks a tie on the first.
                 RankBy::Executions => b.total_reward.cmp(&a.total_reward),
                 RankBy::Reward => b.executions.cmp(&a.executions),
+                RankBy::Reputation => b.executions.cmp(&a.executions),
             })
-            // Addresses are unique, so this always resolves.
             .then_with(|| a.keeper.cmp(&b.keeper))
     });
 
@@ -170,6 +205,7 @@ fn rank(mut totals: Vec<Totals>, rank_by: RankBy, limit: u32) -> Vec<Leaderboard
             keeper: t.keeper,
             executions: t.executions,
             total_reward: I128(t.total_reward),
+            reputation: I128(t.reputation),
         })
         .collect()
 }
@@ -185,6 +221,7 @@ mod tests {
                 keeper: (*keeper).to_string(),
                 executions: *executions,
                 total_reward: *total_reward,
+                reputation: 0,
             })
             .collect()
     }
