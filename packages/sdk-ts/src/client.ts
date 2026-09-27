@@ -238,6 +238,11 @@ export class KeeperRegistryClient implements ContractCaller {
     return views.keeperBalance(this, keeper);
   }
 
+  /** See {@link views.keeperReputation}. */
+  keeperReputation(keeper: string): Promise<number> {
+    return views.keeperReputation(this, keeper);
+  }
+
   /** See {@link views.isClaimable}. */
   isClaimable(taskId: IntegerInput): Promise<boolean> {
     return views.isClaimable(this, taskId);
