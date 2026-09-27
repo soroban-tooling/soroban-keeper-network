@@ -23,6 +23,7 @@ mod register;
 mod reputation;
 mod resource_report;
 mod reward_split;
+mod staking;
 mod ttl;
 mod verifier;
 mod withdraw;
