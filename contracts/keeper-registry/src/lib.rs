@@ -58,6 +58,7 @@ mod errors;
 mod events;
 mod internal;
 mod staking;
+mod reputation;
 mod task;
 mod types;
 mod verifier;
@@ -67,6 +68,8 @@ pub use constants::*;
 pub use errors::KeeperError;
 pub use events::*;
 pub use types::{BatchTaskParams, DataKey, SlashRecord, Task, TaskStatus, TaskType, UnbondRequest};
+pub use reputation::ReputationRecord;
+pub use types::{BatchTaskParams, DataKey, Task, TaskStatus, TaskType};
 pub use verifier::{IKeeperVerifier, KeeperVerifierClient};
 
 // Re-exported for the test and fuzz harnesses, which assert on the reward

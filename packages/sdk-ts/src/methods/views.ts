@@ -282,6 +282,18 @@ export async function keeperBalance(caller: ContractCaller, keeper: string): Pro
 }
 
 /**
+ * A keeper's on-chain reputation.
+ *
+ * An address with no tracked history defaults to 0 rather than erroring.
+ */
+export async function keeperReputation(caller: ContractCaller, keeper: string): Promise<number> {
+  const result = await caller.read<number | bigint | null | undefined>("keeper_reputation", [
+    addressArg(keeper, "keeper"),
+  ]);
+  return result == null ? 0 : Number(result);
+}
+
+/**
  * Whether a task can be claimed right now.
  *
  * Unlike {@link getTask}, a nonexistent id resolves to `false` rather than
