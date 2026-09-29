@@ -8,6 +8,7 @@ use soroban_sdk::{contractimpl, Address, Env};
 use crate::constants::*;
 use crate::errors::KeeperError;
 use crate::internal::*;
+use crate::reputation::reputation_floor_bps;
 use crate::types::{DataKey, Task, TaskStatus};
 use crate::{KeeperRegistry, KeeperRegistryArgs, KeeperRegistryClient};
 
@@ -98,6 +99,11 @@ impl KeeperRegistry {
     pub fn min_reward(e: Env) -> i128 {
         min_reward_floor(&e)
     }
+    /// Minimum stored reputation score, in basis points, required to claim a
+    /// task (0 if unset, which disables the check).
+    pub fn reputation_floor(e: Env) -> u32 {
+        reputation_floor_bps(&e)
+    }
     /// Maximum number of entries `batch_register_tasks` accepts. See
     /// [`MAX_BATCH_SIZE`] — exposed so integrators can chunk their worklists
     /// against the deployed contract's real cap rather than a hardcoded guess.
@@ -107,5 +113,43 @@ impl KeeperRegistry {
     /// Contract logic version. See [`VERSION`].
     pub fn version(_e: Env) -> u32 {
         VERSION
+    }
+    /// Read-only: a keeper's currently-bonded stake (E06,
+    /// docs/STAKING_DESIGN.md). Excludes anything mid-unbond — see
+    /// [`KeeperRegistry::pending_unbond`]. Mirrors `keeper_balance`'s shape
+    /// and TTL policy (not renewed on read).
+    pub fn keeper_stake(e: Env, keeper: Address) -> i128 {
+        e.storage()
+            .persistent()
+            .get(&DataKey::KeeperStake(keeper))
+            .unwrap_or(0i128)
+    }
+    /// Read-only: a keeper's pending unbond request, if any.
+    pub fn pending_unbond(e: Env, keeper: Address) -> Option<crate::types::UnbondRequest> {
+        e.storage()
+            .persistent()
+            .get(&DataKey::UnbondRequest(keeper))
+    }
+    /// Minimum bonded stake `claim_task` requires (0 if unset — no
+    /// requirement). See docs/STAKING_DESIGN.md §6.
+    pub fn min_stake(e: Env) -> i128 {
+        min_stake_floor(&e)
+    }
+    /// Read-only: a specific slash record by id, if it still exists (a
+    /// resolved appeal removes its record — see `resolve_slash_appeal`).
+    pub fn get_slash(e: Env, slash_id: u64) -> Option<crate::types::SlashRecord> {
+        e.storage().persistent().get(&DataKey::Slash(slash_id))
+    }
+    /// Ledgers an execute_task credit is held before it becomes
+    /// withdrawable (0 if unset — disabled). See docs/STAKING_DESIGN.md §4.2.
+    pub fn dispute_window(e: Env) -> u32 {
+        dispute_window_ledgers(&e)
+    }
+    /// Read-only: a keeper's not-yet-finalized execute_task credits.
+    pub fn pending_reward(
+        e: Env,
+        keeper: Address,
+    ) -> soroban_sdk::Vec<crate::types::PendingCredit> {
+        pending_credits_of(&e, &keeper)
     }
 }

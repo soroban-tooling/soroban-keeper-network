@@ -16,6 +16,8 @@ use crate::constants::*;
 use crate::errors::KeeperError;
 use crate::events::*;
 use crate::internal::*;
+use crate::reputation::{record_missed_claim, record_success};
+use crate::reputation::{record_missed_claim, record_success, require_reputation_floor};
 use crate::types::{DataKey, Task, TaskStatus, TaskType};
 use crate::verifier::KeeperVerifierClient;
 use crate::{KeeperRegistry, KeeperRegistryArgs, KeeperRegistryClient};
@@ -205,10 +207,25 @@ impl KeeperRegistry {
     // claimed by anyone; a Claimed task may be re-claimed only after its
     // previous claimer's lock window has elapsed (see `lock_expired`), which
     // stops a keeper from squatting on a task it never intends to execute.
+    //
+    // If the admin has set a reputation floor (`set_reputation_floor`), a
+    // keeper whose stored score is below it is rejected with
+    // `ReputationBelowFloor`. The check runs after the task-state checks, so
+    // that error always means "claimable, but not by you", and before any
+    // write, so a rejected claim records nothing against the previous claimer.
 
     pub fn claim_task(e: Env, keeper: Address, task_id: u64) -> Result<(), KeeperError> {
         require_not_paused(&e)?;
         keeper.require_auth();
+
+        // E06 (docs/STAKING_DESIGN.md §6): opt-in minimum stake to claim.
+        // Defaults to 0 (no requirement) until an admin configures
+        // otherwise via `set_min_stake`, mirroring `min_reward`'s posture
+        // on the task side.
+        let min_stake = min_stake_floor(&e);
+        if min_stake > 0 && keeper_stake_of(&e, &keeper) < min_stake {
+            return Err(KeeperError::MinStakeNotMet);
+        }
 
         let mut task = load_task(&e, task_id)?;
 
@@ -216,18 +233,23 @@ impl KeeperRegistry {
             return Err(KeeperError::DeadlinePassed);
         }
 
-        match task.status {
-            TaskStatus::Pending => {}
+        let missed_claimer = match task.status {
+            TaskStatus::Pending => None,
             TaskStatus::Claimed => {
                 // Only allow a takeover once the current lock has expired.
                 if !lock_expired(&e, &task) {
                     return Err(KeeperError::LockPeriodActive);
                 }
+                task.claimer.clone()
             }
             _ => return Err(KeeperError::InvalidTaskStatus),
-        }
+        };
+        require_reputation_floor(&e, &keeper)?;
 
         bump_instance(&e);
+        if let Some(missed) = missed_claimer {
+            record_missed_claim(&e, &missed);
+        }
         task.status = TaskStatus::Claimed;
         task.claimer = Some(keeper.clone());
         task.claim_ledger = Some(e.ledger().sequence());
@@ -310,8 +332,21 @@ impl KeeperRegistry {
 
         bump_instance(&e);
         let (keeper_net, fee) = split_reward(task.reward, fee_bps(&e))?;
-        credit_keeper(&e, &keeper, keeper_net)?;
+
+        // E06 execution dispute window (docs/STAKING_DESIGN.md §4.2): when
+        // disabled (the default), this is exactly the unmodified wave-1 MVP
+        // path — credit_keeper writes directly into the immediately-
+        // withdrawable KeeperReward balance. When enabled, the credit is
+        // held as a PendingCredit instead; withdraw_rewards finalizes it
+        // into KeeperReward once its unlock_ledger passes undisputed.
+        let window = dispute_window_ledgers(&e);
+        if window > 0 {
+            add_pending_credit(&e, &keeper, task_id, keeper_net, window);
+        } else {
+            credit_keeper(&e, &keeper, keeper_net)?;
+        }
         accrue_fee(&e, fee)?;
+        record_success(&e, &keeper);
 
         task.status = TaskStatus::Executed;
         save_task(&e, task_id, &task);
@@ -395,9 +430,21 @@ impl KeeperRegistry {
     // interactions: the stored balance is zeroed BEFORE the token transfer, so
     // even a malicious reward token that re-enters cannot double-spend the
     // balance. Returns the amount withdrawn.
+    //
+    // E06 (docs/STAKING_DESIGN.md §4.2): first finalizes any of the keeper's
+    // execute_task credits whose dispute window has elapsed undisputed —
+    // exactly a no-op when the dispute window is disabled (the default),
+    // since there are never any pending credits to finalize in that case.
+    // Then proceeds against KeeperReward exactly as before this feature
+    // existed.
 
     pub fn withdraw_rewards(e: Env, keeper: Address) -> Result<i128, KeeperError> {
         keeper.require_auth();
+
+        let finalized = finalize_rewards(&e, &keeper)?;
+        for (task_id, amount) in finalized.iter() {
+            emit_rewards_finalized(&e, &keeper, task_id, amount);
+        }
 
         let key = DataKey::KeeperReward(keeper.clone());
         let balance: i128 = e.storage().persistent().get(&key).unwrap_or(0);

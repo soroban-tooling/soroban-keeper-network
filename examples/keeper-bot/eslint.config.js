@@ -4,7 +4,7 @@ module.exports = [
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "commonjs",
-      globals: { require: "readonly", module: "writable", process: "readonly", console: "readonly", Buffer: "readonly", setTimeout: "readonly", setInterval: "readonly", clearInterval: "readonly" },
+      globals: { require: "readonly", module: "writable", process: "readonly", console: "readonly", Buffer: "readonly", setTimeout: "readonly", clearTimeout: "readonly", setInterval: "readonly", clearInterval: "readonly", AbortController: "readonly" },
     },
     rules: {
       // Keep the ruleset small and non-negotiable rather than stylistic. This

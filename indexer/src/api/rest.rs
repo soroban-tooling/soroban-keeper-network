@@ -15,6 +15,7 @@ use super::types::{
     AdminConfigResponse, ApiError, EventFeedResponse, HealthResponse, TaskDetail, TaskListResponse,
 };
 use super::ApiState;
+use crate::address::normalize_address;
 use crate::cache::LeaderboardKey;
 use crate::events::EventType;
 use crate::queries::leaderboard::{leaderboard, Leaderboard, RankBy};
@@ -121,6 +122,11 @@ pub async fn tasks_by_owner(
     State(state): State<ApiState>,
     Path(owner): Path<String>,
 ) -> Result<Json<TaskListResponse>, Failure> {
+    // Normalized here (not just inside `task_ids_by_owner`) so the response's
+    // own `address` field echoes the canonical form too, e.g. a muxed
+    // address the caller passed resolves to the underlying account it
+    // actually queried (issue 0364).
+    let owner = normalize_address(&owner).unwrap_or(owner);
     let store = state.ingestor.store();
     let ids = store.task_ids_by_owner(&owner).await.map_err(internal)?;
 
@@ -149,6 +155,9 @@ pub async fn tasks_by_keeper(
     State(state): State<ApiState>,
     Path(keeper): Path<String>,
 ) -> Result<Json<TaskListResponse>, Failure> {
+    // See tasks_by_owner's comment: normalized here too so the response's
+    // `address` field echoes the canonical form (issue 0364).
+    let keeper = normalize_address(&keeper).unwrap_or(keeper);
     let store = state.ingestor.store();
     let ids = store.task_ids_by_keeper(&keeper).await.map_err(internal)?;
 

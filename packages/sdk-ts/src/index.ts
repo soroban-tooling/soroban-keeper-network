@@ -91,12 +91,14 @@ export {
   tryWithdrawRewards,
   withdrawRewards,
   type WithdrawRewardsParams,
+  type WithdrawRewardsOutcome,
 } from "./methods/withdrawRewards.js";
 export { extendDeadline, type ExtendDeadlineParams } from "./methods/extendDeadline.js";
 export {
   executeTask,
   toProofBytes,
   type ExecuteTaskParams,
+  type ExecuteTaskOutcome,
   type ProofInput,
 } from "./methods/executeTask.js";
 export { registerTask, type RegisterTaskParams } from "./methods/registerTask.js";
@@ -139,3 +141,41 @@ export {
 export type { NetworkName, NetworkPreset } from "./network.js";
 export { withRetry } from "./retry.js";
 export type { RetryOptions } from "./retry.js";
+export {
+  evaluateProfitability,
+  logProfitabilityDecision,
+  DEFAULT_PROFITABILITY_OPTIONS,
+  type OperationCostEstimate,
+  type ProfitabilityOptions,
+  type ProfitabilityResult,
+} from "./profitability.js";
+export {
+  LogEventType,
+  consoleLogger,
+  noOpLogger,
+  logError,
+  logInfo,
+  logOperationOutcome,
+  logProfitabilityEvaluation,
+  logSimulationFailed,
+  logSimulationStarted,
+  logSimulationSucceeded,
+  type ErrorLogEvent,
+  type InfoLogEvent,
+  type LogEvent,
+  type Logger,
+  type OperationOutcomeLogEvent,
+  type ProfitabilityLogEvent,
+  type SimulationLogEvent,
+} from "./logging.js";
+
+/**
+ * The treasury contract's typed client (`contracts/treasury`), namespaced
+ * rather than flattened into this module's own exports: both clients export
+ * a `keypairSigner`, an `IntegerInput`, and so on, and the two contracts'
+ * error enums are deliberately distinct types. Also available as its own
+ * subpath, `@soroban-keeper-network/sdk/treasury`, for a caller that only
+ * ever talks to the treasury and would rather not pull in the registry
+ * client's types at all.
+ */
+export * as treasury from "./treasury/index.js";

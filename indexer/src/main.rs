@@ -4,8 +4,13 @@
 //! so a misconfigured deployment fails immediately with the full list of
 //! problems rather than part-way through its first poll.
 
+use std::future::Future;
+use std::pin::Pin;
+use std::time::Duration;
+
 use anyhow::{Context, Result};
-use keeper_indexer::{Config, Ingestor, Store};
+use keeper_indexer::rpc::HttpClient;
+use keeper_indexer::{Backfiller, Config, Ingestor, Store};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -35,17 +40,64 @@ async fn main() -> Result<()> {
     let store = Store::connect(&config.database_url)
         .await
         .context("opening the event store")?;
+    // Kept for the API/WebSocket wiring (a later commit): `Ingestor` is
+    // `Clone` over a shared broadcast channel, so the backfiller below gets
+    // its own handle rather than the only one.
     let ingestor = Ingestor::new(store);
 
-    tracing::info!("store ready; ingestion and API wiring land with the service loop");
+    let source = HttpClient::new(&config.rpc_url);
+    let backfiller = Backfiller::new(
+        source,
+        ingestor.clone(),
+        config.contract_id.clone(),
+        config.backfill_page_size,
+    );
 
-    // Keep the process alive until interrupted; the ingest loop and API server
-    // are wired in by the backfill and API commits.
-    let _ = ingestor;
-    tokio::signal::ctrl_c()
+    tracing::info!("store ready; ingesting");
+
+    backfiller
+        .run_until_shutdown(
+            config.start_ledger,
+            Duration::from_secs(config.poll_interval_secs),
+            Duration::from_secs(config.shutdown_drain_secs),
+            shutdown_signal(),
+        )
         .await
-        .context("waiting for shutdown signal")?;
-    tracing::info!("shutting down");
+        .context("ingestion loop failed")?;
+
+    tracing::info!("shut down cleanly");
 
     Ok(())
+}
+
+/// Resolves on SIGINT (ctrl-c; every platform) or SIGTERM (unix only -- what
+/// a container orchestrator sends on a normal stop or restart).
+fn shutdown_signal() -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    Box::pin(async {
+        let ctrl_c = async {
+            let _ = tokio::signal::ctrl_c().await;
+        };
+
+        #[cfg(unix)]
+        let terminate = async {
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(mut sigterm) => {
+                    sigterm.recv().await;
+                }
+                Err(err) => {
+                    // Fall back to SIGINT-only rather than crashing the
+                    // process over a handler that could not be installed.
+                    tracing::warn!(%err, "could not install a SIGTERM handler");
+                    std::future::pending::<()>().await;
+                }
+            }
+        };
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+
+        tokio::select! {
+            () = ctrl_c => tracing::info!("received SIGINT"),
+            () = terminate => tracing::info!("received SIGTERM"),
+        }
+    })
 }

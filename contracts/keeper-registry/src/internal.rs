@@ -4,11 +4,15 @@
 //! entry-point modules (`task`, `batch`, `admin`, `views`) can share one
 //! implementation of each rule rather than each keeping its own copy.
 
-use soroban_sdk::{token, Address, Env};
+use soroban_sdk::{token, Address, Env, Vec};
 
 use crate::constants::*;
 use crate::errors::KeeperError;
-use crate::types::{DataKey, Task};
+use crate::types::{DataKey, SlashHistory, Task};
+use crate::types::{DataKey, PendingCredit, Task};
+
+// ─── E06 — Keeper Staking & Slashing ────────────────────────────────────
+// See `docs/STAKING_DESIGN.md`.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
@@ -36,6 +40,22 @@ pub(crate) fn require_not_paused(e: &Env) -> Result<(), KeeperError> {
         Err(KeeperError::ContractPaused)
     } else {
         Ok(())
+    }
+}
+
+/// Whether `initialize` has ever been called, checked against the same
+/// `DataKey::Admin` presence `require_admin` already uses as the
+/// initialized/not-initialized signal. Entry points that don't otherwise
+/// touch a key only `initialize` sets (unlike `register_task`, which gets
+/// this for free via `reward_token`'s own `NotInitialized` check) must call
+/// this explicitly, and before any storage mutation — an uninitialized
+/// registry must fail with no side effects, not partially write state and
+/// then fail on a later step.
+pub(crate) fn require_initialized(e: &Env) -> Result<(), KeeperError> {
+    if e.storage().instance().has(&DataKey::Admin) {
+        Ok(())
+    } else {
+        Err(KeeperError::NotInitialized)
     }
 }
 
@@ -197,6 +217,85 @@ pub(crate) fn credit_keeper(e: &Env, keeper: &Address, amount: i128) -> Result<(
     Ok(())
 }
 
+/// Reads a keeper's current bonded stake (0 if never deposited).
+///
+/// Named `read_keeper_stake` (not `keeper_stake`) to avoid colliding with
+/// the `#[contractimpl]` entry point of the same name in `staking.rs` — the
+/// two are in scope together via `use crate::internal::*`, and Rust would
+/// otherwise resolve calls inside that entry point to itself.
+///
+/// TTL note: mirrors `keeper_balance`'s policy — this is a read used by both
+/// state-mutating entry points and views, so it deliberately never renews
+/// the entry's TTL itself. Callers that write the stake value renew TTL as
+/// part of that write (see `write_keeper_stake`).
+pub(crate) fn read_keeper_stake(e: &Env, keeper: &Address) -> i128 {
+    e.storage()
+        .persistent()
+        .get(&DataKey::KeeperStake(keeper.clone()))
+        .unwrap_or(0)
+}
+
+/// Overwrites a keeper's bonded stake and renews the entry's TTL. Shared by
+/// every staking entry point that changes the stored amount
+/// (`stake_deposit`, `initiate_unbond`, `slash`), so the TTL-renewal policy
+/// lives in one place, the same reasoning `credit_keeper` documents for
+/// `KeeperReward`.
+pub(crate) fn write_keeper_stake(e: &Env, keeper: &Address, amount: i128) {
+    let key = DataKey::KeeperStake(keeper.clone());
+    e.storage().persistent().set(&key, &amount);
+    e.storage().persistent().extend_ttl(
+        &key,
+        KEEPER_STAKE_BUMP_THRESHOLD,
+        KEEPER_STAKE_BUMP_LEDGERS,
+    );
+}
+
+/// Reads a keeper's aggregate slash history (zero/zero if never slashed).
+/// See `read_keeper_stake`'s doc comment for why this is not named
+/// `slash_history` (avoiding a collision with the `#[contractimpl]` entry
+/// point of that name in `staking.rs`).
+pub(crate) fn read_slash_history(e: &Env, keeper: &Address) -> SlashHistory {
+    e.storage()
+        .persistent()
+        .get(&DataKey::SlashHistory(keeper.clone()))
+        .unwrap_or(SlashHistory {
+            count: 0,
+            total_slashed: 0,
+        })
+}
+
+/// Increments a keeper's slash count and total-slashed figure by one
+/// incident of `amount`, renewing the entry's TTL (#425). Called only from
+/// `slash`, after its own amount/incident checks already passed, so the
+/// `checked_add`s here are defensive rather than expected to ever trip in
+/// practice (a keeper's total_slashed can never exceed what it could ever
+/// have staked, which is itself bounded by the reward token's own supply).
+pub(crate) fn write_slash_history(
+    e: &Env,
+    keeper: &Address,
+    amount: i128,
+) -> Result<(), KeeperError> {
+    let current = read_slash_history(e, keeper);
+    let updated = SlashHistory {
+        count: current
+            .count
+            .checked_add(1)
+            .ok_or(KeeperError::ArithmeticOverflow)?,
+        total_slashed: current
+            .total_slashed
+            .checked_add(amount)
+            .ok_or(KeeperError::ArithmeticOverflow)?,
+    };
+    let key = DataKey::SlashHistory(keeper.clone());
+    e.storage().persistent().set(&key, &updated);
+    e.storage().persistent().extend_ttl(
+        &key,
+        KEEPER_STAKE_BUMP_THRESHOLD,
+        KEEPER_STAKE_BUMP_LEDGERS,
+    );
+    Ok(())
+}
+
 /// Adds `amount` to the swept-able protocol fee accumulator (instance storage).
 pub(crate) fn accrue_fee(e: &Env, amount: i128) -> Result<(), KeeperError> {
     if amount == 0 {
@@ -277,4 +376,129 @@ pub(crate) fn lock_expired(e: &Env, task: &Task) -> bool {
         // reached, which is the safe default.
         None => true,
     }
+}
+
+// ─── E06 — Staking & Slashing (docs/STAKING_DESIGN.md) ─────────────────
+
+/// Reads a keeper's currently-bonded stake (0 if it has never staked).
+pub(crate) fn keeper_stake_of(e: &Env, keeper: &Address) -> i128 {
+    e.storage()
+        .persistent()
+        .get(&DataKey::KeeperStake(keeper.clone()))
+        .unwrap_or(0)
+}
+
+/// Reads the configured minimum stake `claim_task` enforces (0 if unset —
+/// no requirement, mirroring `min_reward_floor`'s default).
+pub(crate) fn min_stake_floor(e: &Env) -> i128 {
+    e.storage().instance().get(&DataKey::MinStake).unwrap_or(0)
+}
+
+/// Allocates the next `slash_id` and advances the counter, mirroring
+/// `next_task_id`'s pattern.
+pub(crate) fn next_slash_id(e: &Env) -> u64 {
+    let id: u64 = e
+        .storage()
+        .instance()
+        .get(&DataKey::SlashCounter)
+        .unwrap_or(0u64);
+    // Unreachable in practice, for the same reason `next_task_id` treats
+    // exhausting a u64 counter as unreachable.
+    let next = id.checked_add(1).expect("slash id counter exhausted");
+    e.storage().instance().set(&DataKey::SlashCounter, &next);
+    next
+}
+
+// ─── E06 — Execution dispute window (docs/STAKING_DESIGN.md §4.2) ──────
+
+/// Reads the configured execution-dispute hold (0 if unset — disabled,
+/// the unmodified wave-1 MVP behavior where `execute_task` credits are
+/// immediately withdrawable).
+pub(crate) fn dispute_window_ledgers(e: &Env) -> u32 {
+    e.storage()
+        .instance()
+        .get(&DataKey::DisputeWindowLedgers)
+        .unwrap_or(0)
+}
+
+pub(crate) fn pending_credits_of(e: &Env, keeper: &Address) -> Vec<PendingCredit> {
+    e.storage()
+        .persistent()
+        .get(&DataKey::PendingReward(keeper.clone()))
+        .unwrap_or_else(|| Vec::new(e))
+}
+
+fn save_pending_credits(e: &Env, keeper: &Address, credits: &Vec<PendingCredit>) {
+    let key = DataKey::PendingReward(keeper.clone());
+    if credits.is_empty() {
+        e.storage().persistent().remove(&key);
+        return;
+    }
+    e.storage().persistent().set(&key, credits);
+    e.storage().persistent().extend_ttl(
+        &key,
+        KEEPER_BALANCE_BUMP_THRESHOLD,
+        KEEPER_BALANCE_BUMP_LEDGERS,
+    );
+}
+
+/// Appends a new `PendingCredit` for `keeper`. Called from `execute_task`
+/// only when the dispute window is enabled (`dispute_window_ledgers > 0`);
+/// when it is `0`, `execute_task` credits `KeeperReward` directly instead,
+/// exactly as before this feature existed.
+pub(crate) fn add_pending_credit(
+    e: &Env,
+    keeper: &Address,
+    task_id: u64,
+    net_reward: i128,
+    window_ledgers: u32,
+) {
+    let mut credits = pending_credits_of(e, keeper);
+    credits.push_back(PendingCredit {
+        task_id,
+        net_reward,
+        unlock_ledger: e.ledger().sequence().saturating_add(window_ledgers),
+        disputed: false,
+    });
+    save_pending_credits(e, keeper, &credits);
+}
+
+/// Moves every one of `keeper`'s pending credits whose `unlock_ledger` has
+/// passed and that was never disputed into the ordinary `KeeperReward`
+/// balance via `credit_keeper` (the same helper `execute_task` already
+/// uses for the window-disabled path), removing each from the pending
+/// list as it finalizes. Disputed credits are left in place untouched —
+/// `resolve_execution_dispute` is what eventually removes or un-disputes
+/// them. Called from `withdraw_rewards` before it reads `KeeperReward`, so
+/// a withdrawal always sees the most up-to-date finalized balance.
+///
+/// Returns the finalized `(task_id, amount)` pairs, so the caller can emit
+/// one `RewardsFinalized` event per credit.
+pub(crate) fn finalize_rewards(
+    e: &Env,
+    keeper: &Address,
+) -> Result<soroban_sdk::Vec<(u64, i128)>, KeeperError> {
+    let credits = pending_credits_of(e, keeper);
+    if credits.is_empty() {
+        return Ok(Vec::new(e));
+    }
+
+    let now = e.ledger().sequence();
+    let mut remaining: Vec<PendingCredit> = Vec::new(e);
+    let mut finalized: Vec<(u64, i128)> = Vec::new(e);
+
+    for credit in credits.iter() {
+        if !credit.disputed && now >= credit.unlock_ledger {
+            credit_keeper(e, keeper, credit.net_reward)?;
+            finalized.push_back((credit.task_id, credit.net_reward));
+        } else {
+            remaining.push_back(credit.clone());
+        }
+    }
+
+    if !finalized.is_empty() {
+        save_pending_credits(e, keeper, &remaining);
+    }
+
+    Ok(finalized)
 }

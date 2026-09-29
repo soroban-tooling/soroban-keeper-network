@@ -39,6 +39,9 @@ pub struct Config {
     /// Extra requests a client may burst above `rate_limit_per_second`
     /// before being throttled, refilling at that same per-second rate.
     pub rate_limit_burst: u32,
+    /// Maximum seconds a SIGINT/SIGTERM shutdown waits for an in-flight
+    /// ingestion pass to finish and checkpoint before exiting anyway.
+    pub shutdown_drain_secs: u64,
 }
 
 /// A configuration value that is missing or unusable.
@@ -78,6 +81,8 @@ const DEFAULT_BIND_ADDRESS: &str = "127.0.0.1:8080";
 const DEFAULT_RATE_LIMIT_PER_SECOND: u32 = 20;
 /// Default burst allowance above the sustained rate.
 const DEFAULT_RATE_LIMIT_BURST: u32 = 40;
+/// Default maximum seconds a shutdown waits for an in-flight pass to drain.
+const DEFAULT_SHUTDOWN_DRAIN_SECS: u64 = 30;
 
 impl Config {
     /// Read and validate configuration from the process environment.
@@ -184,6 +189,13 @@ impl Config {
             problems.push("INDEXER_RATE_LIMIT_PER_SECOND must be greater than zero".to_string());
         }
 
+        let shutdown_drain_secs = optional_parsed(
+            &get,
+            "INDEXER_SHUTDOWN_DRAIN_SECS",
+            DEFAULT_SHUTDOWN_DRAIN_SECS,
+            &mut problems,
+        );
+
         if problems.is_empty() {
             Ok(Self {
                 rpc_url,
@@ -196,6 +208,7 @@ impl Config {
                 cache_ttl_secs,
                 rate_limit_per_second,
                 rate_limit_burst,
+                shutdown_drain_secs,
             })
         } else {
             Err(ConfigError { problems })
@@ -260,6 +273,7 @@ mod tests {
         assert_eq!(config.cache_ttl_secs, crate::cache::DEFAULT_TTL_SECS);
         assert_eq!(config.rate_limit_per_second, DEFAULT_RATE_LIMIT_PER_SECOND);
         assert_eq!(config.rate_limit_burst, DEFAULT_RATE_LIMIT_BURST);
+        assert_eq!(config.shutdown_drain_secs, DEFAULT_SHUTDOWN_DRAIN_SECS);
     }
 
     #[test]

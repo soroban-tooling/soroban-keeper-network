@@ -7,6 +7,8 @@
 //! parsing path means the two cannot drift as the event set evolves.
 
 use anyhow::{Context, Result};
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use crate::ingest::{IngestOutcome, Ingestor};
@@ -169,22 +171,69 @@ impl<S: EventSource> Backfiller<S> {
         Ok(report)
     }
 
-    /// Backfill to the tip, then poll for new ledgers indefinitely.
+    /// Backfill to the tip, then poll for new ledgers until `shutdown`
+    /// resolves.
     ///
     /// The steady-state loop is the same walk with a delay between passes; it
     /// re-enters `run_to_tip`, so no second code path exists to drift.
-    pub async fn run_forever(&self, configured_start: u32, poll_interval: Duration) -> Result<()> {
+    ///
+    /// A signal is only acted on *between* passes or pages, never mid-write:
+    /// `shutdown` is raced against the in-flight pass, but when `shutdown`
+    /// wins that race the pass is not dropped -- it keeps running, bounded by
+    /// `max_drain`, so a page already fetched still gets ingested and
+    /// checkpointed rather than left half-applied. If `max_drain` elapses
+    /// first, this returns anyway rather than hanging on a stuck cycle; the
+    /// next start resumes from the last checkpoint, which is safe because
+    /// `ingest_batch` is idempotent (issue 0230).
+    pub async fn run_until_shutdown(
+        &self,
+        configured_start: u32,
+        poll_interval: Duration,
+        max_drain: Duration,
+        mut shutdown: Pin<Box<dyn Future<Output = ()> + Send>>,
+    ) -> Result<()> {
         loop {
-            let report = self.run_to_tip(configured_start).await?;
-            if report.stored > 0 {
-                tracing::info!(
-                    stored = report.stored,
-                    duplicates = report.duplicates,
-                    last_ledger = report.last_ledger,
-                    "ingested events"
-                );
+            let pass = self.run_to_tip(configured_start);
+            tokio::pin!(pass);
+
+            tokio::select! {
+                biased;
+                result = &mut pass => {
+                    self.log_pass(&result?);
+                }
+                _ = &mut shutdown => {
+                    tracing::info!("shutdown requested; draining the in-flight ingestion pass");
+                    match tokio::time::timeout(max_drain, &mut pass).await {
+                        Ok(result) => self.log_pass(&result?),
+                        Err(_) => tracing::warn!(
+                            max_drain_secs = max_drain.as_secs(),
+                            "in-flight ingestion pass did not finish within the drain window; \
+                             exiting anyway -- the next start resumes from the last checkpoint",
+                        ),
+                    }
+                    return Ok(());
+                }
             }
-            tokio::time::sleep(poll_interval).await;
+
+            tokio::select! {
+                biased;
+                () = tokio::time::sleep(poll_interval) => {}
+                _ = &mut shutdown => {
+                    tracing::info!("shutdown requested between ingestion passes");
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    fn log_pass(&self, report: &BackfillReport) {
+        if report.stored > 0 {
+            tracing::info!(
+                stored = report.stored,
+                duplicates = report.duplicates,
+                last_ledger = report.last_ledger,
+                "ingested events"
+            );
         }
     }
 }
@@ -594,5 +643,152 @@ mod tests {
             .expect("query")
             .expect("new task");
         assert_eq!(task.reward, I128(77));
+    }
+
+    fn immediate_shutdown() -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(async {})
+    }
+
+    fn never_shutdown() -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(std::future::pending())
+    }
+
+    #[tokio::test]
+    async fn shutdown_before_any_pass_starts_stops_without_waiting_for_a_poll_interval() {
+        let backfiller = backfiller(FixtureSource::new(history(), 320), 100).await;
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            backfiller.run_until_shutdown(
+                100,
+                Duration::from_secs(3600),
+                Duration::from_secs(5),
+                immediate_shutdown(),
+            ),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "shutdown must be noticed without waiting out the (hour-long) poll interval"
+        );
+        result
+            .expect("run_until_shutdown")
+            .expect("no ingestion error");
+    }
+
+    #[tokio::test]
+    async fn shutdown_mid_pass_drains_it_before_exiting() {
+        let source = FixtureSource::new(history(), 320);
+        // The very first `get_events` call sleeps, so shutdown (already
+        // pending) is guaranteed to win the race against a pass that has
+        // only just started -- simulating a signal arriving mid-cycle.
+        source.delay_next(Duration::from_millis(30));
+        let backfiller = backfiller(source, 100).await;
+
+        backfiller
+            .run_until_shutdown(
+                100,
+                Duration::from_secs(3600),
+                Duration::from_secs(5),
+                immediate_shutdown(),
+            )
+            .await
+            .expect("run_until_shutdown");
+
+        // The in-flight pass was drained, not truncated: its events are
+        // stored and its checkpoint saved, exactly as an uninterrupted
+        // backfill would leave them.
+        let checkpoint = backfiller
+            .ingestor
+            .store()
+            .checkpoint()
+            .await
+            .expect("checkpoint query")
+            .expect("a checkpoint was saved");
+        assert!(checkpoint.backfill_complete);
+        assert_eq!(checkpoint.last_ledger, 320);
+
+        let task = backfiller
+            .ingestor
+            .store()
+            .task_state(1)
+            .await
+            .expect("query")
+            .expect("task from the drained pass");
+        assert_eq!(task.reward, I128(1_000));
+        assert_eq!(task.status, TaskStatus::Executed);
+    }
+
+    #[tokio::test]
+    async fn a_pass_stuck_past_max_drain_still_returns() {
+        let source = FixtureSource::new(history(), 320);
+        source.delay_next(Duration::from_secs(3600));
+        let backfiller = backfiller(source, 100).await;
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            backfiller.run_until_shutdown(
+                100,
+                Duration::from_secs(3600),
+                Duration::from_millis(20),
+                immediate_shutdown(),
+            ),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "max_drain must bound the wait even though the pass never finishes"
+        );
+        result
+            .expect("run_until_shutdown")
+            .expect("no ingestion error");
+    }
+
+    #[tokio::test]
+    async fn shutdown_between_passes_stops_without_waiting_for_a_poll_interval() {
+        let backfiller = backfiller(FixtureSource::new(history(), 320), 100).await;
+
+        // First call: no shutdown yet, so the initial catch-up pass runs to
+        // completion and the loop reaches the inter-pass sleep, which is
+        // then immediately cut short by shutdown.
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            backfiller.run_until_shutdown(
+                100,
+                Duration::from_secs(3600),
+                Duration::from_secs(5),
+                immediate_shutdown(),
+            ),
+        )
+        .await;
+
+        assert!(result.is_ok());
+        result
+            .expect("run_until_shutdown")
+            .expect("no ingestion error");
+    }
+
+    #[tokio::test]
+    async fn a_failed_pass_propagates_the_error_instead_of_looping_forever() {
+        let source = FixtureSource::new(history(), 320);
+        source.fail_once_at(100);
+        let backfiller = backfiller(source, 100).await;
+
+        let err = backfiller
+            .run_until_shutdown(
+                100,
+                Duration::from_secs(3600),
+                Duration::from_secs(5),
+                never_shutdown(),
+            )
+            .await
+            .expect_err("the simulated RPC failure must surface, not be swallowed");
+        assert!(
+            err.chain()
+                .any(|cause| cause.to_string().contains("simulated RPC failure")),
+            "error chain should mention the simulated failure, got: {err:?}"
+        );
     }
 }

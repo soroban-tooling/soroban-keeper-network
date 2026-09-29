@@ -111,9 +111,16 @@ async fn handle_socket(socket: WebSocket, state: ApiState, query: SubscribeQuery
         },
     };
 
+    // Normalized once, here, so both the SQL-backed replay below and the
+    // in-memory live-feed match in `Filter::matches` compare against the
+    // same canonical form a muxed address the caller supplied would
+    // otherwise miss in exactly one of the two paths (issue 0364).
     let filter = Filter {
         event_type,
-        address: query.address.clone(),
+        address: query
+            .address
+            .clone()
+            .map(|address| crate::address::normalize_address(&address).unwrap_or(address)),
     };
 
     let (mut sink, mut incoming) = socket.split();
@@ -171,7 +178,9 @@ async fn handle_socket(socket: WebSocket, state: ApiState, query: SubscribeQuery
         &mut sink,
         &ServerMessage::Subscribed {
             event_type: query.event_type.clone(),
-            address: query.address.clone(),
+            // The normalized form actually being filtered on (`filter`), not
+            // the raw query string -- see the comment where `filter` is built.
+            address: filter.address.clone(),
             replayed_through,
         },
     )

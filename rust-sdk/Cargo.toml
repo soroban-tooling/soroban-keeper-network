@@ -11,6 +11,7 @@ thiserror = { workspace = true }
 anyhow = "1.0"
 rand = "0.8"
 keeper-registry = { path = "../contracts/keeper-registry" }
+treasury = { path = "../contracts/treasury" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

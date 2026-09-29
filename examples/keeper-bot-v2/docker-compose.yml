@@ -1,0 +1,148 @@
+# Docker Compose example deployment for keeper-bot-v2 with PostgreSQL.
+#
+# USAGE:
+#   1. Copy .env.example to .env and fill in your actual values:
+#      cp .env.example .env
+#
+#   2. Start the deployment:
+#      docker-compose up -d
+#
+#   3. View logs:
+#      docker-compose logs -f keeper-bot
+#      docker-compose logs -f postgres
+#
+#   4. Stop the deployment:
+#      docker-compose down
+#
+#   5. Destroy data (warning: deletes persisted state):
+#      docker-compose down -v
+#
+# SECURITY NOTES:
+#   - .env file contains secrets and should never be committed.
+#     .gitignore MUST include .env before deployment.
+#   - Secrets are passed at runtime, not baked into the image.
+#   - Database password is environment-injected, not hardcoded.
+#
+# TOPOLOGY:
+#   ┌────────────────────────────────────────────────────────────────┐
+#   │  keeper-bot-v2 (Node.js application)                           │
+#   │  ┌─────────────────────────────────────────────────────────┐   │
+#   │  │ • Polls Soroban RPC for tasks                           │   │
+#   │  │ • Claims and executes tasks                             │   │
+#   │  │ • Persists state to PostgreSQL (via DATABASE_URL)       │   │
+#   │  │ • Runtime secrets from environment (.env file)          │   │
+#   │  └──────────────────────────┬──────────────────────────────┘   │
+#   │                             │                                   │
+#   │                             ├──→ Soroban RPC (HTTPS)            │
+#   │                             │                                   │
+#   │                    ┌────────▼────────┐                         │
+#   │                    │ PostgreSQL      │                         │
+#   │                    │ keeper-bot-db   │                         │
+#   │                    │ Port 5432       │                         │
+#   │                    └─────────────────┘                         │
+#   └────────────────────────────────────────────────────────────────┘
+#
+
+version: '3.9'
+
+services:
+  # PostgreSQL database service
+  # Persists keeper state: task outcomes, execution history, etc.
+  postgres:
+    image: postgres:16-alpine
+    container_name: keeper-bot-postgres
+    environment:
+      # Credentials (from .env file)
+      POSTGRES_USER: ${DB_USER:-keeper}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-keeper_bot}
+    ports:
+      # Expose on 5432 for local development/debugging only.
+      # In production, run database in a private network and do not expose the port.
+      - "5432:5432"
+    volumes:
+      # Persistent storage: keeper-bot-pgdata volume.
+      # Survives container restart and compose down (unless `docker-compose down -v`).
+      - keeper-bot-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-keeper}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - keeper-network
+
+  # Keeper Bot v2 application service
+  keeper-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: keeper-bot-v2
+    depends_on:
+      # Ensure database is healthy before starting the bot.
+      # This prevents "connection refused" errors during startup.
+      postgres:
+        condition: service_healthy
+    environment:
+      # ─────────────────────────────────────────────────────────────
+      # REQUIRED: Stellar & Keeper Configuration
+      # ─────────────────────────────────────────────────────────────
+      KEEPER_SECRET_KEY: ${KEEPER_SECRET_KEY}
+      REGISTRY_CONTRACT_ID: ${REGISTRY_CONTRACT_ID}
+      NETWORK: ${NETWORK:-testnet}
+
+      # ─────────────────────────────────────────────────────────────
+      # REQUIRED: Database Connection
+      # ─────────────────────────────────────────────────────────────
+      # Must match postgres service credentials and host:
+      #   postgresql://USER:PASSWORD@HOST:PORT/DATABASE
+      # Within the compose network, postgres is reachable at hostname 'postgres'.
+      DATABASE_URL: postgresql://${DB_USER:-keeper}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-keeper_bot}
+
+      # ─────────────────────────────────────────────────────────────
+      # OPTIONAL: Operational Configuration
+      # ─────────────────────────────────────────────────────────────
+      POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-10000}
+      WITHDRAW_THRESHOLD: ${WITHDRAW_THRESHOLD:-10000000}
+      MAX_TASKS_PER_ROUND: ${MAX_TASKS_PER_ROUND:-5}
+      MAX_RETRIES: ${MAX_RETRIES:-3}
+      RETRY_BASE_MS: ${RETRY_BASE_MS:-500}
+      EXPIRE_STALE_TASKS: ${EXPIRE_STALE_TASKS:-true}
+      MIN_PROFIT_MARGIN_STROOPS: ${MIN_PROFIT_MARGIN_STROOPS:-0}
+
+      # ─────────────────────────────────────────────────────────────
+      # OPTIONAL: Development Configuration
+      # ─────────────────────────────────────────────────────────────
+      SIMULATE_EXECUTION: ${SIMULATE_EXECUTION:-false}
+      RUN_ONCE: ${RUN_ONCE:-false}
+
+    # Mount secrets from .env file (loaded by docker-compose, passed as env vars)
+    env_file:
+      - .env
+
+    # stdout/stderr logs are captured by Docker and available via `docker logs`.
+    # In production, redirect to a centralized logging system (ELK, Datadog, etc.)
+    # by configuring the log driver in the production compose file or k8s deployment.
+
+    # Ensure graceful shutdown: give the bot time to finish the current round
+    # before terminating the container.
+    stop_grace_period: 30s
+
+    # Restart policy: automatically restart on crash or Docker daemon restart
+    restart: unless-stopped
+
+    networks:
+      - keeper-network
+
+volumes:
+  # Named volume for PostgreSQL persistent storage.
+  # Data survives `docker-compose down` (but not `docker-compose down -v`).
+  keeper-bot-pgdata:
+    driver: local
+
+networks:
+  # Internal Docker network for services to communicate.
+  # keeper-bot can reach postgres at hostname 'postgres' without exposing to host.
+  keeper-network:
+    driver: bridge

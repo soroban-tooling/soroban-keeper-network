@@ -1,6 +1,7 @@
 //! Storage keys and the domain types they hold.
 
-use soroban_sdk::{contracttype, Address, Bytes};
+use soroban_sdk::{contracttype, Address, Bytes, BytesN};
+use soroban_sdk::{contracttype, Address, Bytes, Symbol};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Storage Keys
@@ -23,6 +24,80 @@ pub enum DataKey {
     /// Minimum reward a task may be registered with. Guards against dust-spam
     /// tasks that would cost keepers more in fees than they pay out. Default 0.
     MinReward,
+    /// A keeper's current bonded stake (E06, `docs/STAKING_DESIGN.md`). Kept
+    /// under its own key, never conflated with `KeeperReward`, mirroring the
+    /// separation already kept between `FeesAccrued` and task escrow.
+    KeeperStake(Address),
+    /// At most one in-flight unbonding request per keeper. A second
+    /// `initiate_unbond` call while one is already pending replaces it,
+    /// using the new total — see `docs/STAKING_DESIGN.md` §3.
+    UnbondRequest(Address),
+    /// Presence-only marker: this slash incident id has already been
+    /// slashed once. See `docs/STAKING_DESIGN.md` §6.
+    SlashIncident(BytesN<32>),
+    /// Running slash count and total-slashed figure for a keeper (#425).
+    /// Kept separate from `SlashIncident`, which records duplicate-incident
+    /// protection per id, not an aggregate a dashboard can read directly.
+    SlashHistory(Address),
+}
+
+/// A keeper's pending stake withdrawal, started by `initiate_unbond` and
+/// only releasable once `e.ledger().sequence() >= release_ledger`. See
+/// `docs/STAKING_DESIGN.md` §3.
+#[contracttype]
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct UnbondRequest {
+    pub amount: i128,
+    pub release_ledger: u32,
+}
+
+/// A keeper's aggregate slash history, updated by every successful `slash`
+/// call against that keeper (#425). Read by `slash_history` so a dashboard
+/// or keeper bot can see a keeper's track record without replaying every
+/// `Slashed` event.
+#[contracttype]
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct SlashHistory {
+    pub count: u32,
+    pub total_slashed: i128,
+
+    // ─── E06 — Staking & Slashing (docs/STAKING_DESIGN.md) ─────────────
+    /// A keeper's currently-bonded stake. Excludes anything mid-unbond —
+    /// see [`UnbondRequest`]. Stored under its own key, never conflated
+    /// with `KeeperReward`, mirroring the same separation-of-concerns
+    /// reasoning that already keeps `FeesAccrued` distinct from task
+    /// escrow (docs/STAKING_DESIGN.md §2).
+    KeeperStake(Address),
+    /// At most one pending unbond request per keeper.
+    UnbondRequest(Address),
+    /// Configurable minimum stake `claim_task` enforces, if any. Default 0
+    /// (no requirement), mirroring `MinReward`. See
+    /// docs/STAKING_DESIGN.md §6.
+    MinStake,
+    /// Monotonic id source for `Slash(u64)` records, mirroring
+    /// `TaskCounter`.
+    SlashCounter,
+    /// One record per `slash` call, looked up by `raise_slash_appeal` /
+    /// `resolve_slash_appeal`. See docs/STAKING_DESIGN.md §4.1.
+    Slash(u64),
+    /// Admin-configured ledgers a freshly `execute_task`-credited reward is
+    /// held before `withdraw_rewards` will pay it out. Default 0 (disabled
+    /// — a credit is withdrawable immediately, the unchanged wave-1 MVP
+    /// behavior), mirroring `MinStake`/`MinReward`'s opt-in-via-admin-config
+    /// posture. See docs/STAKING_DESIGN.md §4.2.
+    DisputeWindowLedgers,
+    /// A keeper's rewards still within their dispute window — a `Vec` of
+    /// `PendingCredit`, ordered by `unlock_ledger`. Empty (or absent) once
+    /// every credit for this keeper has either finalized into `KeeperReward`
+    /// or been disputed away. Separate from `KeeperReward` so a dispute
+    /// resolution can find and remove exactly the credit it is about, never
+    /// touching an already-finalized balance.
+    PendingReward(Address),
+
+    // ─── E07 — Keeper Reputation ────────────────────────────────────────
+    /// Minimum stored reputation score, in basis points, a keeper needs to
+    /// claim a task. Default 0, which disables the check.
+    ReputationFloor,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -118,4 +193,60 @@ pub struct BatchTaskParams {
     pub deadline: u64,
     pub ttl_ledgers: u32,
     pub lock_ledgers: u32,
+}
+
+// ─── E06 — Staking & Slashing ───────────────────────────────────────────
+
+/// A keeper's pending stake withdrawal, started by `initiate_unbond` and
+/// only releasable via `withdraw_stake` once `unlock_ledger` has passed.
+/// See docs/STAKING_DESIGN.md §3.
+#[contracttype]
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct UnbondRequest {
+    pub amount: i128,
+    /// First ledger sequence at which `withdraw_stake` will accept this
+    /// request — inclusive, mirroring `lock_expired`'s `>=` boundary.
+    pub unlock_ledger: u32,
+}
+
+/// One record of a `slash` call, kept so `raise_slash_appeal` /
+/// `resolve_slash_appeal` can reference it by `slash_id` and so an appeal
+/// can be applied at most once per incident. See docs/STAKING_DESIGN.md §4-5.
+#[contracttype]
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct SlashRecord {
+    pub keeper: Address,
+    pub amount: i128,
+    pub reason: Symbol,
+    /// Ledger sequence the slash occurred at — the appeal window is
+    /// `DISPUTE_WINDOW_LEDGERS` from this value.
+    pub ledger: u32,
+    /// True once an appeal has been raised for this slash — a second
+    /// `raise_slash_appeal` for the same `slash_id` is rejected rather
+    /// than silently accepted, so a slash can be appealed at most once.
+    pub appealed: bool,
+}
+
+/// One `execute_task` credit still within its dispute window (issue 0293 /
+/// #421, docs/STAKING_DESIGN.md §4.2). Held in `DataKey::PendingReward`
+/// until `unlock_ledger`, at which point (if undisputed) `finalize_rewards`
+/// moves `net_reward` into the keeper's ordinary `KeeperReward` balance, or
+/// (if disputed and the dispute is upheld) the credit is removed without
+/// ever finalizing, and the keeper's *stake* is slashed instead
+/// (docs/STAKING_DESIGN.md §5) — the reward itself simply never becomes
+/// withdrawable, rather than being clawed back after the fact.
+#[contracttype]
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct PendingCredit {
+    pub task_id: u64,
+    pub net_reward: i128,
+    /// First ledger sequence at which this credit is eligible to finalize —
+    /// inclusive, mirroring `lock_expired`'s `>=` boundary.
+    pub unlock_ledger: u32,
+    /// True once `dispute_execution` has been called against this credit's
+    /// `task_id` — a disputed credit is excluded from finalization (it
+    /// neither pays out nor silently disappears; `resolve_execution_dispute`
+    /// decides its fate) rather than being finalized or removed by the
+    /// unlock-ledger check alone.
+    pub disputed: bool,
 }

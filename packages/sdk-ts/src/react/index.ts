@@ -8,3 +8,7 @@ export { useTask } from "./useTask.js";
 export type { UseTaskOptions, UseTaskResult } from "./useTask.js";
 export { useTaskEvents } from "./useTaskEvents.js";
 export type { UseTaskEventsOptions, UseTaskEventsResult } from "./useTaskEvents.js";
+export { useRegisterTask } from "./useRegisterTask.js";
+export type { RegisterTaskStatus, UseRegisterTaskResult } from "./useRegisterTask.js";
+export { useKeeperBalance } from "./useKeeperBalance.js";
+export type { UseKeeperBalanceOptions, UseKeeperBalanceResult } from "./useKeeperBalance.js";

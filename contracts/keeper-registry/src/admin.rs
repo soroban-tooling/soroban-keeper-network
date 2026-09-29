@@ -3,9 +3,11 @@
 
 use soroban_sdk::{contractimpl, log, Address, BytesN, Env};
 
+use crate::constants::MAX_REPUTATION_FLOOR_BPS;
 use crate::errors::KeeperError;
 use crate::events::*;
 use crate::internal::*;
+use crate::reputation::reputation_floor_bps;
 use crate::types::DataKey;
 use crate::{KeeperRegistry, KeeperRegistryArgs, KeeperRegistryClient};
 
@@ -77,11 +79,17 @@ impl KeeperRegistry {
     // |                    |             | liveness, not new exposure             |
     // | `expire_task`      | allowed     | permissionless fund recovery           |
     // | `withdraw_rewards` | allowed     | keeper pulling already-earned balance  |
+    // | `stake_deposit`    | BLOCKED     | opens new keeper exposure              |
+    // | `initiate_unbond`  | allowed     | keeper requesting stake return;        |
+    // |                    |             | no new exposure                        |
+    // | `withdraw_stake`   | allowed     | keeper pulling already-owned funds     |
+    // | `slash`            | allowed     | admin action; never gated              |
     // | read-only views    | allowed     | side-effect-free, never gated          |
     //
-    // `set_fee_bps`/`set_min_reward`/`transfer_admin`/`upgrade`/`sweep_fees`
-    // are admin-only (`require_admin`) and were never in scope for the pause
-    // gate at all — pausing doesn't restrict what the admin itself can do.
+    // `set_fee_bps`/`set_min_reward`/`set_reputation_floor`/`transfer_admin`/
+    // `upgrade`/`sweep_fees`/`slash` are admin-only (`require_admin`) and were never in
+    // scope for the pause gate at all — pausing doesn't restrict what the admin
+    // itself can do.
 
     pub fn pause(e: Env, admin: Address) -> Result<(), KeeperError> {
         require_admin(&e, &admin)?;
@@ -129,6 +137,26 @@ impl KeeperRegistry {
         emit_min_reward_updated(&e, old_min, min_reward);
         Ok(())
     }
+    // ── set_reputation_floor ──────────────────────────────────────────────────
+    //
+    // Admin sets the minimum stored reputation score, in basis points, a keeper
+    // needs to claim a task (see `reputation::require_reputation_floor`). `0`,
+    // the default, disables the check. Only future claims are affected; an
+    // existing claim is never revoked.
+
+    pub fn set_reputation_floor(e: Env, admin: Address, floor_bps: u32) -> Result<(), KeeperError> {
+        require_admin(&e, &admin)?;
+        if floor_bps > MAX_REPUTATION_FLOOR_BPS {
+            return Err(KeeperError::InvalidReputationFloor);
+        }
+        bump_instance(&e);
+        let old_floor = reputation_floor_bps(&e);
+        e.storage()
+            .instance()
+            .set(&DataKey::ReputationFloor, &floor_bps);
+        emit_reputation_floor_updated(&e, old_floor, floor_bps);
+        Ok(())
+    }
     // ── transfer_admin ────────────────────────────────────────────────────────
     //
     // Hands the admin role to a new address. Both the current admin and the
@@ -168,6 +196,14 @@ impl KeeperRegistry {
     // Admin moves up to the accrued protocol fees to a treasury address. The
     // amount is checked against the FeesAccrued accumulator, so a sweep can
     // never dip into task escrow or keeper balances.
+    //
+    // E08 (docs/TREASURY_DESIGN.md §3): this stays a plain token transfer.
+    // To route fees through the treasury contract (`contracts/treasury`),
+    // the admin passes that contract's address as `treasury`; its
+    // permissionless `distribute` then splits what arrived across the
+    // configured recipients as a separate step. The registry never calls
+    // into the treasury, so a treasury fault cannot fail a sweep or reach
+    // task escrow, and this entry point's signature is unchanged.
 
     pub fn sweep_fees(
         e: Env,

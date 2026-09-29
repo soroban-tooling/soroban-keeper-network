@@ -115,6 +115,54 @@ pub enum EventPayload {
         admin: String,
         new_wasm_hash: [u8; 32],
     },
+
+    // ── treasury: recipient management ───────────────────────────────────────
+    /// `(radd, recip)` — `(recipient, shares_bps)`
+    RecipientAdded { recipient: String, shares_bps: u32 },
+    /// `(rrm, recip)` — `(recipient,)`
+    RecipientRemoved { recipient: String },
+    /// `(rshr, recip)` — `(recipient, old_shares_bps, new_shares_bps)`
+    RecipientSharesUpdated {
+        recipient: String,
+        old_shares_bps: u32,
+        new_shares_bps: u32,
+    },
+
+    // ── treasury: distribution ────────────────────────────────────────────────
+    /// `(dist, recip)` — `(recipient, amount, total_distributed)`
+    Distributed {
+        recipient: String,
+        amount: i128,
+        total_distributed: i128,
+    },
+    /// `(wdraw, recip)` — `(recipient, amount)`
+    TreasuryWithdrawn { recipient: String, amount: i128 },
+    // ── staking (epic E06, issue 0296) ───────────────────────────────────────
+    /// `(deposit, stake)` — `(keeper, amount, new_total)`
+    StakeDeposited {
+        keeper: String,
+        amount: i128,
+        new_total: i128,
+    },
+    /// `(unbond, stake)` — `(keeper, amount, release_ledger)`
+    UnbondInitiated {
+        keeper: String,
+        amount: i128,
+        release_ledger: u32,
+    },
+    /// `(wdraw, stake)` — `(keeper, amount)`
+    StakeWithdrawn { keeper: String, amount: i128 },
+    /// `(slash, stake)` — `(keeper, amount, reason, incident_id, treasury)`
+    ///
+    /// `incident_id` is the contract's `BytesN<32>`, kept as raw bytes for the
+    /// same reason as `Upgraded::new_wasm_hash` above.
+    Slashed {
+        keeper: String,
+        amount: i128,
+        reason: String,
+        incident_id: [u8; 32],
+        treasury: String,
+    },
 }
 
 impl EventPayload {
@@ -136,6 +184,15 @@ impl EventPayload {
             Self::FeesSwept { .. } => ("sweep", "admin"),
             Self::Initialized { .. } => ("init", "admin"),
             Self::Upgraded { .. } => ("upgrade", "admin"),
+            Self::RecipientAdded { .. } => ("radd", "recip"),
+            Self::RecipientRemoved { .. } => ("rrm", "recip"),
+            Self::RecipientSharesUpdated { .. } => ("rshr", "recip"),
+            Self::Distributed { .. } => ("dist", "recip"),
+            Self::TreasuryWithdrawn { .. } => ("wdraw", "recip"),
+            Self::StakeDeposited { .. } => ("deposit", "stake"),
+            Self::UnbondInitiated { .. } => ("unbond", "stake"),
+            Self::StakeWithdrawn { .. } => ("wdraw", "stake"),
+            Self::Slashed { .. } => ("slash", "stake"),
         };
         EventTopic { verb, noun }
     }

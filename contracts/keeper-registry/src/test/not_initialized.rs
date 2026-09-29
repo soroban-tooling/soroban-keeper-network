@@ -1,9 +1,13 @@
 //! Every entry point requiring configured state must return NotInitialized.
 
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{testutils::Address as _, Address, Bytes, Env};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 
 use super::common::*;
-use crate::{DataKey, KeeperError, KeeperRegistry, KeeperRegistryClient, TaskType};
+use crate::reputation::{record_missed_claim, stored_record};
+use crate::{
+    DataKey, KeeperError, KeeperRegistry, KeeperRegistryClient, ReputationRecord, TaskType,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NotInitialized — every entry point that requires configured state must
@@ -234,4 +238,248 @@ fn test_require_admin_distinguishes_not_initialized_from_wrong_caller() {
         s.registry.try_pause(&stranger),
         Err(Ok(KeeperError::Unauthorized))
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reputation-affecting entry points (issue 0333)
+//
+// Reputation is updated inside claim_task (a missed claim for the previous
+// claimer on an expired-lock takeover) and execute_task (a success for the
+// executing keeper) rather than through new entry points. These tests pin
+// that the guards those functions ran before the reputation layer was added
+// still run first and still surface the same error, and that a rejected call
+// never writes reputation.
+//
+// Neither function reads configured state (they have never touched Admin,
+// RewardToken, or FeeBps before their first write), so on a never-initialized
+// registry they surface TaskNotFound — no task can exist before initialize —
+// exactly as `fuzz_targets/uninitialized_registry.rs` has always asserted.
+// That result is what must stay unchanged; the same existence-before-
+// configuration ordering is explained for increase_reward, cancel_task, and
+// expire_task above.
+//
+// The registry has no reputation eligibility floor (docs/REPUTATION_DESIGN.md
+// keeps claim_task permissionless), so a keeper with a poor record is used
+// wherever a floor would bite: if one is ever added, these tests fail unless
+// it runs after the initialization and pause checks.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn reputation_of(
+    env: &Env,
+    registry: &KeeperRegistryClient<'_>,
+    keeper: &Address,
+) -> ReputationRecord {
+    env.as_contract(&registry.address, || stored_record(env, keeper))
+}
+
+/// Gives `keeper` a record of one missed claim and no successes (score 0),
+/// the worst standing a keeper can have.
+fn with_missed_claim(
+    env: &Env,
+    registry: &KeeperRegistryClient<'_>,
+    keeper: &Address,
+) -> ReputationRecord {
+    env.as_contract(&registry.address, || record_missed_claim(env, keeper));
+    let record = reputation_of(env, registry, keeper);
+    assert_eq!(record.missed_claims, 1);
+    assert_eq!(record.score_bps, 0);
+    record
+}
+
+#[test]
+fn test_claim_task_before_init_fails_without_touching_reputation() {
+// Staking entry points (epic E06) — the same discipline the original entry
+// points already have, extended to stake_deposit, initiate_unbond,
+// withdraw_stake, and slash. See docs/STAKING_DESIGN.md.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_stake_deposit_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let keeper = Address::generate(&env);
+
+    assert_eq!(
+        registry.try_claim_task(&keeper, &0u64),
+        Err(Ok(KeeperError::TaskNotFound))
+    );
+    assert_eq!(
+        reputation_of(&env, &registry, &keeper),
+        ReputationRecord::zero()
+        registry.try_stake_deposit(&keeper, &100i128),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_execute_task_before_init_fails_without_touching_reputation() {
+fn test_initiate_unbond_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let keeper = Address::generate(&env);
+
+    assert_eq!(
+        registry.try_execute_task(&keeper, &0u64, &Bytes::from_slice(&env, b"proof")),
+        Err(Ok(KeeperError::TaskNotFound))
+    );
+    // The proof-length check has always run before the task lookup.
+    assert_eq!(
+        registry.try_execute_task(
+            &keeper,
+            &0u64,
+            &Bytes::from_slice(&env, &[0u8; (crate::MAX_PROOF_LEN + 1) as usize]),
+        ),
+        Err(Ok(KeeperError::ProofTooLarge))
+    );
+    assert_eq!(
+        reputation_of(&env, &registry, &keeper),
+        ReputationRecord::zero()
+    // Without the explicit NotInitialized check, this would otherwise
+    // surface InsufficientStake (an uninitialized registry has no stake for
+    // anyone) — a misleading answer for a registry that was never
+    // configured at all.
+    assert_eq!(
+        registry.try_initiate_unbond(&keeper, &50i128),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_claim_task_before_init_ignores_existing_reputation() {
+    // A record already in storage (e.g. left by a partial migration) must not
+    // change what an uninitialized registry reports, nor be updated by it.
+fn test_withdraw_stake_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let keeper = Address::generate(&env);
+    let before = with_missed_claim(&env, &registry, &keeper);
+
+    assert_eq!(
+        registry.try_claim_task(&keeper, &0u64),
+        Err(Ok(KeeperError::TaskNotFound))
+    );
+    assert_eq!(
+        registry.try_execute_task(&keeper, &0u64, &Bytes::from_slice(&env, b"proof")),
+        Err(Ok(KeeperError::TaskNotFound))
+    );
+    assert_eq!(reputation_of(&env, &registry, &keeper), before);
+}
+
+#[test]
+fn test_claim_task_while_paused_reports_paused_for_low_reputation_keeper() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let before = with_missed_claim(&s.env, &s.registry, &keeper);
+    let id = register_default_task(&s);
+    s.registry.pause(&s.admin);
+
+    assert_eq!(
+        s.registry.try_claim_task(&keeper, &id),
+        Err(Ok(KeeperError::ContractPaused))
+    );
+    assert_eq!(reputation_of(&s.env, &s.registry, &keeper), before);
+
+    // Unpausing restores normal claiming: reputation alone never rejects it.
+    s.registry.unpause(&s.admin);
+    s.registry.claim_task(&keeper, &id);
+}
+
+#[test]
+fn test_takeover_while_paused_does_not_record_missed_claim() {
+    // The takeover path is the one place claim_task writes reputation for a
+    // keeper other than the caller. A paused takeover must be rejected before
+    // that write, so the original claimer is not penalized for a claim that
+    // never happened.
+    let s = setup();
+    let first = Address::generate(&s.env);
+    let second = Address::generate(&s.env);
+    let (id, unlock_at) = claim_with_lock(&s, &first, 120);
+    goto_ledger(&s.env, unlock_at);
+    s.registry.pause(&s.admin);
+
+    assert_eq!(
+        s.registry.try_claim_task(&second, &id),
+        Err(Ok(KeeperError::ContractPaused))
+    );
+    assert_eq!(
+        reputation_of(&s.env, &s.registry, &first),
+        ReputationRecord::zero()
+    );
+    assert_eq!(
+        reputation_of(&s.env, &s.registry, &second),
+        ReputationRecord::zero()
+    );
+
+    // Once unpaused the same takeover succeeds and records the miss.
+    s.registry.unpause(&s.admin);
+    s.registry.claim_task(&second, &id);
+    assert_eq!(reputation_of(&s.env, &s.registry, &first).missed_claims, 1);
+}
+
+#[test]
+fn test_execute_task_while_paused_does_not_record_success() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let id = register_default_task(&s);
+    s.registry.claim_task(&keeper, &id);
+    s.registry.pause(&s.admin);
+
+    assert_eq!(
+        s.registry
+            .try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof")),
+        Err(Ok(KeeperError::ContractPaused))
+    );
+    assert_eq!(
+        reputation_of(&s.env, &s.registry, &keeper),
+        ReputationRecord::zero()
+    );
+
+    // Without the explicit NotInitialized check, this would otherwise
+    // surface NoPendingUnbond — technically true, but not the most useful
+    // answer for a registry that was never configured at all.
+    assert_eq!(
+        registry.try_withdraw_stake(&keeper),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_slash_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let admin = Address::generate(&env);
+    let keeper = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    assert_eq!(
+        registry.try_slash(&admin, &keeper, &100i128, &symbol_short!("bad"), &treasury),
+        Err(Ok(KeeperError::NotInitialized))
+    );
+}
+
+#[test]
+fn test_stake_deposit_before_init_writes_no_state() {
+    // Regression guard for the ordering bug this issue's fix corrects:
+    // stake_deposit used to write the updated KeeperStake balance to
+    // persistent storage *before* discovering (via reward_token) that the
+    // registry was never initialized, leaving a stray balance behind for a
+    // contract that should have no state at all. require_initialized now
+    // runs first, so the call fails before touching storage.
+    let env = Env::default();
+    env.mock_all_auths();
+    let registry = uninitialized_registry(&env);
+    let keeper = Address::generate(&env);
+
+    let _ = registry.try_stake_deposit(&keeper, &100i128);
+
+    env.as_contract(&registry.address, || {
+        assert!(!env
+            .storage()
+            .persistent()
+            .has(&DataKey::KeeperStake(keeper)));
+    });
 }

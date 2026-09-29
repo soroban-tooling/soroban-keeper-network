@@ -241,14 +241,16 @@ one.
 | Backfill | Same loop from `INDEXER_START_LEDGER`; archival RPC is configuration, not a code path |
 | API | Read-only REST per the consumer table; WebSocket later, schema-compatible |
 | Uniqueness key | RPC event id (TOID-derived: ledger, tx order, op index, event index), unique-constrained in `events` |
+| Retention | Keep the complete raw event history for the lifetime of the instance; no automatic archival or pruning |
 
-## Status
+## Original design status
 
-Proposed. Per this issue's own acceptance criteria, 0219 onward should
-wait for a maintainer to review and lock these decisions — this document
-is the basis for that review, not a substitute for it. (0219's scaffold is
-being prepared against it in parallel; everything scaffolded is what this
-document specifies.)
+This section is the proposal the E14 implementation began from. The
+implementation is now far enough along that its actual contract and the
+places it diverged are recorded in the
+[E14 retrospective](#e14-retrospective-and-consumer-handoff) below. Where
+the proposal and retrospective disagree, the retrospective describes the
+code that exists.
 # Indexer Design
 
 This is the design record for the event indexer (epic E14). It exists so
@@ -260,13 +262,15 @@ shape from issue #346 belong in this document as well; they land as that
 issue closes. Until they do, the schema comments in `indexer/src/schema/`
 and `indexer/migrations/` are the reference for tables and columns.
 
-Two questions were asked after the original design was scoped to a single
+Three questions were asked after the original design was scoped to a single
 contract id, and they are answered here:
 
 1. [One instance per registry deployment](#1-one-instance-per-registry-deployment)
    (issue #365)
 2. [Event shape changes across contract `VERSION`](#2-event-shape-changes-across-contract-version)
    (issue #366)
+3. [Data retention and archival](#3-data-retention-and-archival)
+   (issue #375)
 
 How to actually run an instance is in
 [`INDEXER_DEPLOYMENT.md`](INDEXER_DEPLOYMENT.md). This document does not
@@ -470,3 +474,193 @@ When a contract change will alter a known event's payload:
 
 A `VERSION` bump that does not touch event shapes needs no indexer
 release.
+
+---
+
+## 3. Data retention and archival
+
+**Decision:** keep every successfully ingested raw event in the primary
+database for the full lifetime of an indexer instance. There is no
+age-based expiry, automatic archival tier, aggregation-and-delete job, or
+operator-supported pruning procedure.
+
+This is a deliberate full-retention policy, not the absence of a policy.
+The database grows monotonically, and the operator accepts that storage
+cost in exchange for a complete audit trail.
+
+### Why full retention wins
+
+The raw event log is the indexer's evidence. It records which on-chain
+events produced every answer exposed by the API and makes an independent
+audit possible without trusting a mutable summary. That matters to E19's
+audit-readiness work: a task state or keeper total can be traced to its
+source events rather than accepted as an unexplained database value.
+
+It is also part of the current correctness model, not merely historical
+data. `TaskState`, keeper summaries, admin configuration, leaderboards,
+and protocol statistics are folded from `events` on read. Dropping raw
+rows after writing aggregates would make those aggregates a new source of
+truth and would remove the documented ability to rebuild derived state.
+Doing that safely would require versioned snapshots, reconciliation, and
+restore tooling that the service does not have.
+
+Finally, the upstream RPC retention window is finite. Once an old event
+falls outside that window, a pruned indexer may not be able to reconstruct
+it from the public RPC at all. Moving the only retained copy to a cold
+format would save primary-disk cost but make ordinary audit and support
+queries depend on a second storage system and a restore path. For one
+registry deployment's compact event stream, that complexity is not
+justified by measured storage pressure.
+
+### Cost and operating rules
+
+Full retention means disk use is unbounded over an unbounded service
+lifetime. Operators must therefore treat database capacity as a normal
+resource to provision and monitor:
+
+- Alert on database-file size, free disk, and growth rate early enough to
+  expand or move the volume before writes are affected.
+- Take regular, tested backups of the entire SQLite database. A backup is
+  disaster recovery, not an archive tier: it does not permit deleting the
+  corresponding primary rows.
+- Preserve the database when retiring an old contract deployment. Under
+  the one-instance-per-deployment policy, that read-only database is the
+  historical record for that deployment.
+- Use API pagination and query limits to bound request cost. Those are
+  serving controls and do not change what is retained.
+
+Schema migrations must not delete historical event rows as routine
+maintenance. `VACUUM` may reclaim unused SQLite pages after a migration or
+recovery operation, but it is not a retention mechanism. Manual deletion
+of old rows produces an unsupported, incomplete index and must not be
+presented as a healthy full-history instance.
+
+### Revisit trigger
+
+There is intentionally no time or size threshold that starts deletion.
+If measured growth makes full primary retention operationally
+unacceptable, that is a new design decision and implementation issue. It
+must define, before any row is removed, a versioned archive format,
+integrity manifest, durable destination, restore procedure, and a query
+path that clearly distinguishes online from archived history. Until that
+work is reviewed and shipped, the only supported policy is full retention
+forever.
+
+---
+
+## E14 retrospective and consumer handoff
+
+E14 produced a typed fifteen-event model, idempotent ingestion, a
+cursor-paged SQLite event store, state folds, backfill/checkpoint logic,
+REST and WebSocket handlers, caching, rate limiting, authentication
+primitives, OpenAPI generation, and repeatable load tests. This section
+is the contract E15, E16, and E17 should use instead of reconstructing the
+epic from its individual issues.
+
+It is also an honest boundary statement: the components are implemented
+and tested as library/router code, but the checked-in executable does not
+yet run the ingestion loop or bind the HTTP server. That integration and
+the duplicate storage paths are tracked in
+[#582](https://github.com/soroban-tooling/soroban-keeper-network/issues/582).
+This document does not describe the service as deployed until that issue
+is resolved.
+
+### What changed from the original design
+
+| Area | Original decision | What was built and why |
+| --- | --- | --- |
+| Primary database | PostgreSQL through `sqlx`, with mutable derived tables | The API/backfill path uses an embedded SQLite `Store` and `sqlx` migrations. One process owns one contract database, so SQLite keeps deployment and tests self-contained without a database service. The tradeoff is that multi-process writers and horizontal database scaling are not supported. |
+| Derived state | `tasks`, `keepers`, and `admin_state` tables updated transactionally with the raw log | The SQLite path keeps `events` authoritative and folds task, keeper, admin, leaderboard, and statistics state on read. This prevents a derived row from drifting from its evidence and makes replay deterministic, at the cost of aggregate query work that needs caching and request bounds. |
+| Event identity | RPC event id as the primary key | `(tx_hash, event_index)` is the idempotency key. A separate monotonic SQLite `cursor` provides stable API pagination. This matches the identity the implemented decoder retains and makes overlapping backfill pages harmless. |
+| API shape | General `/tasks` filters and `/keepers` aggregates | The implemented v1 routes are task detail, owner tasks, keeper tasks, admin config, leaderboard, event feed, and health. There is no claimable/status-filtered task collection. The route set follows the concrete handlers and generated OpenAPI file rather than the proposal table. |
+| Live updates | Deferred WebSocket layer | `/v1/stream` ships the same `IndexedEvent` representation as REST, adds filters and replay from `after`, and then switches to live broadcast delivery. |
+| Event projections | Dedicated relational columns and tables for each concern | The SQLite event table stores a typed JSON payload plus indexed task/owner/keeper columns. API response types remain independent of that schema, so a storage migration need not become an API break. |
+| Deployment topology | One contract was assumed, not closed as a policy | Issue #365 made it explicit: one process and database per `(network, contract id)`. Multi-contract tenancy is not supported. |
+| Event-version handling | Not specified beyond following the current contract | Issue #366 chose coordinated contract/indexer releases. Unknown new topics are skipped; a malformed payload for a known topic stops the batch rather than silently corrupting derived state. |
+
+The crate still exports older `tokio-postgres` schema and ingest modules
+alongside the SQLite path. They are not the v1 API's storage contract and
+must not be combined with the SQLite migrations. Removing or consolidating
+that second path is part of #582.
+
+### Stable v1 consumer surface
+
+Every HTTP path is rooted at `/v1`. The committed
+`indexer/openapi.yaml`, generated from the Rust handlers and response
+types, is authoritative for REST field names and types. Consumers should
+ignore unknown response fields so additive v1 fields remain compatible.
+A removal, rename, or meaning change requires a new API version.
+
+| Method and path | Contract |
+| --- | --- |
+| `GET /v1/health` | Liveness plus `last_ingested_ledger` and `backfill_complete`. Consumers must use this freshness signal rather than assume a successful HTTP response means the index is caught up. |
+| `GET /v1/tasks/{task_id}` | Current `TaskState` folded from indexed events plus observed task history; `404` means the registration has not been indexed. |
+| `GET /v1/owners/{owner}/tasks` | Task states registered by an owner, newest task id first. |
+| `GET /v1/keepers/{keeper}/tasks` | Task states claimed or executed by a keeper, newest task id first. |
+| `GET /v1/admin/config` | Current configuration folded from public admin events. Optional fields mean the setting event has not been observed. |
+| `GET /v1/leaderboard?rank_by=&since=&limit=` | Ranks by `executions` (default) or `reward`; ties are deterministic; `limit` is clamped to 200. |
+| `GET /v1/events?after=&limit=&event_type=&address=` | Oldest-first event page. `limit` defaults to 50 and is clamped to 500. Pass `next_cursor` back as `after`; `null` means the current end. |
+| `GET /v1/stream?after=&event_type=&address=` | WebSocket replay followed by live events. `event` contains exactly the REST `IndexedEvent`; `subscribed` confirms filters/replay, and `closed` gives a resumable reason. |
+
+All `i128` token amounts are decimal strings in JSON. Timestamps are Unix
+seconds, ledgers are unsigned integers, event names use snake case, and
+errors use `{ "error": <stable code>, "message": <human text> }`.
+Clients may branch on `error`, not on message wording.
+
+The route names, event envelope, cursor meaning, and core response fields
+above are the stable v1 contract. Request-cost policy is not yet final:
+task/address pagination and leaderboard-window constraints may be tightened
+by #580, and WebSocket connection/replay limits by #581. Those changes must
+preserve resumability and use additive response fields where possible.
+Authentication and higher-limit API-key behavior are also provisional
+until #579. Anonymous public reads remain the baseline contract.
+
+### Handoff by consumer
+
+**E15 keeper bot v2.** Use `/v1/stream?event_type=task_registered` for
+candidate discovery and persist the last processed cursor. On reconnect,
+pass that cursor as `after` before consuming live events. The indexer is
+advisory: always call the contract's `is_claimable` view immediately before
+claim submission, because another keeper may win or ingestion may lag.
+There is no v1 `status=registered`/claimable-work endpoint. Keep direct RPC
+event scanning as the fallback until #582 produces a deployable service.
+
+**E16 CLI tooling.** Generate or validate REST types from
+`indexer/openapi.yaml`. Page `/events` by cursor rather than by offset and
+surface health/backfill state with query results. Do not import SQLite
+tables or the legacy PostgreSQL schema as an external contract.
+
+**E17 dashboard.** Use task and address routes for detail views,
+`/leaderboard` for rankings, and the WebSocket event envelope for live
+updates. Display indexed freshness from `/health`. Treat aggregate data as
+eventually consistent within ingestion lag plus the configured cache TTL;
+do not present it as an authoritative on-chain precondition for a write.
+
+### Resolved and deferred questions
+
+- **Retention is resolved, not deferred:** issue #375 records deliberate
+  full raw-event retention for the lifetime of each instance. There is no
+  automatic pruning or cold archive.
+- **Multi-contract indexing is resolved, not deferred:** run one isolated
+  instance and database per deployment. A tenant key is absent by design.
+- **Breaking event shapes are resolved, not deferred:** coordinate the
+  indexer parser release with the contract release; do not dispatch by the
+  contract's live `VERSION` while replaying old ledgers.
+- **General availability is deferred:** #579, #580, and #581 are the
+  mandatory findings from the public-API security review. They cover
+  authenticated/bounded limiter identity, bounded REST work, and bounded
+  WebSocket sessions/replay.
+- **Runnable service integration is deferred:** #582 must converge the
+  SQLite and legacy PostgreSQL paths and wire ingestion plus HTTP serving
+  into `main.rs`.
+- **Protocol statistics and the unified address activity projection are
+  not public API:** query modules exist, but no v1 handlers or OpenAPI paths
+  expose them. Consumers must not depend on those Rust functions as a
+  remote contract.
+- **Bulk export and a checked-in TypeScript indexer client are not present
+  in this revision.** E16 should consume OpenAPI directly; large-history
+  export remains future work and must use bounded or authenticated serving
+  controls.
+
+These gaps are named so later epics do not mistake source files or the
+original proposal for capabilities available from the deployed v1 API.

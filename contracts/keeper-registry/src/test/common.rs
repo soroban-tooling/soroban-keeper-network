@@ -47,11 +47,32 @@ pub(crate) fn deploy_registry<'a>(
     registry_client
 }
 
+pub(crate) fn setup() -> TestSetup {
+    setup_in(Env::default())
+}
+
+/// Default TTL, in ledgers, that [`setup_long_lived`] gives every entry the
+/// test creates: far beyond any gap a test drives, so nothing is archived.
+pub(crate) const LONG_LIVED_TTL_LEDGERS: u32 = 50_000_000;
+
+/// Same as [`setup`], but every entry created from here on (the token, the
+/// registry instance, tasks, balances) starts with [`LONG_LIVED_TTL_LEDGERS`]
+/// of TTL. For tests that jump many reputation half-lives between actions,
+/// where the standard 4,096-ledger default would archive the token contract.
+pub(crate) fn setup_long_lived() -> TestSetup {
+    let env = Env::default();
+    env.ledger().with_mut(|li| {
+        li.min_temp_entry_ttl = LONG_LIVED_TTL_LEDGERS;
+        li.min_persistent_entry_ttl = LONG_LIVED_TTL_LEDGERS;
+        li.max_entry_ttl = LONG_LIVED_TTL_LEDGERS;
+    });
+    setup_in(env)
+}
+
 // The transmutes below intentionally re-bind the env/client to a 'static
 // lifetime — the standard Soroban test-harness pattern for a shared Setup.
 #[allow(clippy::useless_transmute, clippy::missing_transmute_annotations)]
-pub(crate) fn setup() -> TestSetup {
-    let env = Env::default();
+fn setup_in(env: Env) -> TestSetup {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);

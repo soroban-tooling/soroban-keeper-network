@@ -4,8 +4,8 @@ name: CI
 # No manual step is needed — open a PR and this workflow starts.
 #
 # Job policy (see docs/CI.md for the rationale):
-#   REQUIRED  — format, test, build-wasm, sdk-ts, bot, indexer. These block
-#               the merge.
+#   REQUIRED  — format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk,
+#               indexer-client. These block the merge.
 #   ADVISORY  — clippy, audit, wasm-size, sdk-bundle-size, fuzz-pr,
 #               resource-cost. These report findings as annotations or a job
 #               summary but never fail your PR.
@@ -119,17 +119,31 @@ jobs:
           key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-wasm-
 
-      - name: Build release WASM
+      - name: Build release WASM (keeper-registry)
         run: |
           cargo build --locked --release \
             --target wasm32-unknown-unknown \
             --package keeper-registry
 
-      - name: Upload WASM artifact
+      - name: Upload keeper-registry WASM artifact
         uses: actions/upload-artifact@v7
         with:
           name: keeper-registry-wasm
           path: target/wasm32-unknown-unknown/release/keeper_registry.wasm
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Build release WASM (treasury)
+        run: |
+          cargo build --locked --release \
+            --target wasm32-unknown-unknown \
+            --package treasury
+
+      - name: Upload treasury WASM artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: treasury-wasm
+          path: target/wasm32-unknown-unknown/release/treasury.wasm
           retention-days: 14
           if-no-files-found: error
 
@@ -527,6 +541,57 @@ jobs:
           retention-days: 1
 
   # ───────────────────────────────────────────────────────────────────────────
+  # REQUIRED — the indexer's TypeScript client (packages/indexer-client). Its
+  # request/response types are generated from indexer/openapi.yaml (issue
+  # 0373); "Types are generated from or validated against the OpenAPI schema
+  # in CI, catching drift automatically" is the acceptance criterion this
+  # job's last step exists for — regenerate, then fail if that changed
+  # anything, so a handler change that isn't reflected in openapi.yaml (or a
+  # openapi.yaml edit the generated types weren't regenerated from) is a red
+  # CI check, not something a contributor has to remember to notice. This
+  # does not re-verify that indexer/openapi.yaml itself is accurate against
+  # the Rust handlers -- that is the `indexer` job's own committed-file check
+  # (indexer/src/api/mod.rs's `the_openapi_document_describes_every_route`
+  # test); this job only checks that this package's generated types match
+  # whatever indexer/openapi.yaml currently says.
+  # ───────────────────────────────────────────────────────────────────────────
+  indexer-client:
+    name: Indexer client (TypeScript) (required)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/indexer-client
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Verify generated types match indexer/openapi.yaml
+        run: |
+          npm run generate:types
+          if ! git diff --exit-code -- src/generated/openapi-types.ts; then
+            echo "::error::src/generated/openapi-types.ts is stale relative to indexer/openapi.yaml. Run 'npm run generate:types' in packages/indexer-client and commit the result."
+            exit 1
+          fi
+
+  # ───────────────────────────────────────────────────────────────────────────
   # ADVISORY — the example keeper bot. It is a reference implementation, so a
   # lint nit there should not gate a contract PR.
   #
@@ -582,6 +647,102 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # REQUIRED — the keeper-bot-v2 service. Build, lint, and test suite, with
+  # an ephemeral Postgres service container for persistent state tests.
+  #
+  # Ephemeral service container mirrors the indexer approach (issue 0233):
+  # an isolated Postgres container created specifically for this job and
+  # destroyed with it, ensuring test idempotency without shared state.
+  #
+  # Runs only when the PR touches examples/keeper-bot-v2/, packages/sdk-ts/,
+  # or .github/workflows/ci.yml. A contract-only PR skips it while reporting
+  # success, so bot-v2 can be a required gate without blocking contract work.
+  # ───────────────────────────────────────────────────────────────────────────
+  bot-v2:
+    name: Keeper bot v2 (required)
+    runs-on: ubuntu-latest
+    needs: sdk-ts
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: keeper_bot_v2_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: examples/keeper-bot-v2
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for relevant changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qE '^(examples/keeper-bot-v2/|packages/sdk-ts/|\.github/workflows/ci\.yml)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node.js
+        if: steps.changes.outputs.relevant == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Download SDK artifact
+        if: steps.changes.outputs.relevant == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: sdk-ts-dist
+          path: packages/sdk-ts/dist
+
+      - name: Install SDK dependencies
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: packages/sdk-ts
+        run: npm ci --no-audit --no-fund
+
+      - name: Install keeper-bot-v2 dependencies
+        if: steps.changes.outputs.relevant == 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Build keeper-bot-v2
+        if: steps.changes.outputs.relevant == 'true'
+        run: npm run build
+
+      - name: Lint keeper-bot-v2
+        if: steps.changes.outputs.relevant == 'true'
+        run: npm run lint
+
+      - name: Test keeper-bot-v2 against ephemeral Postgres
+        if: steps.changes.outputs.relevant == 'true'
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/keeper_bot_v2_test
+        run: npm test
+
+      - name: Skipped (no keeper-bot-v2 changes)
+        if: steps.changes.outputs.relevant == 'false'
+        run: |
+          echo "PR does not touch examples/keeper-bot-v2 or SDK dependencies; keeper-bot-v2 checks skipped."
 
   # ───────────────────────────────────────────────────────────────────────────
   # REQUIRED — the indexer service. Format, build and test, with a real
@@ -724,12 +885,12 @@ jobs:
     name: CI required checks
     runs-on: ubuntu-latest
     if: always()
-    needs: [format, test, build-wasm, sdk-ts, bot, indexer, rust-sdk]
+    needs: [format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client]
     steps:
       - name: Verify required jobs succeeded
         run: |
           results='${{ join(needs.*.result, ' ') }}'
-          echo "Required job results (format, test, build-wasm, sdk-ts, bot, indexer, rust-sdk): $results"
+          echo "Required job results (format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client): $results"
           for r in $results; do
             if [ "$r" != "success" ]; then
               echo "::error::A required CI job did not succeed."

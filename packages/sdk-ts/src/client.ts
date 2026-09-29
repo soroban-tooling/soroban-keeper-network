@@ -22,7 +22,8 @@ import {
 } from "@stellar/stellar-sdk";
 
 import type { ContractCaller, TransactionSigner } from "./core/caller.js";
-import { KeeperRpcError, KeeperSdkError, toKeeperError } from "./errors.js";
+import { decodeKeeperErrorCode, KeeperRpcError, KeeperSdkError, toKeeperError } from "./errors.js";
+import { withRetry } from "./retry.js";
 import type { IntegerInput } from "./core/scval.js";
 import type { Task } from "./types.js";
 import type { ContractCompatibility, VersionOptions } from "./methods/views.js";
@@ -114,6 +115,15 @@ export interface KeeperRegistryClientOptions {
   /** Delay between confirmation polls. */
   pollIntervalMs?: number | undefined;
   /**
+   * Retries (in addition to the first attempt) for a transient RPC failure
+   * while sending or polling a transaction. A decodable contract error (see
+   * {@link decodeKeeperErrorCode}) is never retried, since it is a
+   * deterministic verdict, not a transport failure. Defaults to 3.
+   */
+  maxRetries?: number | undefined;
+  /** Base delay in milliseconds for the retry back-off. Defaults to 500. */
+  retryBaseMs?: number | undefined;
+  /**
    * Pre-built RPC server. Supplying one skips constructing a `rpc.Server` from
    * `rpcUrl` -- the seam this package's tests use to run without a network.
    */
@@ -151,6 +161,8 @@ export class KeeperRegistryClient implements ContractCaller {
   private readonly timeoutSeconds: number;
   private readonly confirmationTimeoutMs: number;
   private readonly pollIntervalMs: number;
+  private readonly maxRetries: number;
+  private readonly retryBaseMs: number;
   private readonly warnSink: (message: string) => void;
 
   constructor(options: KeeperRegistryClientOptions) {
@@ -178,6 +190,8 @@ export class KeeperRegistryClient implements ContractCaller {
     this.timeoutSeconds = options.timeoutSeconds ?? 30;
     this.confirmationTimeoutMs = options.confirmationTimeoutMs ?? 30_000;
     this.pollIntervalMs = options.pollIntervalMs ?? 1_000;
+    this.maxRetries = options.maxRetries ?? 3;
+    this.retryBaseMs = options.retryBaseMs ?? 500;
     this.warnSink = options.warn ?? ((message: string) => console.warn(message));
   }
 
@@ -236,6 +250,11 @@ export class KeeperRegistryClient implements ContractCaller {
   /** See {@link views.keeperBalance}. */
   keeperBalance(keeper: string): Promise<bigint> {
     return views.keeperBalance(this, keeper);
+  }
+
+  /** See {@link views.keeperReputation}. */
+  keeperReputation(keeper: string): Promise<number> {
+    return views.keeperReputation(this, keeper);
   }
 
   /** See {@link views.isClaimable}. */
@@ -389,12 +408,7 @@ export class KeeperRegistryClient implements ContractCaller {
     });
     const signed = TransactionBuilder.fromXDR(signedXdr, this.networkPassphrase);
 
-    let sent: rpc.Api.SendTransactionResponse;
-    try {
-      sent = await this.server.sendTransaction(signed as never);
-    } catch (cause) {
-      throw toKeeperError(cause, context);
-    }
+    const sent = await this.sendTransactionWithRetry(signed, context);
     if (sent.status !== "PENDING") {
       throw toKeeperError(sent.errorResult ?? `submission returned ${sent.status}`, context);
     }
@@ -480,12 +494,7 @@ export class KeeperRegistryClient implements ContractCaller {
     });
     const signed = TransactionBuilder.fromXDR(signedXdr, this.networkPassphrase);
 
-    let sent: rpc.Api.SendTransactionResponse;
-    try {
-      sent = await this.server.sendTransaction(signed as never);
-    } catch (cause) {
-      throw toKeeperError(cause, context);
-    }
+    const sent = await this.sendTransactionWithRetry(signed, context);
     if (sent.status !== "PENDING") {
       throw toKeeperError(sent.errorResult ?? `submission returned ${sent.status}`, context);
     }
@@ -543,13 +552,39 @@ export class KeeperRegistryClient implements ContractCaller {
       .build();
   }
 
+  /**
+   * Submits a signed transaction, retrying a transient RPC failure
+   * (`this.maxRetries` times, exponential back-off) via {@link withRetry}
+   * rather than surfacing it on the first blip. A decodable contract error
+   * is a deterministic verdict, not a transport failure, so it is never
+   * retried (backlog issue 0188).
+   */
+  private async sendTransactionWithRetry(
+    signed: Parameters<RpcServerLike["sendTransaction"]>[0],
+    context: string,
+  ): Promise<rpc.Api.SendTransactionResponse> {
+    try {
+      return await withRetry(() => this.server.sendTransaction(signed), {
+        maxRetries: this.maxRetries,
+        retryBaseMs: this.retryBaseMs,
+        isPermanentError: isDecodableContractError,
+      });
+    } catch (cause) {
+      throw toKeeperError(cause, context);
+    }
+  }
+
   /** Polls until the submitted transaction leaves `NOT_FOUND`/`PENDING`. */
   private async confirm<T>(hash: string, context: string): Promise<T> {
     const deadline = Date.now() + this.confirmationTimeoutMs;
     for (;;) {
       let result: rpc.Api.GetTransactionResponse;
       try {
-        result = await this.server.getTransaction(hash);
+        result = await withRetry(() => this.server.getTransaction(hash), {
+          maxRetries: this.maxRetries,
+          retryBaseMs: this.retryBaseMs,
+          isPermanentError: isDecodableContractError,
+        });
       } catch (cause) {
         throw toKeeperError(cause, context);
       }
@@ -602,4 +637,14 @@ export class KeeperRegistryClient implements ContractCaller {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * `isPermanentError` for {@link withRetry}: a decodable {@link KeeperErrorCode}
+ * is the contract's own deterministic verdict, so retrying the identical call
+ * would just pay another fee for the same rejection. Anything else (a network
+ * timeout, a dropped connection, an RPC 5xx) is presumed transient.
+ */
+function isDecodableContractError(error: unknown): boolean {
+  return decodeKeeperErrorCode(error) !== undefined;
 }

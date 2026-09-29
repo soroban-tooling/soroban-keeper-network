@@ -67,6 +67,10 @@ contract `VERSION` that changes event shapes is a coordinated indexer
 release, not a live `version()` dispatch. Both decisions, and what happens
 to already-ingested rows, are in [`docs/INDEXER_DESIGN.md`](../docs/INDEXER_DESIGN.md).
 
+For the database itself — every table, its columns, and how the API's
+derived views (a task's status, a keeper's balance, ...) are folded from
+the raw `events` table — see [`docs/INDEXER_SCHEMA.md`](../docs/INDEXER_SCHEMA.md).
+
 Ingestion polls the RPC's `getEvents`, the mechanism the keeper-bot already
 uses. Backfill and steady-state polling share one parsing path
 (`ingest::Ingestor::ingest_batch`); the only difference between them is the
@@ -90,12 +94,23 @@ problems at once and exits, rather than failing later inside the ingest loop.
 | `INDEXER_BIND_ADDRESS` | no | `127.0.0.1:8080` | API bind address |
 | `INDEXER_POLL_INTERVAL_SECS` | no | `5` | Seconds between polls once caught up |
 | `INDEXER_BACKFILL_PAGE_SIZE` | no | `200` | Ledgers per page during backfill |
+| `INDEXER_SHUTDOWN_DRAIN_SECS` | no | `30` | Max seconds a SIGINT/SIGTERM shutdown waits for an in-flight ingestion pass to finish and checkpoint before exiting anyway |
 | `INDEXER_LOG` | no | `info` | `tracing` filter directive |
 
 `INDEXER_START_LEDGER` should be the contract's deployment ledger. On a
 network where that is not known exactly, any ledger at or before the
 `initialize` call works: ingestion is idempotent, so starting early costs
 extra scanning rather than correctness.
+
+## Shutdown
+
+On SIGINT (ctrl-c) or SIGTERM (what a container orchestrator sends on a
+normal stop or restart), the indexer stops starting new ingestion passes
+and, if one is already in flight, lets it finish and checkpoint before
+exiting — bounded by `INDEXER_SHUTDOWN_DRAIN_SECS`, so a stuck pass cannot
+block shutdown indefinitely. If that bound is hit, the process exits anyway;
+the next start resumes cleanly from the last checkpoint, since ingestion is
+idempotent.
 
 ## Running
 

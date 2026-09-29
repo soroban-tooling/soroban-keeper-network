@@ -21,12 +21,14 @@
 | [Architecture](docs/ARCHITECTURE.md) | Components, task lifecycle, storage, money invariants, trust model |
 | [Fuzzing & property testing](docs/FUZZING.md) | Running/adding fuzz targets, the shared invariant module, crash-to-regression convention |
 | [Verifier design (E04)](docs/VERIFIER_DESIGN.md) | `IKeeperVerifier` interface for optional on-chain proof verification |
+| [Reputation design (E07)](docs/REPUTATION_DESIGN.md) | On-chain keeper reputation scoring architecture and epic retrospective |
 | [Indexer design](docs/INDEXER_DESIGN.md) | One instance per deployment, event-shape versioning policy |
 | [Indexer deployment](docs/INDEXER_DEPLOYMENT.md) | Provisioning, backfill, and operating an indexer instance |
 | [Batch operations (E05)](docs/BATCH_OPERATIONS.md) | Proposed `batch_register_tasks` design + integration guide |
 | [Storage layout survey](docs/STORAGE_LAYOUT.md) | `Task` struct storage-cost findings and recommendations |
 | [Audit scope](docs/AUDIT_SCOPE.md) | Surfaces and primary artifacts an external auditor should review, including the verifier integration |
 | [Events for a future indexer](docs/EVENTS.md) | Verifier-related event schema (epic E14 scope), field-by-field indexer purpose |
+| [Treasury events](docs/TREASURY_EVENTS.md) | Treasury event topic pairs, distribution breakdown, rebuilding recipient configuration from events |
 | [CI](docs/CI.md) | What each CI job checks and which are advisory vs. required |
 | [Deploying & running](docs/DEPLOYING.md) | Testnet deploy walkthrough and keeper-bot operator guide |
 | [Deployments](docs/DEPLOYMENTS.md) | Canonical record of on-chain addresses |
@@ -262,14 +264,15 @@ A **shared, permissionless, on-chain coordination layer** where:
 
 #### FR-7: Admin Controls
 - `pause`/`unpause` MUST gate `register_task`, `claim_task`, `execute_task`,
-  `increase_reward`, and `extend_deadline` — the first four open new escrow
-  or reward exposure, and `extend_deadline` can keep escrow locked in a
-  contract the admin has declared unsafe if left open.
-- `pause`/`unpause` MUST NOT gate `cancel_task`, `expire_task`, or
-  `withdraw_rewards` — these only let already-escrowed value flow back to
-  whoever already owns it, which must always stay available so an admin
-  pause can never become a fund freeze. Read-only views are likewise never
-  gated.
+  `increase_reward`, `extend_deadline`, and `stake_deposit` — these open new
+  escrow, reward, or keeper stake exposure. `extend_deadline` can keep escrow
+  locked in a contract the admin has declared unsafe if left open.
+- `pause`/`unpause` MUST NOT gate `cancel_task`, `expire_task`,
+  `withdraw_rewards`, `initiate_unbond`, or `withdraw_stake` — these only
+  let already-escrowed value flow back to whoever already owns it, which must
+  always stay available so an admin pause can never become a fund freeze.
+  `slash` is an admin action and is also not gated. Read-only views are likewise
+  never gated.
   See the `pause`/`unpause` doc comment in
   `contracts/keeper-registry/src/lib.rs` and the
   `test_pause_policy_matrix_entry_point_by_entry_point` test in
@@ -280,7 +283,57 @@ A **shared, permissionless, on-chain coordination layer** where:
 - `upgrade` MUST use `deployer().update_current_contract_wasm`, and MUST
   emit `Upgraded` (admin + new WASM hash) before doing so.
 
-#### FR-8 — Batch Task Registration
+#### FR-8: Stake Deposit
+- `deposit_stake` MUST transfer the caller-specified `amount` into the contract
+  and increase that keeper's stake balance by exactly `amount`.
+- `deposit_stake` MUST reject `amount <= 0` rather than silently no-oping.
+- The stake balance MUST be tracked separately from task reward balances so a
+  keeper's task-escrowed funds and staked collateral remain independently
+  auditable.
+- MUST emit `StakeDeposited` with `(keeper, amount)` or equivalent data that
+  reconstructs the deposit from the event stream.
+
+#### FR-9: Stake Unbonding and Withdrawal
+- `initiate_unbond` MUST require a configured `unbonding_delay` and place the
+  requested amount into a pending unbonding state for that keeper.
+- A keeper MUST NOT be able to withdraw or spend the pending amount as if it
+  were still active collateral before the configured delay elapses.
+- `withdraw_stake` MUST succeed only after the entire requested amount has aged
+  past the unbonding delay; a withdrawal at `delay - 1` MUST revert, while the
+  first ledger at or after `delay` MUST succeed.
+- Once the delay has elapsed, the contract MUST release the eligible amount to
+  the keeper and clear the corresponding pending unbonding record atomically.
+- MUST emit `StakeUnbondingStarted` and `StakeWithdrawn` with enough data to
+  reconstruct the outstanding and released balances from the event history.
+
+#### FR-10: Minimum Stake Requirement
+- If `min_stake` is configured to a non-zero value, `claim_task` MUST reject a
+  keeper whose effective stake is below the configured floor.
+- A keeper exactly equal to the minimum MUST remain eligible; a keeper one unit
+  below MUST be rejected.
+- The effective stake MUST exclude any amount that is currently unbonding and
+  therefore not withdrawable, so a keeper cannot game the requirement by
+  moving funds into a pending unbond state while still claiming tasks.
+- The minimum MUST be admin-configurable and default to `0` when unset.
+- MUST expose a read-only `min_stake()` view mirroring the configuration pattern
+  of the task reward floor, with no pause gate on the view.
+
+#### FR-11: Slash Authorization
+- `slash` MUST only be callable by the authorized slash authority, which MUST be
+  a single explicit party or role defined by the staking design and enforced by
+  the contract.
+- An unauthorized caller MUST revert with the same failure semantics as other
+  auth-gated registry actions; no caller other than the designated authority may
+  reduce a keeper's stake.
+- The slash amount MUST never exceed the keeper's current active stake and MUST
+  apply atomically so a slash cannot partially succeed against stale state.
+- `slash` MUST emit `StakeSlashed` with the keeper, amount, and reason so the
+  event stream alone explains why the collateral changed.
+- If the slash authority is admin-gated, it MUST follow the normal admin auth
+  flow exactly, including successful transfer to a new admin without stale
+  authorization from the previous admin.
+
+#### FR-12 — Batch Task Registration
 
 `batch_register_tasks` is implemented; see
 [docs/BATCH_OPERATIONS.md](docs/BATCH_OPERATIONS.md) for the full design and
@@ -299,7 +352,7 @@ Note that `MAX_BATCH_SIZE` is currently a conservative guard rather than a
 measured ceiling — issue 0104 owns the empirical measurement. Read the live
 value from the `max_batch_size()` view instead of hardcoding it.
 
-#### FR-8: Batch Task Reads
+#### FR-13: Batch Task Reads
 - `get_tasks(ids: Vec<u64>) -> Vec<Option<Task>>` MUST read every requested id
   in a single call, so an indexer or keeper bot does not need one RPC round
   trip per task.
@@ -325,6 +378,20 @@ value from the `max_batch_size()` view instead of hardcoding it.
 - `count == 0` and an empty `ids` MUST return an empty vector, not an error.
 - Duplicate ids are permitted and each is resolved independently.
 - Both are read-only views and are therefore never gated by `pause`.
+
+#### FR-9: Keeper Reputation Tracking
+- `execute_task` MUST increment the claiming keeper's reputation record upon successful execution (`successful_executions` incremented).
+- Re-claiming a task after `lock_ledgers` has elapsed MUST record a missed lock window against the prior claimer (`missed_locks` incremented).
+- A keeper's reputation record MUST be created upon their first tracked action and updated incrementally.
+- Reputation MUST decay lazily at read time based on ledgers elapsed since the last update ledger; querying reputation via `keeper_reputation` MUST NOT mutate state and MUST NOT bump TTL.
+- Querying reputation for an address with no recorded history MUST return a zero-initialized default record rather than erroring.
+- MUST emit `("reputation", "update")` event carrying `(keeper, action, new_score)` on state-mutating updates.
+
+#### FR-10: Claim Eligibility Floor
+- When the eligibility floor (`min_reputation`) is configured to a non-zero value, `claim_task` MUST reject callers whose decayed reputation is strictly below `min_reputation` with `KeeperError::ReputationTooLow`.
+- `min_reputation` MUST default to `0` (disabled), ensuring existing and new keepers are not gated by default.
+- `set_min_reputation` MUST only be callable by the `Admin`.
+- `min_reputation` MUST NOT gate task registration, task execution, cancellation, expiry, or reward withdrawal.
 
 ---
 
@@ -371,8 +438,16 @@ value from the `max_batch_size()` view instead of hardcoding it.
 | `Paused` | `bool` | Instance | Instance lifetime | `false` |
 | `TaskCounter` | `u64` | Instance | Instance lifetime | `0` |
 | `RewardToken` | `Address` | Instance | Instance lifetime | — |
+| `MinStake` | `i128` | Instance | Instance lifetime | `0` |
+| `UnbondingDelay` | `u64` | Instance | Instance lifetime | `0` |
+| `SlashAuthority` | `Address` | Instance | Instance lifetime | `Admin` |
 | `Task(u64)` | `Task` struct | Persistent | `task.ttl_ledgers` | — |
 | `KeeperReward(Address)` | `i128` | Persistent | ~1 year (6.3M ledgers) | `0` |
+| `KeeperStake(Address)` | `i128` | Persistent | ~1 year (6.3M ledgers) | `0` |
+| `UnbondRequest(Address)` | `UnbondRequest` struct | Persistent | ~1 year (6.3M ledgers) | — (absent) |
+| `MinStake` | `i128` | Instance | Instance lifetime | `0` (no requirement) |
+| `SlashCounter` | `u64` | Instance | Instance lifetime | `0` |
+| `Slash(u64)` | `SlashRecord` struct | Persistent | ~1 year (6.3M ledgers) | — (removed once resolved) |
 
 `Task.calldata` is capped at `MAX_CALLDATA_LEN` = 1024 bytes, enforced at
 `register_task`. `save_task` re-writes the whole `Task` struct (including
@@ -430,9 +505,17 @@ without breaking existing consumers.
 | `Paused` | `pause` / `unpause` | `("paused", "admin")` | `(paused: bool,)` — `true` from `pause`, `false` from `unpause` |
 | `FeeUpdated` | `set_fee_bps` | `("fee", "admin")` | `(old_bps: u32, new_bps: u32)` |
 | `MinRewardUpdated` | `set_min_reward` | `("minrwd", "admin")` | `(old_min: i128, new_min: i128)` |
+| `ReputationFloorUpdated` | `set_reputation_floor` | `("repfloor", "admin")` | `(old_floor_bps: u32, new_floor_bps: u32)` — `0` means the floor is disabled |
 | `AdminTransferred` | `transfer_admin` | `("admin", "xfer")` | `(old_admin: Address, new_admin: Address)` |
 | `FeesSwept` | `sweep_fees` | `("sweep", "admin")` | `(treasury: Address, amount: i128, remaining: i128)` |
 | `Upgraded` | `upgrade` | `("upgrade", "admin")` | `(admin: Address, new_wasm_hash: BytesN<32>)` — emitted before the executable is swapped |
+| `StakeDeposited` | `stake_deposit` | `("stkdep", "stake")` | `(keeper: Address, amount: i128, new_total: i128)` |
+| `UnbondInitiated` | `initiate_unbond` | `("unbond", "stake")` | `(keeper: Address, amount: i128, unlock_ledger: u32)` |
+| `StakeWithdrawn` | `withdraw_stake` | `("stkwd", "stake")` | `(keeper: Address, amount: i128)` |
+| `Slashed` | `slash` | `("slash", "stake")` | `(slash_id: u64, keeper: Address, amount: i128, reason: Symbol)` |
+| `MinStakeUpdated` | `set_min_stake` | `("minstk", "admin")` | `(old_min: i128, new_min: i128)` |
+| `SlashAppealRaised` | `raise_slash_appeal` | `("appeal", "stake")` | `(slash_id: u64, keeper: Address)` |
+| `SlashAppealResolved` | `resolve_slash_appeal` | `("resolve", "stake")` | `(slash_id: u64, upheld: bool)` |
 
 Notes:
 
@@ -443,6 +526,7 @@ Notes:
   not just one.
 - `VerifierAttached` is emitted on `register_task` when an optional verifier is attached, preserving the standard 4-tuple schema of `TaskRegistered` for backwards compatibility with existing event parsers.
 - `VerifierUpdated` follows the `FeeUpdated` / `MinRewardUpdated` before/after pattern with `(task_id, old_verifier, new_verifier)`.
+- `StakeDeposited`/`UnbondInitiated`/`StakeWithdrawn`/`Slashed`/`MinStakeUpdated`/`SlashAppealRaised`/`SlashAppealResolved` are the staking epic's events (E06, `docs/STAKING_DESIGN.md`). `Slashed`'s `reason` is a `Symbol`, not free text — see the design doc for the trust model behind `slash`'s authorization.
 
 #### Task Lifecycle State Machine
 
@@ -695,7 +779,7 @@ need the daemon loop to complete a round without a real executor in place.
 
 1. **No on-chain execution verification (MVP)** — The registry trusts the claimer to submit proof. A malicious keeper could claim-and-execute-fake. Phase 2 adds an optional verifier callback.
 2. **Fee sweep is manual** — Protocol fees are batched and swept by admin. In Phase 2 this flows automatically to a staking/treasury contract.
-3. **No slashing (MVP)** — Unresponsive keepers lose their lock but face no economic penalty. Phase 2 introduces staking + slashing.
+3. **No automatic slashing for missed executions** — The staking and slashing requirements are documented in FR-8 through FR-11; unresponsive keepers still lose their lock without an automatic penalty.
 
 ### Security Properties
 

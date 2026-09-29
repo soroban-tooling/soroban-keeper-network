@@ -4,7 +4,7 @@
 //! consumers can filter without decoding the payload. The README event table
 //! is the published contract for these shapes.
 
-use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env};
+use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Symbol};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Events — emitted for off-chain keeper bots to consume
@@ -154,5 +154,127 @@ pub fn emit_verifier_updated(
     e.events().publish(
         (symbol_short!("vupdate"), symbol_short!("task")),
         (task_id, old_verifier, new_verifier),
+    );
+}
+
+// ─── E06 — Keeper Staking & Slashing ────────────────────────────────────
+// See `docs/STAKING_DESIGN.md`.
+
+pub fn emit_stake_deposited(e: &Env, keeper: &Address, amount: i128, new_total: i128) {
+    e.events().publish(
+        (symbol_short!("deposit"), symbol_short!("stake")),
+// ─── E06 — Staking & Slashing (docs/STAKING_DESIGN.md) ─────────────────
+// Staking state-transition events go here.
+
+pub fn emit_stake_deposited(e: &Env, keeper: &Address, amount: i128, new_total: i128) {
+    e.events().publish(
+        (symbol_short!("stkdep"), symbol_short!("stake")),
+        (keeper.clone(), amount, new_total),
+    );
+}
+
+pub fn emit_unbond_initiated(e: &Env, keeper: &Address, amount: i128, release_ledger: u32) {
+    e.events().publish(
+        (symbol_short!("unbond"), symbol_short!("stake")),
+        (keeper.clone(), amount, release_ledger),
+pub fn emit_unbond_initiated(e: &Env, keeper: &Address, amount: i128, unlock_ledger: u32) {
+    e.events().publish(
+        (symbol_short!("unbond"), symbol_short!("stake")),
+        (keeper.clone(), amount, unlock_ledger),
+    );
+}
+
+pub fn emit_stake_withdrawn(e: &Env, keeper: &Address, amount: i128) {
+    e.events().publish(
+        (symbol_short!("wdraw"), symbol_short!("stake")),
+        (symbol_short!("stkwd"), symbol_short!("stake")),
+        (keeper.clone(), amount),
+    );
+}
+
+/// `reason` is a bounded `Symbol` (9-char limit), not an arbitrary string —
+/// see `docs/STAKING_DESIGN.md`'s entry-point signature note.
+pub fn emit_slashed(
+    e: &Env,
+    keeper: &Address,
+    amount: i128,
+    reason: Symbol,
+    incident_id: &BytesN<32>,
+    treasury: &Address,
+) {
+    e.events().publish(
+        (symbol_short!("slash"), symbol_short!("stake")),
+        (
+            keeper.clone(),
+            amount,
+            reason,
+            incident_id.clone(),
+            treasury.clone(),
+        ),
+pub fn emit_slashed(e: &Env, slash_id: u64, keeper: &Address, amount: i128, reason: &Symbol) {
+    e.events().publish(
+        (symbol_short!("slash"), symbol_short!("stake")),
+        (slash_id, keeper.clone(), amount, reason.clone()),
+    );
+}
+
+pub fn emit_min_stake_updated(e: &Env, old_min: i128, new_min: i128) {
+    e.events().publish(
+        (symbol_short!("minstk"), symbol_short!("admin")),
+        (old_min, new_min),
+    );
+}
+
+pub fn emit_slash_appeal_raised(e: &Env, slash_id: u64, keeper: &Address) {
+    e.events().publish(
+        (symbol_short!("appeal"), symbol_short!("stake")),
+        (slash_id, keeper.clone()),
+    );
+}
+
+pub fn emit_slash_appeal_resolved(e: &Env, slash_id: u64, upheld: bool) {
+    e.events().publish(
+        (symbol_short!("resolve"), symbol_short!("stake")),
+        (slash_id, upheld),
+    );
+}
+
+// ─── E06 — Execution dispute window (docs/STAKING_DESIGN.md §4.2) ──────
+
+pub fn emit_dispute_window_updated(e: &Env, old_ledgers: u32, new_ledgers: u32) {
+    e.events().publish(
+        (symbol_short!("disptwin"), symbol_short!("admin")),
+        (old_ledgers, new_ledgers),
+    );
+}
+
+pub fn emit_execution_disputed(e: &Env, task_id: u64, keeper: &Address) {
+    e.events().publish(
+        (symbol_short!("exdisp"), symbol_short!("task")),
+        (task_id, keeper.clone()),
+    );
+}
+
+pub fn emit_execution_dispute_resolved(e: &Env, task_id: u64, upheld: bool) {
+    e.events().publish(
+        (symbol_short!("exresolv"), symbol_short!("task")),
+        (task_id, upheld),
+    );
+}
+
+pub fn emit_rewards_finalized(e: &Env, keeper: &Address, task_id: u64, amount: i128) {
+    e.events().publish(
+        (symbol_short!("finalize"), symbol_short!("reward")),
+        (keeper.clone(), task_id, amount),
+    );
+}
+
+// ─── E07 — Keeper Reputation ───────────────────────────────────────────
+// New reputation events go here.
+
+pub fn emit_reputation_floor_updated(e: &Env, old_floor_bps: u32, new_floor_bps: u32) {
+    e.events().publish(
+        (symbol_short!("repfloor"), symbol_short!("admin")),
+        (old_floor_bps, new_floor_bps),
     );
 }

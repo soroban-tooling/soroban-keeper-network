@@ -25,6 +25,9 @@ soroban-sdk = { version = "22.0.1" }
 [dev-dependencies]
 soroban-sdk = { version = "22.0.1", features = ["testutils"] }
 proptest = "1"
+# Only for the sweep_fees -> treasury round trip in `test/withdraw.rs`
+# (docs/TREASURY_DESIGN.md §3). The registry itself never depends on it.
+keeper-treasury = { path = "../treasury", features = ["testutils"] }
 
 # `cfg(fuzzing)` is set automatically by cargo-fuzz/libfuzzer-sys, not
 # declared anywhere in this workspace's own Cargo.toml — the check-cfg lint
