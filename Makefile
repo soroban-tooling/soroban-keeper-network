@@ -16,7 +16,7 @@ WASM := target/wasm32-unknown-unknown/release/keeper_registry.wasm
 #   make indexer INDEXER_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/indexer_test
 INDEXER_TEST_DATABASE_URL ?=
 
-.PHONY: help build test fmt fmt-check lint wasm optimize clean bot bot-test bot-v2-test sdk-ts indexer ci check
+.PHONY: help build test fmt fmt-check lint wasm optimize clean bot bot-test bot-v2-test sdk-ts sdk-ts-lint indexer ci check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -52,8 +52,11 @@ indexer: ## Format-check, build and test the indexer (matches CI)
 	INDEXER_TEST_DATABASE_URL=$(INDEXER_TEST_DATABASE_URL) \
 		cargo test --package keeper-indexer --locked
 
-sdk-ts: ## Build and test the TypeScript SDK (matches CI)
-	cd packages/sdk-ts && npm install --no-audit --no-fund && npm run build && npm test && npm run lint
+sdk-ts: ## Typecheck, build and test the TypeScript SDK (matches the required CI job)
+	cd packages/sdk-ts && npm install --no-audit --no-fund && npx tsc --noEmit -p tsconfig.json && npm run build && npm test
+
+sdk-ts-lint: ## ESLint the TypeScript SDK (advisory in CI, so not part of `make ci`)
+	cd packages/sdk-ts && npm install --no-audit --no-fund && npm run lint
 
 bot-test: sdk-ts ## Build the SDK then run the keeper bot's tests (matches CI) — bot depends on sdk-ts's dist/ output
 	cd examples/keeper-bot && npm install --no-audit --no-fund && npm test && npm run lint
@@ -66,4 +69,4 @@ clean: ## Remove build artifacts
 
 ci: fmt-check test wasm sdk-ts bot-test bot-v2-test indexer ## Run all required CI checks locally (blocking checks only)
 
-check: ci lint ## Run all checks contributors should run before opening a PR
+check: ci lint sdk-ts-lint ## Run all checks contributors should run before opening a PR

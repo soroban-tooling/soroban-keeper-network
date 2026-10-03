@@ -6,7 +6,7 @@ name: CI
 # Job policy (see docs/CI.md for the rationale):
 #   REQUIRED  — format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk,
 #               indexer-client. These block the merge.
-#   ADVISORY  — clippy, audit, wasm-size, sdk-bundle-size, fuzz-pr,
+#   ADVISORY  — clippy, audit, wasm-size, sdk-ts-lint, sdk-bundle-size, fuzz-pr,
 #               resource-cost. These report findings as annotations or a job
 #               summary but never fail your PR.
 #
@@ -496,7 +496,10 @@ jobs:
         run: ./scripts/report-resource-cost.sh
 
   # ───────────────────────────────────────────────────────────────────────────
-  # REQUIRED — the TypeScript SDK (packages/sdk-ts). Built and uploaded as an
+  # REQUIRED — the TypeScript SDK (packages/sdk-ts). Typechecked, built and
+  # tested; a type error blocks the merge, the way `cargo fmt --check` does on
+  # the Rust side. ESLint is deliberately NOT here: it is the advisory
+  # `sdk-ts-lint` job below, mirroring clippy. Built and uploaded as an
   # artifact so `bot` (below) can install it as a real `file:` dependency
   # without re-running its build — `npm install` on a `file:` reference
   # copies the referenced directory as-is, it does not build it.
@@ -530,15 +533,41 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Lint
-        run: npm run lint
-
       - name: Upload built package (for the bot job to consume)
         uses: actions/upload-artifact@v7
         with:
           name: sdk-ts-dist
           path: packages/sdk-ts/dist
           retention-days: 1
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — ESLint for the TypeScript SDK, the counterpart of `clippy`:
+  # lint findings are subjective enough that a maintainer should decide
+  # case-by-case, so this never blocks a PR. Uses packages/sdk-ts's flat config
+  # (eslint.config.cjs — `.cjs` because that package is `"type": "module"`).
+  # The type-correctness half of this concern is the required `sdk-ts` job.
+  # ───────────────────────────────────────────────────────────────────────────
+  sdk-ts-lint:
+    name: SDK lint (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: packages/sdk-ts
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # Findings are surfaced, not denied. Maintainers decide during review
+      # whether a given rule is worth acting on.
+      - name: ESLint
+        run: npm run lint
 
   # ───────────────────────────────────────────────────────────────────────────
   # REQUIRED — the indexer's TypeScript client (packages/indexer-client). Its
