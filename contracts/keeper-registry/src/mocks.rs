@@ -15,7 +15,7 @@
 
 #![cfg(any(test, fuzzing))]
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
 
 use crate::KeeperRegistryClient;
 
@@ -87,9 +87,7 @@ impl ReentrantToken {
     /// yet is left alone).
     pub fn extend_ttl_for_test(env: Env, holders: soroban_sdk::Vec<Address>, to_ledger: u32) {
         env.storage().instance().extend_ttl(to_ledger, to_ledger);
-        env.storage()
-            .instance()
-            .extend_ttl(to_ledger, to_ledger);
+        env.storage().instance().extend_ttl(to_ledger, to_ledger);
         for holder in holders.iter() {
             let key = DataKey::Balance(holder);
             if env.storage().persistent().has(&key) {
@@ -295,22 +293,11 @@ fn reenter(env: &Env) {
             let keeper: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
             let admin: Address = env.storage().instance().get(&DataKey::Keeper).unwrap();
             let treasury: Address = env.storage().instance().get(&DataKey::TriggerTo).unwrap();
-            // The reentrant call's own incident id — deliberately the same
-            // fixed value `test_reentrant_token_slash` uses for the outer
-            // call, so a correct CEI ordering (incident recorded before the
-            // token transfer) rejects this as a duplicate.
-            let incident_id = BytesN::from_array(env, &[9u8; 32]);
-            let treasury: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::TriggerTo)
-                .unwrap();
             match client.try_slash(
                 &admin,
                 &keeper,
                 &100_000i128,
                 &symbol_short!("fraud"),
-                &incident_id,
                 &treasury,
             ) {
                 Ok(_) => (true, NO_ERROR_CODE),

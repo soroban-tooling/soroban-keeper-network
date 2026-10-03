@@ -1,18 +1,4 @@
 [package]
-name = "treasury"
-version = "0.1.0"
-edition = "2021"
-authors = ["Soroban Keeper Network Contributors"]
-description = "Recipient distribution treasury contract for the Soroban Keeper Network"
-license = "Apache-2.0"
-repository = "https://github.com/soroban-tooling/soroban-keeper-network"
-keywords = ["soroban", "stellar", "treasury", "automation", "defi"]
-categories = ["cryptography::cryptocurrencies"]
-
-[lib]
-# cdylib for the on-chain WASM build; rlib so the property tests (and any
-# other Rust-side consumer) can `use treasury::*` as a normal library
-# dependency instead of only linking the compiled WASM.
 name = "keeper-treasury"
 version = "0.1.0"
 edition = "2021"
@@ -26,7 +12,8 @@ categories = ["cryptography::cryptocurrencies"]
 [lib]
 # cdylib for the on-chain WASM build; rlib so the registry's test suite can
 # register this contract for the sweep-to-distribution round trip
-# (docs/TREASURY_DESIGN.md §3).
+# (docs/TREASURY_DESIGN.md §3) and the property tests can `use treasury::*`
+# as a normal library dependency instead of only linking the compiled WASM.
 crate-type = ["cdylib", "rlib"]
 
 [features]
@@ -38,8 +25,6 @@ soroban-sdk = { version = "22.0.1" }
 
 [dev-dependencies]
 soroban-sdk = { version = "22.0.1", features = ["testutils"] }
-
-# Note: release profile is defined once at the workspace root Cargo.toml.
 proptest = "1"
 
 # `cfg(fuzzing)` is set automatically by cargo-fuzz/libfuzzer-sys, not

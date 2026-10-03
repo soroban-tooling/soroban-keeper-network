@@ -140,6 +140,14 @@ impl KeeperRegistry {
     pub fn get_slash(e: Env, slash_id: u64) -> Option<crate::types::SlashRecord> {
         e.storage().persistent().get(&DataKey::Slash(slash_id))
     }
+    /// Read-only: a keeper's aggregate slash history, `(count,
+    /// total_slashed)`, both zero if the keeper has never been slashed
+    /// (#425). Lets a dashboard or keeper bot read a keeper's track record
+    /// without replaying every `Slashed` event.
+    pub fn slash_history(e: Env, keeper: Address) -> (u32, i128) {
+        let history = read_slash_history(&e, &keeper);
+        (history.count, history.total_slashed)
+    }
     /// Ledgers an execute_task credit is held before it becomes
     /// withdrawable (0 if unset — disabled). See docs/STAKING_DESIGN.md §4.2.
     pub fn dispute_window(e: Env) -> u32 {

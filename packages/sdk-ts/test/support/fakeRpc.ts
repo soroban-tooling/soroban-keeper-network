@@ -48,6 +48,8 @@ export interface FakeRpcOptions {
   authRequiredBy?: Record<string, readonly string[]>;
   /** Ledger sequence `getLatestLedger` reports. */
   latestLedger?: number;
+  /** What a `keeper_balance` read returns, unless `results.keeper_balance` overrides it. */
+  keeperBalance?: bigint;
 }
 
 export class FakeRpc implements RpcServerLike {
@@ -151,7 +153,9 @@ export class FakeRpc implements RpcServerLike {
   }
 
   private resultFor(call: RecordedCall): unknown {
-    const configured = this.options.results?.[call.method];
+    const configured =
+      this.options.results?.[call.method] ??
+      (call.method === "keeper_balance" ? this.options.keeperBalance : undefined);
     return typeof configured === "function"
       ? (configured as (args: unknown[]) => unknown)(call.args)
       : configured;

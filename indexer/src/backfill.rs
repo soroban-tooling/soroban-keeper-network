@@ -12,6 +12,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use crate::ingest::{IngestOutcome, Ingestor};
+use crate::progress::IngestionProgress;
 use crate::reorg::{LedgerDiscrepancyError, Observation, ReorgDetector};
 use crate::rpc::{EventSource, RawEvent};
 use crate::store::Checkpoint;
@@ -23,6 +24,7 @@ pub struct Backfiller<S: EventSource> {
     contract_id: String,
     page_size: u32,
     detector: ReorgDetector,
+    progress: IngestionProgress,
 }
 
 /// What a completed backfill did.
@@ -63,7 +65,17 @@ impl<S: EventSource> Backfiller<S> {
             contract_id: contract_id.into(),
             page_size: page_size.max(1),
             detector,
+            progress: IngestionProgress::new(),
         }
+    }
+
+    /// Handle to the shared ingestion-progress state (issue #359).
+    ///
+    /// The walk updates it on every cycle; the API's health check reads the
+    /// lag off it. Cloneable, so the server can hold one while the walk
+    /// keeps writing.
+    pub fn progress(&self) -> IngestionProgress {
+        self.progress.clone()
     }
 
     /// Fingerprint every ledger this page covers, and stop if one of them now
@@ -118,6 +130,11 @@ impl<S: EventSource> Backfiller<S> {
             .latest_ledger()
             .await
             .context("reading the chain tip")?;
+        self.progress.observe_tip(tip);
+        // The resume point itself is progress: everything below it was fully
+        // ingested by an earlier run, and lag must reflect that immediately
+        // rather than only after this pass's first page.
+        self.progress.observe_ingested(next.saturating_sub(1));
 
         let mut report = BackfillReport {
             last_ledger: next.saturating_sub(1),
@@ -151,6 +168,9 @@ impl<S: EventSource> Backfiller<S> {
                     backfill_complete: scanned_through >= tip,
                 })
                 .await?;
+            // Only after the checkpoint: "ingested" here means the same thing
+            // it means to a restart - stored and checkpointed, not in flight.
+            self.progress.observe_ingested(scanned_through);
 
             next = scanned_through.saturating_add(1);
         }
@@ -168,6 +188,7 @@ impl<S: EventSource> Backfiller<S> {
                 .await?;
         }
 
+        self.progress.observe_cycle();
         Ok(report)
     }
 
@@ -790,5 +811,22 @@ mod tests {
                 .any(|cause| cause.to_string().contains("simulated RPC failure")),
             "error chain should mention the simulated failure, got: {err:?}"
         );
+    }
+    #[tokio::test]
+    async fn progress_reports_zero_lag_once_a_pass_reaches_the_tip() {
+        // Issue #359: lag is updated on every ingestion cycle. After a full
+        // pass the walk has both observed the tip and checkpointed through
+        // it, so the metric reads caught-up - and the cycle counter proves
+        // the loop actually ran rather than never starting.
+        let backfiller = backfiller(FixtureSource::new(history(), 320), 100).await;
+        let progress = backfiller.progress();
+        assert_eq!(progress.snapshot().lag_ledgers(), None);
+
+        backfiller.run_to_tip(100).await.expect("backfill");
+
+        let snapshot = progress.snapshot();
+        assert_eq!(snapshot.latest_known_ledger, Some(320));
+        assert_eq!(snapshot.lag_ledgers(), Some(0));
+        assert_eq!(snapshot.cycles, 1);
     }
 }

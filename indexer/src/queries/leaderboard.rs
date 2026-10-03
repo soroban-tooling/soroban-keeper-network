@@ -147,7 +147,9 @@ pub async fn leaderboard(
          FROM events
          WHERE event_type = 'reputation_updated'
            AND keeper_address IS NOT NULL
-         ORDER BY ledger ASC, tx_index ASC, event_index ASC"
+         -- `cursor` is the store's canonical insert order (there is no
+         -- tx_index column); within a ledger it preserves ingestion order.
+         ORDER BY ledger ASC, cursor ASC",
     )
     .fetch_all(store.pool())
     .await

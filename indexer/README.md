@@ -166,3 +166,35 @@ spend most of its life empty, and would be emptiest exactly when traffic is
 highest. Point lookups are not cached — their cost does not grow with traffic
 the same way, and they are the reads most likely to be checked right after a
 write.
+
+## Schema migrations
+
+The schema is versioned by [sqlx migrations](../indexer/migrations/) —
+numbered SQL files, checked in and reviewed like any other code change
+(issue #360). Which migrations have run against a given database is
+recorded by sqlx itself, in that database's `_sqlx_migrations` table, with
+a checksum per file: a committed migration that is edited after it shipped
+is refused at startup rather than silently producing databases built from
+different versions of the same "migration".
+
+Applying them is one command either way:
+
+- **On deploy, nothing** — `Store::connect` runs any pending migrations on
+  every start.
+- **Without starting an indexer** — ahead of a rollout, or against a
+  restored backup:
+
+  ```bash
+  cargo run -p keeper-indexer --bin migrate -- sqlite://indexer.db
+  # or with INDEXER_DATABASE_URL set, no argument needed
+  ```
+
+  The report lists every migration as `applied` / `already applied`, so a
+  no-op run on a current database is visible as exactly that.
+
+To add a migration: create `indexer/migrations/NNNN_short_name.sql` with
+the next number, never edit a shipped one (add a corrective migration
+instead), and let review read it like code — `tests/migrations.rs` pins
+that a fresh database reaches the current schema in one step, that
+migrating an existing database forward loses no data, and that a tampered
+shipped migration is refused.

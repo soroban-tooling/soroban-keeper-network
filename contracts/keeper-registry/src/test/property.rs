@@ -11,7 +11,7 @@ extern crate std;
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Deployer as _},
-    token, Address, Bytes, BytesN,
+    token, Address, Bytes,
 };
 
 use super::common::*;
@@ -156,75 +156,6 @@ proptest! {
         );
     }
 
-    // I-1 (staking extension) — E06 / issue #433. Extends I-1 to cover
-    // stake_deposit, initiate_unbond, withdraw_stake, and slash: the same
-    // assert_solvent this file already uses for task/reward outcomes now
-    // also sums each known keeper's keeper_stake (invariants.rs's own
-    // extension, `docs/STAKING_DESIGN.md`), so this property proves the
-    // registry's token balance stays exactly accounted for across a random
-    // mix of staking operations, not just task operations. This is the
-    // "0294's extended solvency property" docs/ARCHITECTURE.md's new I-9
-    // through I-11 subsections cross-reference.
-    #[test]
-    fn property_i1_solvency_holds_across_staking_operations(
-        deposit_amounts in prop::collection::vec(1_i128..500_000, 1..5),
-        // 0 = deposit only, 1 = deposit then partially unbond, 2 = deposit
-        // then unbond then withdraw, 3 = deposit then slash.
-        operations in prop::collection::vec(0u8..4, 1..5),
-    ) {
-        let s = setup();
-        let token = token::Client::new(&s.env, &s.token_id);
-        let treasury = Address::generate(&s.env);
-        let mut keepers = std::vec::Vec::new();
-        let mut incident_counter: u8 = 0;
-
-        for (amount, op) in deposit_amounts.iter().zip(operations.iter()) {
-            let keeper = Address::generate(&s.env);
-            token::StellarAssetClient::new(&s.env, &s.token_id).mint(&keeper, &(amount * 2));
-            keepers.push(keeper.clone());
-
-            s.registry.stake_deposit(&keeper, amount);
-
-            match op % 4 {
-                0 => {
-                    // Deposit only — nothing further.
-                }
-                1 => {
-                    // Partially unbond, but never withdraw — still fully
-                    // counted in keeper_stake until withdraw_stake runs.
-                    let unbond_amount = (*amount / 2).max(1);
-                    s.registry.initiate_unbond(&keeper, &unbond_amount);
-                }
-                2 => {
-                    // Unbond, advance past the delay, withdraw.
-                    let unbond_amount = (*amount / 2).max(1);
-                    let release_ledger = s.registry.initiate_unbond(&keeper, &unbond_amount);
-                    let current = s.env.ledger().sequence();
-                    if release_ledger > current {
-                        advance(&s.env, release_ledger - current, 0);
-                    }
-                    s.registry.withdraw_stake(&keeper);
-                }
-                _ => {
-                    // Slash a fraction of the deposit.
-                    let slash_amount = (*amount / 3).max(1).min(*amount);
-                    incident_counter += 1;
-                    let incident_id = BytesN::from_array(&s.env, &[incident_counter; 32]);
-                    s.registry.slash(
-                        &s.admin,
-                        &keeper,
-                        &slash_amount,
-                        &symbol_short!("fuzz"),
-                        &incident_id,
-                        &treasury,
-                    );
-                }
-            }
-        }
-
-        let balance = token.balance(&s.registry.address);
-        assert_solvent(&s.env, &s.registry, &[], &keepers, balance)
-            .expect("I-1 solvency must hold across a mix of stake/unbond/withdraw/slash operations");
     // I-1 (E06 extension) — issue #422 / backlog 0294. Extends I-1 to cover
     // the staking/unbonding/slashing surface (docs/STAKING_DESIGN.md §3, §5)
     // and the execution dispute window (§4.2): `assert_solvent` now also

@@ -105,7 +105,6 @@ pub fn assert_solvent(
     }
 
     let mut keeper_balances: i128 = 0;
-    let mut stake_total: i128 = 0;
     let mut keeper_stakes: i128 = 0;
     let mut pending_unbonds: i128 = 0;
     let mut pending_credits: i128 = 0;
@@ -113,9 +112,6 @@ pub fn assert_solvent(
         keeper_balances = keeper_balances
             .checked_add(registry.keeper_balance(keeper))
             .ok_or("keeper_balances overflowed while summing balances")?;
-        stake_total = stake_total
-            .checked_add(registry.keeper_stake(keeper))
-            .ok_or("stake_total overflowed while summing stakes")?;
         keeper_stakes = keeper_stakes
             .checked_add(registry.keeper_stake(keeper))
             .ok_or("keeper_stakes overflowed while summing stakes")?;
@@ -142,9 +138,6 @@ pub fn assert_solvent(
     let owed = open_escrow
         .checked_add(keeper_balances)
         .and_then(|sum| sum.checked_add(fees_accrued))
-        .and_then(|sum| sum.checked_add(stake_total))
-        .ok_or(
-            "owed total overflowed (open_escrow + keeper_balances + fees_accrued + stake_total)",
         .and_then(|sum| sum.checked_add(keeper_stakes))
         .and_then(|sum| sum.checked_add(pending_unbonds))
         .and_then(|sum| sum.checked_add(pending_credits))
@@ -157,7 +150,6 @@ pub fn assert_solvent(
         return Err(format!(
             "I-1 solvency violated: token_balance={token_balance} but owed={owed} \
              (open_escrow={open_escrow}, keeper_balances={keeper_balances}, \
-             fees_accrued={fees_accrued}, stake_total={stake_total})"
              fees_accrued={fees_accrued}, keeper_stakes={keeper_stakes}, \
              pending_unbonds={pending_unbonds}, pending_credits={pending_credits})"
         ));

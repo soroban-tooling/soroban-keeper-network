@@ -173,7 +173,6 @@ describe("evaluateProfitability", () => {
 
       const result = evaluateProfitability(reward, costs, options);
 
-      expect(result.totalFees).toContain(costs.verifierCost);
       const totalCost =
         costs.claimCost +
         costs.executeCost +
@@ -278,7 +277,7 @@ describe("evaluateProfitability", () => {
     it("one stoop below minimum margin", () => {
       const reward = 2_000_000n;
       const costs = BASE_COSTS;
-      const minMargin = 100_001n;
+      const minMargin = 300_001n; // net is 2_000_000 - 1_700_000 = 300_000
       const options: ProfitabilityOptions = {
         minProfitMarginStroops: minMargin,
         simulationOverheadMs: 0,

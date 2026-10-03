@@ -115,6 +115,35 @@ export {
 } from "./methods/cancelTask.js";
 export { expireTask, type ExpireTaskParams } from "./methods/expireTask.js";
 export {
+  stakeDeposit,
+  initiateUnbond,
+  withdrawStake,
+  slash,
+  setMinStake,
+  raiseSlashAppeal,
+  resolveSlashAppeal,
+  setDisputeWindow,
+  disputeExecution,
+  resolveExecutionDispute,
+  keeperStake,
+  pendingUnbond,
+  minStake,
+  getSlash,
+  slashHistory,
+  disputeWindow,
+  pendingReward,
+  type StakeDepositParams,
+  type InitiateUnbondParams,
+  type WithdrawStakeParams,
+  type SlashParams,
+  type SetMinStakeParams,
+  type RaiseSlashAppealParams,
+  type ResolveSlashAppealParams,
+  type SetDisputeWindowParams,
+  type DisputeExecutionParams,
+  type ResolveExecutionDisputeParams,
+} from "./methods/staking.js";
+export {
   MAX_CALLDATA_LEN,
   MAX_LOCK_LEDGERS,
   MIN_LOCK_LEDGERS,
@@ -132,7 +161,14 @@ export {
   type ExternalSigner,
   type UnsignedTransaction,
 } from "./transactionBuilder.js";
-export { TaskStatus, TaskType, type Task } from "./types.js";
+export {
+  TaskStatus,
+  TaskType,
+  type Task,
+  type PendingCredit,
+  type SlashRecord,
+  type UnbondRequest,
+} from "./types.js";
 export {
   NETWORK_PRESETS,
   NETWORK_NAMES,

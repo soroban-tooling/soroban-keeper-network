@@ -77,10 +77,24 @@ pub async fn health(State(state): State<ApiState>) -> Result<Json<HealthResponse
         .await
         .map_err(internal)?;
 
+    // Lag comes from the in-process progress handle, not another database
+    // read: the point of the metric is to keep answering (and to answer
+    // honestly) precisely when ingestion - and its database writes - stall.
+    let progress = state.progress.snapshot();
+    let lag = progress.lag_ledgers();
+    // Unknown lag is not unhealthy on its own: before the first ingestion
+    // cycle there is nothing to measure. A *stalled* loop still flips this,
+    // because the tip observation keeps advancing while ingestion does not.
+    let healthy = lag.is_none_or(|l| l <= state.max_healthy_lag_ledgers);
+
     Ok(Json(HealthResponse {
-        status: "ok".to_string(),
+        status: if healthy { "ok" } else { "lagging" }.to_string(),
         last_ingested_ledger: checkpoint.map(|c| c.last_ledger),
         backfill_complete: checkpoint.is_some_and(|c| c.backfill_complete),
+        latest_known_ledger: progress.latest_known_ledger,
+        ingestion_lag_ledgers: lag,
+        max_healthy_lag_ledgers: state.max_healthy_lag_ledgers,
+        healthy,
     }))
 }
 
@@ -378,10 +392,20 @@ mod tests {
                 .expect("insert");
         }
 
+        app_watching(store, crate::progress::IngestionProgress::new(), 60)
+    }
+
+    fn app_watching(
+        store: Store,
+        progress: crate::progress::IngestionProgress,
+        max_healthy_lag_ledgers: u32,
+    ) -> axum::Router {
         router(
             ApiState {
                 ingestor: Ingestor::new(store),
                 caches: AggregateCaches::from_secs(crate::cache::DEFAULT_TTL_SECS),
+                progress,
+                max_healthy_lag_ledgers,
             },
             1_000,
             1_000,
@@ -410,6 +434,63 @@ mod tests {
             serde_json::from_slice(&bytes).expect("json body")
         };
         (status, json)
+    }
+
+    #[tokio::test]
+    async fn health_reports_lag_and_stays_healthy_within_the_threshold() {
+        let store = Store::connect("sqlite::memory:").await.expect("store");
+        let progress = crate::progress::IngestionProgress::new();
+        progress.observe_tip(200);
+        progress.observe_ingested(190);
+        let app = app_watching(store, progress, 50);
+
+        let (status, body) = get_json(&app, "/v1/health").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["ingestion_lag_ledgers"], 10);
+        assert_eq!(body["latest_known_ledger"], 200);
+        assert_eq!(body["max_healthy_lag_ledgers"], 50);
+        assert_eq!(body["healthy"], true);
+        assert_eq!(body["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn health_flips_to_unhealthy_when_a_stall_pushes_lag_past_the_threshold() {
+        // Issue #359 acceptance: the stalled-loop simulation. Ingestion
+        // freezes at 100 while the observed tip keeps advancing; the same
+        // /health that said healthy must say unhealthy once the threshold
+        // is crossed - a stalled indexer must not look like a quiet one.
+        let store = Store::connect("sqlite::memory:").await.expect("store");
+        let progress = crate::progress::IngestionProgress::new();
+        progress.observe_tip(100);
+        progress.observe_ingested(100);
+        let app = app_watching(store, progress.clone(), 50);
+
+        let (_, body) = get_json(&app, "/v1/health").await;
+        assert_eq!(body["healthy"], true);
+
+        // The stall: three more cycles observe the tip, none ingest.
+        for tip in [120, 145, 151] {
+            progress.observe_tip(tip);
+        }
+        let (status, body) = get_json(&app, "/v1/health").await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "unhealthy is a report, not an error status"
+        );
+        assert_eq!(body["ingestion_lag_ledgers"], 51);
+        assert_eq!(body["healthy"], false);
+        assert_eq!(body["status"], "lagging");
+    }
+
+    #[tokio::test]
+    async fn health_before_the_first_cycle_reports_unknown_lag_not_unhealthy() {
+        let store = Store::connect("sqlite::memory:").await.expect("store");
+        let app = app_watching(store, crate::progress::IngestionProgress::new(), 50);
+
+        let (_, body) = get_json(&app, "/v1/health").await;
+        assert_eq!(body["ingestion_lag_ledgers"], serde_json::Value::Null);
+        assert_eq!(body["healthy"], true);
     }
 
     #[tokio::test]

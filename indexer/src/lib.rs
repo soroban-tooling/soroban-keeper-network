@@ -37,6 +37,7 @@ pub mod event;
 pub mod events;
 pub mod ingest;
 pub mod numeric;
+pub mod progress;
 pub mod queries;
 pub mod reorg;
 pub mod rpc;
@@ -47,6 +48,7 @@ pub use backfill::Backfiller;
 pub use config::Config;
 pub use events::{EventPayload, EventType, IndexedEvent};
 pub use ingest::Ingestor;
+pub use progress::{IngestionProgress, ProgressSnapshot};
 pub use store::Store;
 
 use tokio_postgres::Client;

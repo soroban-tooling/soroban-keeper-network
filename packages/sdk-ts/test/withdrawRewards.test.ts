@@ -157,13 +157,14 @@ describe("client.withdrawRewards", () => {
     });
 
     it("needs a signer that can authorize the withdrawing keeper", async () => {
-      // The default client signs as OWNER, not KEEPER.
-      const { client, rpc } = testClient();
+      // The default client signs as OWNER, not KEEPER. The free balance read
+      // still happens; the signer check must stop it before any submission.
+      const { client, rpc } = testClient({ keeperBalance: 1n });
 
       await expect(client.withdrawRewards({ keeper: KEEPER })).rejects.toThrow(
         /must be authorized by/,
       );
-      expect(rpc.calls).toHaveLength(0);
+      expect(rpc.submitted).toHaveLength(0);
     });
   });
 

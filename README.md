@@ -516,6 +516,10 @@ without breaking existing consumers.
 | `MinStakeUpdated` | `set_min_stake` | `("minstk", "admin")` | `(old_min: i128, new_min: i128)` |
 | `SlashAppealRaised` | `raise_slash_appeal` | `("appeal", "stake")` | `(slash_id: u64, keeper: Address)` |
 | `SlashAppealResolved` | `resolve_slash_appeal` | `("resolve", "stake")` | `(slash_id: u64, upheld: bool)` |
+| `DisputeWindowUpdated` | `set_dispute_window` | `("disptwin", "admin")` | `(old_ledgers: u32, new_ledgers: u32)` |
+| `ExecutionDisputed` | `dispute_execution` | `("exdisp", "task")` | `(task_id: u64, keeper: Address)` |
+| `ExecutionDisputeResolved` | `resolve_execution_dispute` | `("exresolv", "task")` | `(task_id: u64, upheld: bool)` |
+| `RewardsFinalized` | `withdraw_rewards` | `("finalize", "reward")` | `(keeper: Address, task_id: u64, amount: i128)` — emitted once per pending credit that finalizes into the keeper's withdrawable balance |
 
 Notes:
 
@@ -527,6 +531,7 @@ Notes:
 - `VerifierAttached` is emitted on `register_task` when an optional verifier is attached, preserving the standard 4-tuple schema of `TaskRegistered` for backwards compatibility with existing event parsers.
 - `VerifierUpdated` follows the `FeeUpdated` / `MinRewardUpdated` before/after pattern with `(task_id, old_verifier, new_verifier)`.
 - `StakeDeposited`/`UnbondInitiated`/`StakeWithdrawn`/`Slashed`/`MinStakeUpdated`/`SlashAppealRaised`/`SlashAppealResolved` are the staking epic's events (E06, `docs/STAKING_DESIGN.md`). `Slashed`'s `reason` is a `Symbol`, not free text — see the design doc for the trust model behind `slash`'s authorization.
+- `DisputeWindowUpdated`/`ExecutionDisputed`/`ExecutionDisputeResolved`/`RewardsFinalized` cover the optional execution-dispute hold (E06, `docs/STAKING_DESIGN.md` §4.2). `RewardsFinalized` only fires for credits that actually go through a dispute-window hold; when the window is disabled (the default), `withdraw_rewards` behaves exactly as it did before this feature existed and this event is never emitted.
 
 #### Task Lifecycle State Machine
 

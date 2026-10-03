@@ -28,9 +28,9 @@ import type { IntegerInput } from "./core/scval.js";
 import type { Task } from "./types.js";
 import type { ContractCompatibility, VersionOptions } from "./methods/views.js";
 import * as views from "./methods/views.js";
-import type { WithdrawRewardsParams } from "./methods/withdrawRewards.js";
+import type { WithdrawRewardsOutcome, WithdrawRewardsParams } from "./methods/withdrawRewards.js";
 import { tryWithdrawRewards, withdrawRewards } from "./methods/withdrawRewards.js";
-import type { ExecuteTaskParams } from "./methods/executeTask.js";
+import type { ExecuteTaskOutcome, ExecuteTaskParams } from "./methods/executeTask.js";
 import type { AuthEntrySigner } from "./core/auth.js";
 import { signAuthEntries } from "./core/auth.js";
 import { executeTask } from "./methods/executeTask.js";
@@ -58,6 +58,20 @@ import type {
   SetMinRewardParams,
 } from "./methods/admin.js";
 import { pause, setFeeBps, setMinReward, unpause } from "./methods/admin.js";
+import type {
+  DisputeExecutionParams,
+  InitiateUnbondParams,
+  RaiseSlashAppealParams,
+  ResolveExecutionDisputeParams,
+  ResolveSlashAppealParams,
+  SetDisputeWindowParams,
+  SetMinStakeParams,
+  SlashParams,
+  StakeDepositParams,
+  WithdrawStakeParams,
+} from "./methods/staking.js";
+import * as staking from "./methods/staking.js";
+import type { PendingCredit, SlashRecord, UnbondRequest } from "./types.js";
 
 /**
  * The subset of `rpc.Server` this SDK uses.
@@ -298,7 +312,7 @@ export class KeeperRegistryClient implements ContractCaller {
   }
 
   /** See {@link withdrawRewards}. */
-  withdrawRewards(params: WithdrawRewardsParams): Promise<bigint> {
+  withdrawRewards(params: WithdrawRewardsParams): Promise<WithdrawRewardsOutcome> {
     return withdrawRewards(this, params);
   }
 
@@ -308,7 +322,7 @@ export class KeeperRegistryClient implements ContractCaller {
   }
 
   /** See {@link executeTask}. */
-  executeTask(params: ExecuteTaskParams): Promise<void> {
+  executeTask(params: ExecuteTaskParams): Promise<ExecuteTaskOutcome> {
     return executeTask(this, params);
   }
 
@@ -340,6 +354,91 @@ export class KeeperRegistryClient implements ContractCaller {
   /** See {@link expireTask}. */
   expireTask(params: ExpireTaskParams): Promise<void> {
     return expireTask(this, params);
+  }
+
+  /** See {@link staking.stakeDeposit}. */
+  stakeDeposit(params: StakeDepositParams): Promise<void> {
+    return staking.stakeDeposit(this, params);
+  }
+
+  /** See {@link staking.initiateUnbond}. */
+  initiateUnbond(params: InitiateUnbondParams): Promise<void> {
+    return staking.initiateUnbond(this, params);
+  }
+
+  /** See {@link staking.withdrawStake}. */
+  withdrawStake(params: WithdrawStakeParams): Promise<bigint> {
+    return staking.withdrawStake(this, params);
+  }
+
+  /** See {@link staking.slash}. */
+  slash(params: SlashParams): Promise<bigint> {
+    return staking.slash(this, params);
+  }
+
+  /** See {@link staking.setMinStake}. */
+  setMinStake(params: SetMinStakeParams): Promise<void> {
+    return staking.setMinStake(this, params);
+  }
+
+  /** See {@link staking.raiseSlashAppeal}. */
+  raiseSlashAppeal(params: RaiseSlashAppealParams): Promise<void> {
+    return staking.raiseSlashAppeal(this, params);
+  }
+
+  /** See {@link staking.resolveSlashAppeal}. */
+  resolveSlashAppeal(params: ResolveSlashAppealParams): Promise<void> {
+    return staking.resolveSlashAppeal(this, params);
+  }
+
+  /** See {@link staking.setDisputeWindow}. */
+  setDisputeWindow(params: SetDisputeWindowParams): Promise<void> {
+    return staking.setDisputeWindow(this, params);
+  }
+
+  /** See {@link staking.disputeExecution}. */
+  disputeExecution(params: DisputeExecutionParams): Promise<void> {
+    return staking.disputeExecution(this, params);
+  }
+
+  /** See {@link staking.resolveExecutionDispute}. */
+  resolveExecutionDispute(params: ResolveExecutionDisputeParams): Promise<void> {
+    return staking.resolveExecutionDispute(this, params);
+  }
+
+  /** See {@link staking.keeperStake}. */
+  keeperStake(keeper: string): Promise<bigint> {
+    return staking.keeperStake(this, keeper);
+  }
+
+  /** See {@link staking.pendingUnbond}. */
+  pendingUnbond(keeper: string): Promise<UnbondRequest | undefined> {
+    return staking.pendingUnbond(this, keeper);
+  }
+
+  /** See {@link staking.minStake}. */
+  minStake(): Promise<bigint> {
+    return staking.minStake(this);
+  }
+
+  /** See {@link staking.getSlash}. */
+  getSlash(slashId: IntegerInput): Promise<SlashRecord | undefined> {
+    return staking.getSlash(this, slashId);
+  }
+
+  /** See {@link staking.slashHistory}. */
+  slashHistory(keeper: string): Promise<{ count: number; totalSlashed: bigint }> {
+    return staking.slashHistory(this, keeper);
+  }
+
+  /** See {@link staking.disputeWindow}. */
+  disputeWindow(): Promise<number> {
+    return staking.disputeWindow(this);
+  }
+
+  /** See {@link staking.pendingReward}. */
+  pendingReward(keeper: string): Promise<PendingCredit[]> {
+    return staking.pendingReward(this, keeper);
   }
 
   // -- shared plumbing -------------------------------------------------------

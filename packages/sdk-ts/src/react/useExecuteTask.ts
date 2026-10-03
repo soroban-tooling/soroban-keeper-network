@@ -3,7 +3,7 @@ import {
   useState,
 } from "react";
 
-import type { ExecuteTaskParams } from "../methods/executeTask.js";
+import type { ExecuteTaskOutcome, ExecuteTaskParams } from "../methods/executeTask.js";
 import { useKeeperRegistryClient } from "./provider.js";
 
 export type ExecuteTaskStatus =
@@ -13,7 +13,7 @@ export type ExecuteTaskStatus =
   | "error";
 
 export interface UseExecuteTaskResult {
-  executeTask: (params: ExecuteTaskParams) => Promise<void>;
+  executeTask: (params: ExecuteTaskParams) => Promise<ExecuteTaskOutcome>;
   status: ExecuteTaskStatus;
   error: Error | null;
   reset: () => void;

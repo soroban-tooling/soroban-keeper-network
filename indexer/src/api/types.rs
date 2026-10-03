@@ -36,6 +36,17 @@ pub struct HealthResponse {
     pub last_ingested_ledger: Option<u32>,
     /// Whether the initial catch-up has finished.
     pub backfill_complete: bool,
+    /// Highest chain tip ingestion has observed, absent before its first
+    /// cycle (issue #359).
+    pub latest_known_ledger: Option<u32>,
+    /// How many ledgers ingestion is behind the chain; absent until both
+    /// sides have been observed. Updated every ingestion cycle.
+    pub ingestion_lag_ledgers: Option<u32>,
+    /// The lag threshold this deployment considers healthy.
+    pub max_healthy_lag_ledgers: u32,
+    /// False once the lag exceeds the threshold: the difference between a
+    /// stalled indexer and a healthy but quiet one.
+    pub healthy: bool,
 }
 
 /// A task's current state together with the events that produced it.

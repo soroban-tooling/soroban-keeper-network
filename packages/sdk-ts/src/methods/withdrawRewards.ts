@@ -4,7 +4,6 @@
 
 import type { ContractCaller, SignedCallOptions } from "../core/caller.js";
 import { addressArg } from "../core/scval.js";
-import { KeeperErrorCode, isKeeperError } from "../errors.js";
 
 export interface WithdrawRewardsParams extends SignedCallOptions {
   /** `G...` address of the keeper withdrawing. Must authorize the call. */

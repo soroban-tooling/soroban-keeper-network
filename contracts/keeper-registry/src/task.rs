@@ -16,7 +16,6 @@ use crate::constants::*;
 use crate::errors::KeeperError;
 use crate::events::*;
 use crate::internal::*;
-use crate::reputation::{record_missed_claim, record_success};
 use crate::reputation::{record_missed_claim, record_success, require_reputation_floor};
 use crate::types::{DataKey, Task, TaskStatus, TaskType};
 use crate::verifier::KeeperVerifierClient;

@@ -3,10 +3,10 @@
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events as _},
-    token, vec, Address, Bytes, Symbol, TryIntoVal,
+    token, Address, Bytes, Symbol, TryIntoVal,
 };
 
-use keeper_treasury::{Recipient, Treasury, TreasuryClient};
+use keeper_treasury::{Treasury, TreasuryClient};
 
 use super::common::*;
 use crate::{split_reward, KeeperError, TaskStatus};
@@ -281,12 +281,12 @@ fn test_sweep_partial_sequence_conserves_remainder_and_leaves_other_balances_unt
     assert_eq!(s.registry.keeper_balance(&keeper), 970_000i128);
 }
 
-/// E08 round trip (docs/TREASURY_DESIGN.md §3): fees accrue from real
-/// executions, `sweep_fees` moves them into the treasury contract as a plain
-/// transfer, and the treasury's `distribute` splits them so each configured
-/// recipient can withdraw exactly its share. Along the way, the registry's
-/// own solvency (invariant I-1, docs/ARCHITECTURE.md) is checked: the sweep
-/// moves exactly `FeesAccrued` and never task escrow or keeper balances.
+/// E08 round trip: fees accrue from real executions, `sweep_fees` moves them
+/// to the admin, and the admin hands them to the treasury's `distribute`,
+/// which splits them so each configured recipient can withdraw exactly its
+/// share. Along the way, the registry's own solvency (invariant I-1,
+/// docs/ARCHITECTURE.md) is checked: the sweep moves exactly `FeesAccrued`
+/// and never task escrow or keeper balances.
 #[test]
 fn test_sweep_fees_round_trip_through_treasury_distribution() {
     let s = setup();
@@ -298,24 +298,9 @@ fn test_sweep_fees_round_trip_through_treasury_distribution() {
     let dao = Address::generate(&s.env);
     let staking_pool = Address::generate(&s.env);
     let public_goods = Address::generate(&s.env);
-    treasury.set_recipients(
-        &s.admin,
-        &vec![
-            &s.env,
-            Recipient {
-                address: dao.clone(),
-                shares_bps: 5_000,
-            },
-            Recipient {
-                address: staking_pool.clone(),
-                shares_bps: 3_333,
-            },
-            Recipient {
-                address: public_goods.clone(),
-                shares_bps: 1_667,
-            },
-        ],
-    );
+    treasury.add_recipient(&s.admin, &dao, &5_000);
+    treasury.add_recipient(&s.admin, &staking_pool, &3_333);
+    treasury.add_recipient(&s.admin, &public_goods, &1_667);
 
     // An open task and two credited keepers: none of these may move.
     let untouched_task_id = register_default_task(&s); // 1_000_000 escrowed
@@ -331,8 +316,9 @@ fn test_sweep_fees_round_trip_through_treasury_distribution() {
     let fees = s.registry.fees_accrued();
     assert_eq!(fees, 67_037);
     let registry_before = token.balance(&s.registry.address);
+    let admin_before = token.balance(&s.admin);
 
-    s.registry.sweep_fees(&s.admin, &treasury_id, &fees);
+    s.registry.sweep_fees(&s.admin, &s.admin, &fees);
 
     // I-1 after the sweep: exactly the accrued fees left the registry, and
     // what remains is exactly open escrow plus keeper balances.
@@ -349,18 +335,20 @@ fn test_sweep_fees_round_trip_through_treasury_distribution() {
         s.registry.get_task(&untouched_task_id).reward + 970_000 + keeper2_net
     );
 
-    // The sweep landed in the treasury as undistributed funds.
-    assert_eq!(token.balance(&treasury_id), fees);
-    assert_eq!(treasury.undistributed(), fees);
+    // The sweep landed with the admin, who hands it to the treasury.
+    assert_eq!(token.balance(&s.admin), admin_before + fees);
 
-    treasury.distribute(&fees);
+    treasury.distribute(&s.admin, &fees);
 
+    // Floor division per recipient; the remainder is never pulled from the
+    // caller (see `distribute`'s doc comment).
+    // 67_037 * 5_000 / 10_000 = 33_518.5 -> 33_518
     // 67_037 * 3_333 / 10_000 = 22_343.43 -> 22_343
     // 67_037 * 1_667 / 10_000 = 11_175.07 -> 11_175
-    // The primary (dao) absorbs the rounding remainder: 67_037 - 22_343 -
-    // 11_175 = 33_519, against a nominal 33_518.5.
+    let credited = 33_518i128 + 22_343 + 11_175;
+    assert_eq!(token.balance(&s.admin), admin_before + fees - credited);
     let expected = [
-        (dao, 33_519i128),
+        (dao, 33_518i128),
         (staking_pool, 22_343),
         (public_goods, 11_175),
     ];
@@ -370,9 +358,9 @@ fn test_sweep_fees_round_trip_through_treasury_distribution() {
         assert_eq!(token.balance(recipient), *share);
         withdrawn_total += share;
     }
-    assert_eq!(withdrawn_total, fees);
+    assert_eq!(withdrawn_total, credited);
     assert_eq!(token.balance(&treasury_id), 0);
-    assert_eq!(treasury.total_distributed(), fees);
+    assert_eq!(treasury.total_distributed(), credited);
 
     // Keepers can still withdraw exactly what they were credited.
     assert_eq!(s.registry.withdraw_rewards(&keeper1), 970_000);

@@ -163,6 +163,14 @@ pub enum EventPayload {
         incident_id: [u8; 32],
         treasury: String,
     },
+
+    // ── reputation (issue #359 epic) ─────────────────────────────────────────
+    /// `(update, reputation)` — `(keeper, action, score)`
+    ReputationUpdated {
+        keeper: String,
+        action: String,
+        score: i128,
+    },
 }
 
 impl EventPayload {
@@ -193,6 +201,7 @@ impl EventPayload {
             Self::UnbondInitiated { .. } => ("unbond", "stake"),
             Self::StakeWithdrawn { .. } => ("wdraw", "stake"),
             Self::Slashed { .. } => ("slash", "stake"),
+            Self::ReputationUpdated { .. } => ("update", "reputation"),
         };
         EventTopic { verb, noun }
     }

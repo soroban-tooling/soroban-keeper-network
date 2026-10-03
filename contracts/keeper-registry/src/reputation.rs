@@ -6,15 +6,14 @@
 //! overwritten so callers can judge the confidence behind the rate. The
 //! effective score is lazily halved once per 100,000 ledgers without changing
 //! stored history.
-
-
 //!
 //! The admin may set an eligibility floor that `claim_task` checks against the
 //! claiming keeper's stored score; it defaults to 0, which disables it.
 
 use soroban_sdk::{contractimpl, contracttype, Address, Env};
 
-use crate::errors::KeeperError::types::DataKey;
+use crate::errors::KeeperError;
+use crate::types::DataKey;
 use crate::{KeeperRegistry, KeeperRegistryArgs, KeeperRegistryClient};
 
 /// One score half-life, in ledgers. Decay is a deterministic right shift by

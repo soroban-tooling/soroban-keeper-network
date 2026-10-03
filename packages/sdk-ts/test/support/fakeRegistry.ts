@@ -24,6 +24,7 @@ import {
   Keypair,
   Networks,
   SorobanDataBuilder,
+  nativeToScVal,
   rpc,
   scValToNative,
   xdr,
@@ -45,6 +46,26 @@ export interface FakeTask {
   /** Unix timestamp (seconds), mirroring the contract's `deadline`. */
   deadline: bigint;
 }
+
+/** Mirrors `contracts/keeper-registry/src/types.rs::UnbondRequest`. */
+interface FakeUnbondRequest {
+  amount: bigint;
+  unlockLedger: number;
+}
+
+/** Mirrors `contracts/keeper-registry/src/types.rs::SlashRecord`. */
+interface FakeSlashRecord {
+  keeper: string;
+  amount: bigint;
+  reason: string;
+  ledger: number;
+  appealed: boolean;
+}
+
+/** Unbonding delay in ledgers -- mirrors `UNBOND_DELAY_LEDGERS` (constants.rs). */
+const UNBOND_DELAY_LEDGERS = 86_400;
+/** Slash appeal window in ledgers -- mirrors `DISPUTE_WINDOW_LEDGERS` (constants.rs). */
+const DISPUTE_WINDOW_LEDGERS = 51_840;
 
 export interface SeedTaskOptions {
   owner?: string;
@@ -75,6 +96,12 @@ export class FakeRegistry implements RpcServerLike {
 
   private readonly tasks = new Map<string, FakeTask>();
   private nextId = 1n;
+
+  private readonly stakes = new Map<string, bigint>();
+  private readonly unbondRequests = new Map<string, FakeUnbondRequest>();
+  private readonly slashes = new Map<string, FakeSlashRecord>();
+  private minStakeFloor = 0n;
+  private nextSlashId = 1n;
 
   /** Adds a task and returns its id. Defaults describe a fresh Pending task. */
   seedTask(options: SeedTaskOptions = {}): bigint {
@@ -127,12 +154,15 @@ export class FakeRegistry implements RpcServerLike {
    * under test, and doing it in one place keeps the fake honest about which
    * call produced which state.
    */
+  /** The last successful dispatch's return value, encoded for both the simulation and submitted-transaction paths. */
+  private lastResult: unknown = undefined;
+
   async simulateTransaction(tx: unknown): Promise<rpc.Api.SimulateTransactionResponse> {
     const { method, args } = decodeCall(tx);
     this.methods.push(method);
 
     try {
-      this.dispatch(method, args);
+      this.lastResult = this.dispatch(method, args);
     } catch (error) {
       if (!(error instanceof ContractRejection)) throw error;
       // `_parsed` marks the response as already-decoded, which is what a real
@@ -153,7 +183,7 @@ export class FakeRegistry implements RpcServerLike {
       events: [],
       transactionData: new SorobanDataBuilder(),
       minResourceFee: "100",
-      result: { retval: xdr.ScVal.scvVoid(), auth: [] },
+      result: { retval: toScVal(this.lastResult), auth: [] },
     } as unknown as rpc.Api.SimulateTransactionResponse;
   }
 
@@ -171,13 +201,13 @@ export class FakeRegistry implements RpcServerLike {
       status: rpc.Api.GetTransactionStatus.SUCCESS,
       latestLedger: 1,
       txHash: hash,
-      returnValue: xdr.ScVal.scvVoid(),
+      returnValue: toScVal(this.lastResult),
     } as unknown as rpc.Api.GetTransactionResponse;
   }
 
   // ── The modelled entry points ─────────────────────────────────────────────
 
-  private dispatch(method: string, args: unknown[]): void {
+  private dispatch(method: string, args: unknown[]): unknown {
     switch (method) {
       case "cancel_task":
         return this.cancelTask(args[0] as string, args[1] as bigint);
@@ -185,8 +215,155 @@ export class FakeRegistry implements RpcServerLike {
         return this.expireTask(args[0] as bigint);
       case "claim_task":
         return this.claimTask(args[0] as string, args[1] as bigint);
+      case "stake_deposit":
+        return this.stakeDeposit(args[0] as string, args[1] as bigint);
+      case "initiate_unbond":
+        return this.initiateUnbond(args[0] as string, args[1] as bigint);
+      case "withdraw_stake":
+        return this.withdrawStake(args[0] as string);
+      case "slash":
+        return this.slash(
+          args[0] as string,
+          args[1] as string,
+          args[2] as bigint,
+          args[3] as string,
+          args[4] as string,
+        );
+      case "set_min_stake":
+        return this.setMinStake(args[1] as bigint);
+      case "raise_slash_appeal":
+        return this.raiseSlashAppeal(args[0] as string, args[1] as bigint);
+      case "resolve_slash_appeal":
+        return this.resolveSlashAppeal(args[1] as bigint, args[2] as boolean);
+      case "keeper_stake":
+        return this.stakes.get(args[0] as string) ?? 0n;
+      case "pending_unbond": {
+        const request = this.unbondRequests.get(args[0] as string);
+        return request ? { amount: request.amount, unlock_ledger: request.unlockLedger } : null;
+      }
+      case "min_stake":
+        return this.minStakeFloor;
+      case "get_slash": {
+        const record = this.slashes.get((args[0] as bigint).toString());
+        return record
+          ? {
+              keeper: record.keeper,
+              amount: record.amount,
+              reason: record.reason,
+              ledger: record.ledger,
+              appealed: record.appealed,
+            }
+          : null;
+      }
+      case "slash_history": {
+        const keeper = args[0] as string;
+        let count = 0;
+        let total = 0n;
+        for (const record of this.slashes.values()) {
+          if (record.keeper === keeper) {
+            count += 1;
+            total += record.amount;
+          }
+        }
+        return [count, total];
+      }
       default:
         throw new Error(`FakeRegistry does not model ${method}`);
+    }
+  }
+
+  // ── E06: staking, unbonding, slashing, and the appeal window ─────────────
+
+  private stakeDeposit(keeper: string, amount: bigint): void {
+    if (amount <= 0n) throw new ContractRejection(KeeperErrorCode.InvalidReward);
+    this.stakes.set(keeper, (this.stakes.get(keeper) ?? 0n) + amount);
+  }
+
+  private initiateUnbond(keeper: string, amount: bigint): void {
+    if (amount <= 0n) throw new ContractRejection(KeeperErrorCode.InvalidReward);
+    const current = this.stakes.get(keeper) ?? 0n;
+    if (amount > current) throw new ContractRejection(KeeperErrorCode.InsufficientStake);
+    if (this.unbondRequests.has(keeper)) {
+      throw new ContractRejection(KeeperErrorCode.UnbondAlreadyPending);
+    }
+    // The unbonding amount leaves the effective stake immediately, mirroring
+    // the contract's own behaviour (docs/STAKING_DESIGN.md §3).
+    this.stakes.set(keeper, current - amount);
+    this.unbondRequests.set(keeper, {
+      amount,
+      unlockLedger: this.ledgerSequence + UNBOND_DELAY_LEDGERS,
+    });
+  }
+
+  private withdrawStake(keeper: string): bigint {
+    const request = this.unbondRequests.get(keeper);
+    if (!request) throw new ContractRejection(KeeperErrorCode.NoPendingUnbond);
+    if (this.ledgerSequence < request.unlockLedger) {
+      throw new ContractRejection(KeeperErrorCode.UnbondNotReady);
+    }
+    this.unbondRequests.delete(keeper);
+    return request.amount;
+  }
+
+  private slash(
+    _admin: string,
+    keeper: string,
+    amount: bigint,
+    reason: string,
+    _treasury: string,
+  ): bigint {
+    if (amount <= 0n) throw new ContractRejection(KeeperErrorCode.InvalidReward);
+    const bonded = this.stakes.get(keeper) ?? 0n;
+    const pendingUnbond = this.unbondRequests.get(keeper)?.amount ?? 0n;
+    const totalSlashable = bonded + pendingUnbond;
+    if (amount > totalSlashable) throw new ContractRejection(KeeperErrorCode.InsufficientStake);
+
+    const fromStake = amount < bonded ? amount : bonded;
+    this.stakes.set(keeper, bonded - fromStake);
+    const fromUnbond = amount - fromStake;
+    if (fromUnbond > 0n) {
+      const request = this.unbondRequests.get(keeper) as FakeUnbondRequest;
+      const remaining = request.amount - fromUnbond;
+      if (remaining === 0n) {
+        this.unbondRequests.delete(keeper);
+      } else {
+        this.unbondRequests.set(keeper, { ...request, amount: remaining });
+      }
+    }
+
+    const slashId = this.nextSlashId++;
+    this.slashes.set(slashId.toString(), {
+      keeper,
+      amount,
+      reason,
+      ledger: this.ledgerSequence,
+      appealed: false,
+    });
+    return slashId;
+  }
+
+  private setMinStake(minStake: bigint): void {
+    if (minStake < 0n) throw new ContractRejection(KeeperErrorCode.InvalidReward);
+    this.minStakeFloor = minStake;
+  }
+
+  private raiseSlashAppeal(keeper: string, slashId: bigint): void {
+    const record = this.slashes.get(slashId.toString());
+    if (!record) throw new ContractRejection(KeeperErrorCode.SlashNotFound);
+    if (record.keeper !== keeper) throw new ContractRejection(KeeperErrorCode.NotSlashedKeeper);
+    if (record.appealed) throw new ContractRejection(KeeperErrorCode.AppealAlreadyRaised);
+    if (this.ledgerSequence > record.ledger + DISPUTE_WINDOW_LEDGERS) {
+      throw new ContractRejection(KeeperErrorCode.AppealWindowClosed);
+    }
+    record.appealed = true;
+  }
+
+  private resolveSlashAppeal(slashId: bigint, upholdAppeal: boolean): void {
+    const record = this.slashes.get(slashId.toString());
+    if (!record || !record.appealed) throw new ContractRejection(KeeperErrorCode.SlashNotFound);
+    this.slashes.delete(slashId.toString());
+    if (upholdAppeal) {
+      this.stakes.set(record.keeper, (this.stakes.get(record.keeper) ?? 0n) + record.amount);
     }
   }
 
@@ -274,4 +451,11 @@ function decodeCall(tx: unknown): { method: string; args: unknown[] } {
     method: invocation.functionName().toString(),
     args: invocation.args().map((arg) => scValToNative(arg)),
   };
+}
+
+/** Encodes a modelled entry point's return value for the fake RPC responses. */
+function toScVal(value: unknown): xdr.ScVal {
+  if (value === undefined || value === null) return xdr.ScVal.scvVoid();
+  if (value instanceof xdr.ScVal) return value;
+  return nativeToScVal(value);
 }

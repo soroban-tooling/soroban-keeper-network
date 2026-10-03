@@ -13,10 +13,10 @@
 pub mod admin;
 pub mod keepers;
 pub mod parse;
+pub mod reputation;
 pub mod staking;
 pub mod tasks;
 pub mod treasury;
-pub mod reputation;
 
 use anyhow::Result;
 use tokio::sync::broadcast;

@@ -362,10 +362,11 @@ test("integration: multiple workers respect profitability and concurrency", asyn
   const skippedCount = allResults.filter(
     (r) => r.action === "skipped" && r.reason !== "already_claimed"
   ).length;
+  // Each worker evaluates task-3 on its own, so both skip it.
   assert.strictEqual(
     skippedCount,
-    1,
-    "One task skipped for unprofitability"
+    2,
+    "task-3 skipped for unprofitability by each worker"
   );
 
   // Verify no double-execution

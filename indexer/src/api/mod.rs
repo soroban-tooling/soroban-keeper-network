@@ -22,6 +22,7 @@ use utoipa::OpenApi;
 
 use crate::cache::AggregateCaches;
 use crate::ingest::Ingestor;
+use crate::progress::IngestionProgress;
 use rate_limit::RateLimiter;
 
 /// Shared state every handler reads from.
@@ -31,6 +32,12 @@ pub struct ApiState {
     /// Short-TTL caches in front of the expensive aggregate folds. Cloned with
     /// the state, so every handler shares one set of entries.
     pub caches: AggregateCaches,
+    /// Shared ingestion-progress state the backfiller writes and /health
+    /// reads the lag off (issue #359). `Backfiller::progress()` hands out
+    /// the matching handle.
+    pub progress: IngestionProgress,
+    /// Lag, in ledgers, past which /health reports unhealthy (issue #359).
+    pub max_healthy_lag_ledgers: u32,
 }
 
 /// The OpenAPI document, derived from the same handler and response types the

@@ -86,6 +86,37 @@ export enum KeeperErrorCode {
    * rather than a bare number.
    */
   VerificationFailed = 24,
+  // -- E06 staking, unbonding, slashing, and the appeal window (issue #427) --
+  /** `initiate_unbond` or `slash` asked for more than the keeper's current stake. */
+  InsufficientStake = 25,
+  /** `withdraw_stake` called before the pending request's unlock ledger. */
+  UnbondNotReady = 26,
+  /** `initiate_unbond` called while a prior request has not yet been withdrawn. */
+  UnbondAlreadyPending = 27,
+  /** `withdraw_stake` called with no pending unbond request on file. */
+  NoPendingUnbond = 28,
+  /** `claim_task` rejected a keeper whose stake is below the configured `MinStake` floor. */
+  MinStakeNotMet = 29,
+  /** `raise_slash_appeal` / `resolve_slash_appeal` given a `slashId` with no matching record. */
+  SlashNotFound = 30,
+  /** `raise_slash_appeal` called after the dispute window has elapsed since the slash. */
+  AppealWindowClosed = 31,
+  /** A second `raise_slash_appeal` for a `slashId` that already has one. */
+  AppealAlreadyRaised = 32,
+  /** `raise_slash_appeal` called by an address other than the slash record's own keeper. */
+  NotSlashedKeeper = 33,
+  /** `dispute_execution` given a `taskId` with no matching pending credit for the keeper. */
+  NoPendingCredit = 34,
+  /** A second `dispute_execution` for a `taskId` whose credit is already disputed. */
+  ExecutionAlreadyDisputed = 35,
+  /** `dispute_execution` called after the credit's unlock ledger has already passed. */
+  DisputeWindowClosed = 36,
+  /** `resolve_execution_dispute` given a `taskId` with no disputed pending credit on file. */
+  NoDisputedCredit = 37,
+  /** `claim_task` rejected a keeper whose reputation is below the configured floor. */
+  ReputationBelowFloor = 38,
+  /** `set_reputation_floor` was given a floor above the maximum a keeper can ever reach. */
+  InvalidReputationFloor = 39,
 }
 
 /** Human-readable name, so an unknown future code still prints usefully. */

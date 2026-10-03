@@ -27,6 +27,8 @@ async fn start_server() -> (String, Ingestor) {
         ApiState {
             ingestor: ingestor.clone(),
             caches: AggregateCaches::from_secs(0),
+            progress: keeper_indexer::IngestionProgress::new(),
+            max_healthy_lag_ledgers: 60,
         },
         10_000,
         10_000,

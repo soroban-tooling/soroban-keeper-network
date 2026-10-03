@@ -319,7 +319,7 @@ test("profitability: boundary at very low reward", () => {
   assert.strictEqual(result.profitable, false, "Very low reward unprofitable");
   assert.strictEqual(
     result.netProfit,
-    -60_001n,
+    -60_000n, // 1_000 - (10_000 + 50_000 + 1_000)
     "Significant loss expected"
   );
 });

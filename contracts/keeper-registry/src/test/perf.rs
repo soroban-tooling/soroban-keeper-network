@@ -4,7 +4,6 @@ use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
     Address, Bytes,
 };
-use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Bytes};
 
 use super::common::*;
 
@@ -123,13 +122,11 @@ fn test_withdraw_stake_cpu_instructions_within_ceiling() {
     let keeper = Address::generate(&s.env);
     token::StellarAssetClient::new(&s.env, &s.token_id).mint(&keeper, &10_000_000i128);
     s.registry.stake_deposit(&keeper, &500_000i128);
-    let release_ledger = s.registry.initiate_unbond(&keeper, &200_000i128);
-    s.env
-        .ledger()
-        .with_mut(|li| li.sequence_number = release_ledger);
     s.registry.initiate_unbond(&keeper, &200_000i128);
     let unlock_ledger = s.registry.pending_unbond(&keeper).unwrap().unlock_ledger;
-    s.env.ledger().with_mut(|li| li.sequence_number = unlock_ledger);
+    s.env
+        .ledger()
+        .with_mut(|li| li.sequence_number = unlock_ledger);
 
     s.env.cost_estimate().budget().reset_default();
     s.registry.withdraw_stake(&keeper);
@@ -157,7 +154,6 @@ fn test_slash_cpu_instructions_within_ceiling() {
         &keeper,
         &50_000i128,
         &soroban_sdk::symbol_short!("fraud"),
-        &soroban_sdk::BytesN::from_array(&s.env, &[1u8; 32]),
         &treasury,
     );
     let consumed = s.env.cost_estimate().budget().cpu_instruction_cost();

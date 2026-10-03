@@ -309,9 +309,9 @@ describe("evaluateCandidateBatch - issue #0270", () => {
         { taskId: 2n, reward: 300_000n, deadline: now + 3600, profitable: true },
         { taskId: 3n, reward: 250_000n, deadline: now + 3600, profitable: true },
         
-        // Unprofitable tasks
+        // Unprofitable tasks (below the 60_000 claim + execute fee estimate)
         { taskId: 4n, reward: 50_000n, deadline: now + 3600, profitable: false },
-        { taskId: 5n, reward: 75_000n, deadline: now + 3600, profitable: false },
+        { taskId: 5n, reward: 55_000n, deadline: now + 3600, profitable: false },
         
         // Profitable again
         { taskId: 6n, reward: 400_000n, deadline: now + 3600, profitable: true },

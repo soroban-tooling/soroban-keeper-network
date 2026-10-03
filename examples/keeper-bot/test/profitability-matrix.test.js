@@ -215,7 +215,8 @@ test("profitability-matrix: 2D matrix reward x claim fee", () => {
   rewardAtClaimFee5k.forEach((r) => {
     if (r.profitable) profitableCount++;
   });
-  assert.strictEqual(profitableCount, 3, "All reward levels profitable at lowest fee");
+  // 50_000 < 5_000 + 50_000 + 1_000, so only the 100k and 200k rewards clear the lowest fee.
+  assert.strictEqual(profitableCount, 2, "Rewards above total cost are profitable at the lowest fee");
 
   // Verify consistency: higher fee = less likely profitable
   const rewardAt200k = results.filter((r) => r.reward === 200_000n);

@@ -46,6 +46,47 @@ export interface Task {
   lockLedgers: number;
 }
 
+/**
+ * Mirrors `contracts/keeper-registry/src/types.rs::UnbondRequest`.
+ *
+ * `amount` is `i128`, so `bigint`; `unlockLedger` is `u32`, so `number` per
+ * the same numeric convention {@link Task} follows.
+ */
+export interface UnbondRequest {
+  amount: bigint;
+  /** First ledger sequence at which `withdraw_stake` will accept this request. */
+  unlockLedger: number;
+}
+
+/**
+ * Mirrors `contracts/keeper-registry/src/types.rs::SlashRecord`.
+ *
+ * `amount` is `i128` (`bigint`); `ledger` is `u32` (`number`). `reason` is a
+ * Soroban `Symbol`, decoded as a plain `string`.
+ */
+export interface SlashRecord {
+  keeper: string;
+  amount: bigint;
+  reason: string;
+  /** Ledger sequence the slash occurred at. */
+  ledger: number;
+  appealed: boolean;
+}
+
+/**
+ * Mirrors `contracts/keeper-registry/src/types.rs::PendingCredit`.
+ *
+ * One `execute_task` credit still within its dispute window (E06,
+ * `docs/STAKING_DESIGN.md` §4.2).
+ */
+export interface PendingCredit {
+  taskId: number;
+  netReward: bigint;
+  /** First ledger sequence at which this credit is eligible to finalize. */
+  unlockLedger: number;
+  disputed: boolean;
+}
+
 /** Which network preset a client is configured against. */
 export type NetworkPreset = "testnet" | "futurenet" | "mainnet";
 

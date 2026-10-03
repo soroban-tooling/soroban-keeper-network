@@ -528,6 +528,23 @@ components:
             type: string
             enum:
             - upgraded
+      - type: object
+        required:
+        - keeper
+        - action
+        - score
+        - type
+        properties:
+          action:
+            type: string
+          keeper:
+            type: string
+          score:
+            type: string
+          type:
+            type: string
+            enum:
+            - reputation_updated
       description: |-
         The decoded payload of one event.
 
@@ -557,22 +574,53 @@ components:
       - fees_swept
       - initialized
       - upgraded
+      - reputation_updated
     HealthResponse:
       type: object
       description: Service liveness and how far ingestion has reached.
       required:
       - status
       - backfill_complete
+      - max_healthy_lag_ledgers
+      - healthy
       properties:
         backfill_complete:
           type: boolean
           description: Whether the initial catch-up has finished.
+        healthy:
+          type: boolean
+          description: |-
+            False once the lag exceeds the threshold: the difference between a
+            stalled indexer and a healthy but quiet one.
+        ingestion_lag_ledgers:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: |-
+            How many ledgers ingestion is behind the chain; absent until both
+            sides have been observed. Updated every ingestion cycle.
+          minimum: 0
         last_ingested_ledger:
           type:
           - integer
           - 'null'
           format: int32
           description: Highest ledger fully ingested, absent before the first checkpoint.
+          minimum: 0
+        latest_known_ledger:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: |-
+            Highest chain tip ingestion has observed, absent before its first
+            cycle (issue #359).
+          minimum: 0
+        max_healthy_lag_ledgers:
+          type: integer
+          format: int32
+          description: The lag threshold this deployment considers healthy.
           minimum: 0
         status:
           type: string
@@ -689,6 +737,7 @@ components:
       - keeper
       - executions
       - total_reward
+      - reputation
       properties:
         executions:
           type: integer
@@ -702,6 +751,9 @@ components:
           format: int32
           description: 1-based position after ordering and tie-breaking.
           minimum: 0
+        reputation:
+          type: string
+          description: Current reputation score.
         total_reward:
           type: string
           description: Net reward earned within the window.
@@ -711,6 +763,7 @@ components:
       enum:
       - executions
       - reward
+      - reputation
     TaskDetail:
       type: object
       description: A task's current state together with the events that produced it.

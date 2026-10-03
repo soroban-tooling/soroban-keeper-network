@@ -73,6 +73,11 @@ export function toBigInt(value: IntegerInput, label: string): bigint {
   return BigInt(value);
 }
 
+/** Converts a `bool` argument. `nativeToScVal` infers `scvBool` from a plain JS boolean with no `opts.type` needed. */
+export function boolArg(value: boolean): xdr.ScVal {
+  return nativeToScVal(value);
+}
+
 /**
  * Converts a `u32` argument.
  *
@@ -107,4 +112,22 @@ export function bytesN32Arg(value: Uint8Array, label: string): xdr.ScVal {
     throw new KeeperSdkError(`${label} must be exactly 32 bytes, got ${value.length}.`);
   }
   return xdr.ScVal.scvBytes(Buffer.from(value));
+}
+
+/**
+ * Soroban's `Symbol` character set and length limit, checked here so an
+ * invalid `slash` reason surfaces as a local, actionable error rather than an
+ * opaque XDR encoding failure. A Soroban `Symbol` is at most 32 characters
+ * from `[a-zA-Z0-9_]`.
+ */
+const SYMBOL_PATTERN = /^[a-zA-Z0-9_]{1,32}$/;
+
+/** Converts a `Symbol` argument, e.g. `slash`'s `reason` parameter. */
+export function symbolArg(value: string, label: string): xdr.ScVal {
+  if (!SYMBOL_PATTERN.test(value)) {
+    throw new KeeperSdkError(
+      `${label} must be 1-32 characters from [a-zA-Z0-9_], got ${JSON.stringify(value)}.`,
+    );
+  }
+  return nativeToScVal(value, { type: "symbol" });
 }

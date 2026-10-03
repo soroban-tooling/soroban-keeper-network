@@ -157,12 +157,6 @@ pub fn emit_verifier_updated(
     );
 }
 
-// ─── E06 — Keeper Staking & Slashing ────────────────────────────────────
-// See `docs/STAKING_DESIGN.md`.
-
-pub fn emit_stake_deposited(e: &Env, keeper: &Address, amount: i128, new_total: i128) {
-    e.events().publish(
-        (symbol_short!("deposit"), symbol_short!("stake")),
 // ─── E06 — Staking & Slashing (docs/STAKING_DESIGN.md) ─────────────────
 // Staking state-transition events go here.
 
@@ -173,10 +167,6 @@ pub fn emit_stake_deposited(e: &Env, keeper: &Address, amount: i128, new_total: 
     );
 }
 
-pub fn emit_unbond_initiated(e: &Env, keeper: &Address, amount: i128, release_ledger: u32) {
-    e.events().publish(
-        (symbol_short!("unbond"), symbol_short!("stake")),
-        (keeper.clone(), amount, release_ledger),
 pub fn emit_unbond_initiated(e: &Env, keeper: &Address, amount: i128, unlock_ledger: u32) {
     e.events().publish(
         (symbol_short!("unbond"), symbol_short!("stake")),
@@ -186,31 +176,11 @@ pub fn emit_unbond_initiated(e: &Env, keeper: &Address, amount: i128, unlock_led
 
 pub fn emit_stake_withdrawn(e: &Env, keeper: &Address, amount: i128) {
     e.events().publish(
-        (symbol_short!("wdraw"), symbol_short!("stake")),
         (symbol_short!("stkwd"), symbol_short!("stake")),
         (keeper.clone(), amount),
     );
 }
 
-/// `reason` is a bounded `Symbol` (9-char limit), not an arbitrary string —
-/// see `docs/STAKING_DESIGN.md`'s entry-point signature note.
-pub fn emit_slashed(
-    e: &Env,
-    keeper: &Address,
-    amount: i128,
-    reason: Symbol,
-    incident_id: &BytesN<32>,
-    treasury: &Address,
-) {
-    e.events().publish(
-        (symbol_short!("slash"), symbol_short!("stake")),
-        (
-            keeper.clone(),
-            amount,
-            reason,
-            incident_id.clone(),
-            treasury.clone(),
-        ),
 pub fn emit_slashed(e: &Env, slash_id: u64, keeper: &Address, amount: i128, reason: &Symbol) {
     e.events().publish(
         (symbol_short!("slash"), symbol_short!("stake")),

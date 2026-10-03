@@ -131,8 +131,9 @@ class PersistentStateStore {
       if (task.status === "Executed" || task.status === "Failed") {
         // Terminal state: fully persisted, restored as-is
         restarted.tasks.set(taskId, { ...task });
-      } else if (task.status === "Claimed") {
-        // Claimed but not executed: ready for execution retry
+      } else if (task.status === "Claimed" || task.status === "ExecutionInProgress") {
+        // Claimed (or mid-execution when the process died): the claim is on
+        // chain, so the task comes back as Claimed, ready for execution retry
         restarted.tasks.set(taskId, {
           ...task,
           status: "Claimed",

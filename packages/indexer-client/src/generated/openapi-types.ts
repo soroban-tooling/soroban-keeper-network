@@ -276,6 +276,12 @@ export interface components {
             new_wasm_hash: string;
             /** @enum {string} */
             type: "upgraded";
+        } | {
+            action: string;
+            keeper: string;
+            score: string;
+            /** @enum {string} */
+            type: "reputation_updated";
         };
         /**
          * @description The discriminant of an [`EventPayload`], usable as a filter without
@@ -283,16 +289,38 @@ export interface components {
          *     `(verb, noun)` topic pair.
          * @enum {string}
          */
-        EventType: "task_registered" | "task_claimed" | "task_executed" | "task_expired" | "task_cancelled" | "reward_increased" | "deadline_extended" | "rewards_withdrawn" | "paused" | "fee_updated" | "admin_transferred" | "min_reward_updated" | "fees_swept" | "initialized" | "upgraded";
+        EventType: "task_registered" | "task_claimed" | "task_executed" | "task_expired" | "task_cancelled" | "reward_increased" | "deadline_extended" | "rewards_withdrawn" | "paused" | "fee_updated" | "admin_transferred" | "min_reward_updated" | "fees_swept" | "initialized" | "upgraded" | "reputation_updated";
         /** @description Service liveness and how far ingestion has reached. */
         HealthResponse: {
             /** @description Whether the initial catch-up has finished. */
             backfill_complete: boolean;
             /**
+             * @description False once the lag exceeds the threshold: the difference between a
+             *     stalled indexer and a healthy but quiet one.
+             */
+            healthy: boolean;
+            /**
+             * Format: int32
+             * @description How many ledgers ingestion is behind the chain; absent until both
+             *     sides have been observed. Updated every ingestion cycle.
+             */
+            ingestion_lag_ledgers?: number | null;
+            /**
              * Format: int32
              * @description Highest ledger fully ingested, absent before the first checkpoint.
              */
             last_ingested_ledger?: number | null;
+            /**
+             * Format: int32
+             * @description Highest chain tip ingestion has observed, absent before its first
+             *     cycle (issue #359).
+             */
+            latest_known_ledger?: number | null;
+            /**
+             * Format: int32
+             * @description The lag threshold this deployment considers healthy.
+             */
+            max_healthy_lag_ledgers: number;
             status: string;
         };
         /**
@@ -373,6 +401,8 @@ export interface components {
              * @description 1-based position after ordering and tie-breaking.
              */
             rank: number;
+            /** @description Current reputation score. */
+            reputation: string;
             /** @description Net reward earned within the window. */
             total_reward: string;
         };
@@ -380,7 +410,7 @@ export interface components {
          * @description Which metric to rank by.
          * @enum {string}
          */
-        RankBy: "executions" | "reward";
+        RankBy: "executions" | "reward" | "reputation";
         /** @description A task's current state together with the events that produced it. */
         TaskDetail: {
             /** @description Every event for this task, oldest first. */

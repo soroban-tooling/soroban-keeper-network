@@ -32,8 +32,6 @@
  * candidate evaluation loop per issue #0254.
  */
 
-import type { IntegerInput } from "./core/scval.js";
-
 /**
  * Estimated costs for state-mutating operations, in stroops (XLM's smallest unit).
  *
@@ -129,7 +127,7 @@ export interface ProfitabilityResult {
    * Human-readable reason why the task is unprofitable (if `profitable` is
    * false). Useful for logging.
    */
-  reason?: string;
+  reason?: string | undefined;
 }
 
 /**

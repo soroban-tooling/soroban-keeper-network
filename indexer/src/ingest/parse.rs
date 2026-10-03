@@ -93,6 +93,13 @@ pub fn parse_event(raw: &RawEvent) -> Result<Option<EventPayload>> {
             admin: address_at(v, 0, event_type)?,
             new_wasm_hash: bytes_at(v, 1, event_type)?,
         },
+        // Recognised in the type system for the API's sake, but not parseable
+        // from the wire yet: the contract's only reputation event today is
+        // `reputation_floor_updated` (a different shape), and `RawValue` has
+        // no string variant to carry `action`. Until the contract emits the
+        // `(update, reputation)` event this maps to, treat it like any other
+        // event we do not understand - skip it, never halt ingestion.
+        EventType::ReputationUpdated => return Ok(None),
     };
 
     Ok(Some(payload))

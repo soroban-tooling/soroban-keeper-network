@@ -1083,14 +1083,12 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
   // other unexpected error, is a failure.
   // Note: a round that finds no tasks is a success. Losing a claim race to
   // another keeper is also a success, as this is normal competitive behaviour.
-  const summary = { processed: 0, errors: [], decisions: [] };
-  const summary = { processed: 0, errors: [], skipped: 0 };
+  const summary = { processed: 0, errors: [], decisions: [], skipped: 0 };
   let newEmptyRounds = emptyRounds;
   const server = client.getServer();
 
   try {
     const nowSeconds = Math.floor(Date.now() / 1000);
-    const isLiveMode = !CONFIG.dryRun;
     if (CONFIG.dryRun) {
       console.log(`\nKeeper round (DRY-RUN mode) at ${new Date().toISOString()}`);
     } else {
@@ -1136,38 +1134,6 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
       evaluationContext
     );
 
-      if (task.deadline <= nowSeconds) {
-        if (CONFIG.dryRun) {
-          const decision = createSkipDecision(
-            task.taskId,
-            "Task is past deadline",
-            { evaluationPhase: 1, taskMetadata: { deadline: task.deadline } }
-          );
-          summary.decisions.push(decision);
-          logDecisionRecord(decision);
-        }
-        if (CONFIG.expireStaleTasks) {
-          try {
-            if (!CONFIG.dryRun) {
-              await withRetry(`expire_task ${task.taskId}`, () =>
-                client.invoke("expire_task", [
-                  nativeToScVal(task.taskId, { type: "u64" }),
-                ])
-              );
-            }
-            console.log(
-              `  Task ${task.taskId} expired — escrow refunded to owner`
-            );
-          } catch (err) {
-            console.log(
-              `  Task ${task.taskId} past deadline (skip: ${err.message})`
-            );
-          }
-        } else {
-          console.log(`  Task ${task.taskId} is past deadline, skipping`);
-        }
-        continue;
-      }
     console.log(
       `  Evaluated ${pendingTasks.length} tasks; ${sortedCandidates.length} are profitable candidates`
     );
@@ -1178,127 +1144,6 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
         console.log(
           `  Round budget exhausted (${CONFIG.maxTasksPerRound} tasks processed); ${sortedCandidates.length - summary.processed} candidates remain for future rounds`
         );
-        await withRetry(`claim_task ${task.taskId}`, () =>
-          client.claimTask({ keeper: keypair.publicKey(), taskId: task.taskId })
-        );
-        const taskType = fullTask.task_type;
-        const taskTypeName = TASK_TYPE_NAMES[taskType] || `Unknown(${taskType})`;
-        const verifier = fullTask.verifier || null;
-
-        const evaluatedTask = {
-          taskId: task.taskId,
-          taskType,
-          taskTypeName,
-          calldata: fullTask.calldata,
-          reward: task.reward,
-          deadline: task.deadline,
-          verifier,
-        };
-
-        // Step 1: Check if bot has a proof-generation strategy for this verifier / task type
-        const support = checkVerifierSupport(
-          evaluatedTask,
-          CONFIG.simulateExecution
-        );
-        if (!support.supported) {
-          if (CONFIG.dryRun) {
-            const decision = createSkipDecision(
-              task.taskId,
-              `Unsupported verifier/executor — ${support.reason}`,
-              {
-                evaluationPhase: 2,
-                taskMetadata: {
-                  taskType: taskTypeName,
-                  verifier: verifier,
-                  deadline: task.deadline,
-                },
-              }
-            );
-            summary.decisions.push(decision);
-            logDecisionRecord(decision);
-          }
-          console.log(
-            `  Skipping task ${task.taskId}: unsupported verifier/executor — ${support.reason}`
-          );
-          continue;
-        }
-
-        const executorCtx = {
-          server,
-          keypair,
-          networkPassphrase: client.networkPassphrase,
-          log: (msg) => console.log(msg),
-        };
-
-        // Generate candidate proof pre-claim if possible for accurate verifier simulation
-        const candidateProof = await executeTaskOffChain(
-          evaluatedTask,
-          executorCtx,
-          CONFIG.simulateExecution
-        );
-
-        if (candidateProof === null || candidateProof === undefined) {
-          if (CONFIG.dryRun) {
-            const decision = createSkipDecision(
-              task.taskId,
-              `Could not generate valid proof for ${taskTypeName}`,
-              {
-                evaluationPhase: 3,
-                taskMetadata: {
-                  taskType: taskTypeName,
-                  verifier: verifier,
-                  deadline: task.deadline,
-                },
-              }
-            );
-            summary.decisions.push(decision);
-            logDecisionRecord(decision);
-          }
-          console.log(
-            `  Skipping task ${task.taskId} (${taskTypeName}): could not generate valid proof before claim.`
-          );
-          continue;
-        }
-
-        // Step 2: Pre-claim profitability check (including verifier resource costs)
-        const profitCheck = await estimateTaskProfitability({
-          server,
-          sourcePublicKey: keypair.publicKey(),
-          networkPassphrase: client.networkPassphrase,
-          task: evaluatedTask,
-          proof: candidateProof,
-          minProfitMargin: CONFIG.minProfitMarginStroops,
-        });
-
-        if (!profitCheck.profitable) {
-          if (CONFIG.dryRun) {
-            const decision = createSkipDecision(
-              task.taskId,
-              profitCheck.reason,
-              {
-                evaluationPhase: 4,
-                taskMetadata: {
-                  taskType: taskTypeName,
-                  verifier: verifier,
-                  deadline: task.deadline,
-                },
-                profitability: {
-                  reward: BigInt(task.reward),
-                  estimatedFee: profitCheck.estimatedFee,
-                  netProfit: profitCheck.netProfit,
-                  profitable: false,
-                  profitMargin: CONFIG.minProfitMarginStroops,
-                },
-              }
-            );
-            summary.decisions.push(decision);
-            logDecisionRecord(decision);
-          }
-          console.log(
-            `  Skipping task ${task.taskId}: unprofitable — ${profitCheck.reason}`
-          );
-          continue;
-        }
         break;
       }
 
@@ -1306,46 +1151,23 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
         console.log(
           `  Attempting to claim task ${candidate.taskId} (reward: ${candidate.reward}, est net profit: ${candidate.profitCheck.netProfit} stroops)...`
         );
-
         if (CONFIG.dryRun) {
-          // In dry-run mode: log the claim decision but don't actually claim
-          const decision = createClaimDecision(task.taskId, {
-            reason: `Task passed all profitability and eligibility checks (est net profit: ${profitCheck.netProfit} stroops)`,
-            taskMetadata: {
-              taskType: taskTypeName,
-              verifier: verifier,
-              deadline: task.deadline,
-            },
+          // Dry-run: record the claim decision, submit nothing.
+          const decision = createClaimDecision(candidate.taskId, {
+            reason: `Task passed all profitability and eligibility checks (est net profit: ${candidate.profitCheck.netProfit} stroops)`,
             profitability: {
-              reward: BigInt(task.reward),
-              estimatedFee: profitCheck.estimatedFee,
-              netProfit: profitCheck.netProfit,
+              reward: BigInt(candidate.reward),
+              estimatedFee: candidate.profitCheck.estimatedFee,
+              netProfit: candidate.profitCheck.netProfit,
               profitable: true,
               profitMargin: CONFIG.minProfitMarginStroops,
             },
           });
           summary.decisions.push(decision);
           logDecisionRecord(decision);
-          console.log(`  [DRY-RUN] Task ${task.taskId} would be claimed (proof: ${candidateProof.toString("hex").slice(0, 20)}...)`);
+          console.log(`  [DRY-RUN] Task ${candidate.taskId} would be claimed`);
           summary.processed++;
-        } else {
-          // Live mode: actually claim and execute
-          await withRetry(`claim_task ${task.taskId}`, () =>
-            client.claimTask({ keeper: keypair.publicKey(), taskId: task.taskId })
-          );
-          console.log(`  Task ${task.taskId} claimed!`);
-
-          await withRetry(`execute_task ${task.taskId}`, () =>
-            client.executeTask({
-              keeper: keypair.publicKey(),
-              taskId: task.taskId,
-              proof: candidateProof,
-            })
-          );
-          console.log(
-            `  Task ${task.taskId} executed! Proof: ${candidateProof.toString("hex").slice(0, 20)}...`
-          );
-          summary.processed++;
+          continue;
         }
         await withRetry(`claim_task ${candidate.taskId}`, () =>
           client.claimTask({ keeper: keypair.publicKey(), taskId: candidate.taskId })
@@ -1376,7 +1198,7 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
     if (expiredTasks.length > 0) {
       console.log(`  ${expiredTasks.length} task(s) past deadline`);
       for (const task of expiredTasks) {
-        if (CONFIG.expireStaleTasks) {
+        if (CONFIG.expireStaleTasks && !CONFIG.dryRun) {
           try {
             await withRetry(`expire_task ${task.taskId}`, () =>
               client.invoke("expire_task", [

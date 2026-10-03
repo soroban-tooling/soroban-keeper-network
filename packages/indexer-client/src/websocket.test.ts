@@ -23,7 +23,9 @@ class FakeWebSocket extends EventTarget implements WebSocketLike {
   }
 
   emitClose(init: { wasClean: boolean; code: number; reason: string }): void {
-    this.dispatchEvent(new CloseEvent("close", init));
+    // Node 20 (the CI runtime) has no global CloseEvent; a plain Event with the
+    // same fields is what the client reads.
+    this.dispatchEvent(Object.assign(new Event("close"), init));
   }
 
   emitError(): void {

@@ -45,15 +45,15 @@ export interface SimulationLogEvent {
   /** The operation being simulated (claim_task, execute_task, withdraw_rewards, is_claimable, keeper_balance, etc.). */
   operation: string;
   /** Task ID, if applicable. */
-  taskId?: bigint | number;
+  taskId?: bigint | number | undefined;
   /** "started" | "succeeded" | "failed". */
   status: "started" | "succeeded" | "failed";
   /** Time in ms for the simulation to complete. */
-  durationMs?: number;
+  durationMs?: number | undefined;
   /** Error code if failed, from KeeperErrorCode. */
-  errorCode?: number;
+  errorCode?: number | undefined;
   /** Human-readable error or outcome. */
-  message?: string;
+  message?: string | undefined;
 }
 
 /**
@@ -68,7 +68,7 @@ export interface ProfitabilityLogEvent {
   totalFees: bigint;
   netProfit: bigint;
   minMargin: bigint;
-  reason?: string;
+  reason?: string | undefined;
 }
 
 /**
@@ -78,13 +78,13 @@ export interface OperationOutcomeLogEvent {
   type: LogEventType.Outcome;
   /** The operation completed (claim_task, execute_task, withdraw_rewards). */
   operation: string;
-  taskId?: bigint | number;
+  taskId?: bigint | number | undefined;
   /** The outcome status from the operation's outcome type. */
   status: string;
   /** Message explaining the outcome. */
-  message?: string;
+  message?: string | undefined;
   /** Amount moved (for withdraw_rewards) or other numeric result. */
-  amount?: bigint;
+  amount?: bigint | undefined;
 }
 
 /**
@@ -93,14 +93,14 @@ export interface OperationOutcomeLogEvent {
 export interface ErrorLogEvent {
   type: LogEventType.Error;
   /** The operation that errored. */
-  operation?: string;
-  taskId?: bigint | number;
+  operation?: string | undefined;
+  taskId?: bigint | number | undefined;
   /** Error code if available. */
-  errorCode?: number;
+  errorCode?: number | undefined;
   /** Human-readable error message. */
   message: string;
   /** Stack trace if available. */
-  stack?: string;
+  stack?: string | undefined;
 }
 
 /**
