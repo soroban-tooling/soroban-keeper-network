@@ -10,7 +10,7 @@ without blocking your PR.
 | `format` | Required | `cargo fmt --all -- --check` — a formatting diff is trivially fixable and shouldn't need discussion. |
 | `test` | Required | `cargo test --workspace --locked` — the test suite is the correctness bar. |
 | `build-wasm` | Required | The `keeper-registry` and `treasury` contracts must actually compile to the `wasm32-unknown-unknown` target they deploy to. |
-| `sdk-ts` | Required | The TypeScript SDK (`packages/sdk-ts`) must build, pass its own test suite, and lint clean. Uploads its built `dist/` as an artifact for `bot` to consume. |
+| `sdk-ts` | Required | The TypeScript SDK (`packages/sdk-ts`) must typecheck (`tsc --noEmit`), build, and pass its own test suite. Uploads its built `dist/` as an artifact for `bot` to consume. Lint is the advisory `sdk-ts-lint` job. See [SDK typecheck and lint](#sdk-typecheck-and-lint). |
 | `bot` | Required | The example keeper bot (`examples/keeper-bot`) must lint, syntax-check, and pass its own test suite. Depends on `sdk-ts`'s built output (the bot's `@soroban-keeper-network/sdk` dependency is a local `file:` reference, which `npm install` copies as-is rather than building). |
 | `bot-v2` | Required | The production keeper bot v2 (`examples/keeper-bot-v2`) must build, lint, and pass its test suite against an ephemeral Postgres service container. See [The keeper-bot-v2 job](#the-keeper-bot-v2-job). |
 | `indexer` | Required | The indexer service (`indexer/`) must format, build, and pass its test suite, including the database-backed tests. See [The indexer job](#the-indexer-job). |
@@ -18,7 +18,7 @@ without blocking your PR.
 | `clippy` | Advisory (`continue-on-error: true`) | Lints are useful but subjective enough that a maintainer should decide case-by-case, not have every PR blocked by a new upstream lint. |
 | `audit` | Advisory (`continue-on-error: true`) | A new upstream dependency CVE should notify maintainers, not fail every open PR the moment it's published. |
 | `wasm-size` | Advisory (`continue-on-error: true`) | Reports binary size for visibility; see below. |
-| `sdk-ts` | Advisory (`continue-on-error: true`) | Builds and smoke-tests `packages/sdk-ts` (the TypeScript SDK scaffold, backlog 0151). Advisory until backlog 0187 adds a dedicated typecheck/lint job with its own required/advisory split. |
+| `sdk-ts-lint` | Advisory (`continue-on-error: true`) | `npm run lint` (ESLint) on `packages/sdk-ts`. Lint findings are subjective enough that a maintainer should decide case-by-case, the same reasoning as `clippy`. See [SDK typecheck and lint](#sdk-typecheck-and-lint). |
 | `wasm-size` | Advisory (`continue-on-error: true`) | Reports contract binary size for visibility; see below. |
 | `sdk-bundle-size` | Advisory (`continue-on-error: true`) | Reports the SDK's minified+gzipped bundle size for visibility — the frontend analogue of `wasm-size`; see below. |
 
@@ -31,6 +31,36 @@ Run every required check locally before opening a PR:
 
 ```bash
 make ci
+```
+
+`make ci` covers blocking checks only, so it does not lint the SDK. `make check`
+runs `make ci` plus the advisory lints (`make lint` for clippy, `make sdk-ts-lint`
+for the SDK's ESLint).
+
+## SDK typecheck and lint
+
+`packages/sdk-ts` is gated the way the Rust side is:
+
+| Check | Job | Gate | Rust analogue |
+|-------|-----|------|---------------|
+| `tsc --noEmit -p tsconfig.json` | `sdk-ts` | Required | `format` (`cargo fmt --check`) |
+| `npm run lint` (ESLint) | `sdk-ts-lint` | Advisory | `clippy` |
+
+A type error fails `sdk-ts`, and through it `ci-required`, so it blocks the
+merge. A lint finding fails only `sdk-ts-lint`, which is `continue-on-error`, so
+it shows as a failed check on the PR but does not block it.
+
+ESLint reads the flat config at `packages/sdk-ts/eslint.config.cjs`, the same
+flat-config pattern as `examples/keeper-bot/eslint.config.js` (no legacy
+`.eslintrc`). It is `.cjs` rather than `.js` because `packages/sdk-ts` declares
+`"type": "module"`, which would make a `.js` config an ES module and break its
+`require` calls; `examples/keeper-bot` is CommonJS, so its config can be `.js`.
+
+To reproduce locally:
+
+```bash
+make sdk-ts        # typecheck + build + test (required)
+make sdk-ts-lint   # ESLint (advisory)
 ```
 
 ## The keeper-bot-v2 job
