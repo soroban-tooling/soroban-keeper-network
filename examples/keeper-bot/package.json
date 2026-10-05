@@ -21,12 +21,12 @@
   "dependencies": {
     "@soroban-keeper-network/sdk": "file:../../packages/sdk-ts",
     "@stellar/stellar-sdk": "^16.2.0",
-    "dotenv": "^18.0.3"
+    "dotenv": "^18.0.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.8.0",
-    "globals": "^17.12.0"
+    "globals": "^17.13.0"
   },
   "engines": {
     "node": ">=18.0.0"
