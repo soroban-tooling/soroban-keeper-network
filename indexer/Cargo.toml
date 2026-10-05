@@ -16,7 +16,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 futures = "0.3"
 # API-key secrets need an OS-backed CSPRNG. Already in the tree via sqlx, so
 # this declares an existing transitive crate rather than adding a new one.
-getrandom = "0.3"
+getrandom = "0.4"
 hex = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
