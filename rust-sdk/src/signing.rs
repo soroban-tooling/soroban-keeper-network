@@ -3,6 +3,8 @@
 //! Abstracts cryptographic signing behind [`TransactionSigner`] so integrators
 //! can use local keypairs, hardware wallets (HSM / Ledger), or remote KMS signing.
 
+#![warn(missing_docs)]
+
 use soroban_sdk::Address;
 
 /// Trait for signing transactions without exposing raw private keys.
@@ -15,9 +17,12 @@ pub trait TransactionSigner {
 }
 
 #[derive(Debug, thiserror::Error)]
+/// Failures returned by a [`TransactionSigner`] implementation.
 pub enum SignerError {
+    /// The signing backend rejected or failed the signing operation.
     #[error("Signing failed: {0}")]
     Failed(#[from] anyhow::Error),
+    /// Required signer configuration is absent or invalid.
     #[error("Invalid signer configuration")]
     InvalidConfig,
 }
@@ -28,6 +33,7 @@ pub struct KeypairSigner {
 }
 
 impl KeypairSigner {
+    /// Create a local-development signer for the supplied public address.
     pub fn new(address: Address) -> Self {
         Self { address }
     }

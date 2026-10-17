@@ -4,14 +4,27 @@ version = "0.1.0"
 edition = "2021"
 description = "Rust client SDK for interacting with the Soroban Keeper Network protocol."
 license = "MIT OR Apache-2.0"
+authors = ["Soroban Keeper Network Contributors"]
+repository = "https://github.com/soroban-tooling/soroban-keeper-network"
+homepage = "https://github.com/soroban-tooling/soroban-keeper-network"
+readme = "README.md"
+keywords = ["stellar", "soroban", "keeper", "automation"]
+categories = ["api-bindings", "cryptography::cryptocurrencies"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
 
 [dependencies]
 soroban-sdk = { workspace = true }
 thiserror = { workspace = true }
 anyhow = "1.0"
 rand = "0.8"
-keeper-registry = { path = "../contracts/keeper-registry" }
-treasury = { path = "../contracts/treasury", package = "keeper-treasury" }
+keeper-registry = { version = "0.1.0", path = "../contracts/keeper-registry" }
+treasury = { version = "0.1.0", path = "../contracts/treasury", package = "keeper-treasury" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

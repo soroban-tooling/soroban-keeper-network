@@ -1,4 +1,4 @@
-# keeper-sdk
+# soroban-keeper-sdk
 
 A Rust client SDK for the [Soroban keeper registry contract](../contracts/keeper-registry).
 
@@ -16,7 +16,7 @@ TypeScript SDK — it targets that environment and speaks the same contract.
 
 ```toml
 [dependencies]
-keeper-sdk = { git = "https://github.com/soroban-tooling/soroban-keeper-network", package = "keeper-sdk" }
+soroban-keeper-sdk = "0.1"
 ```
 
 ## What's here today
@@ -77,4 +77,23 @@ submission is never retried, since a lost response may mean it already landed.
   SDKs.
 * The root [README](../README.md#events)'s event table — the events this
   crate's client will decode.
-* Rustdoc (`cargo doc --open -p keeper-sdk`) for the current module reference.
+* Rustdoc (`cargo doc --open -p soroban-keeper-sdk`) for the current module reference.
+
+## Releasing
+
+1. Update `version` in `rust-sdk/Cargo.toml` and commit the change.
+2. Dry-run the `keeper-treasury` and `keeper-registry` support packages, then
+   run `cargo publish --dry-run --locked --manifest-path rust-sdk/Cargo.toml`.
+   Before the first release, Cargo reports the support crates as missing from
+   crates.io; use `cargo package --list --locked --manifest-path
+   rust-sdk/Cargo.toml` to inspect the initial SDK package file set.
+3. Create an annotated tag matching that version, for example
+   `git tag -a rust-sdk-v0.2.0 -m "rust-sdk v0.2.0"`.
+4. Push the tag. The `Publish Rust SDK` workflow checks that the tag and crate
+   versions match, runs the SDK tests, publishes any missing versioned support
+   crates in dependency order, verifies the SDK against crates.io, and then
+   publishes the SDK.
+
+The workflow reads the crates.io API token from the
+`RUST_SDK_CRATES_IO_TOKEN` repository secret. The token must never be placed
+in a tag, workflow input, command argument, or committed configuration file.

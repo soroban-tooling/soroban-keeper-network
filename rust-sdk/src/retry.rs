@@ -10,6 +10,8 @@
 //! The retry loop wraps only the RPC call itself — never the decoding of a
 //! successful response into a contract-level error.
 
+#![warn(missing_docs)]
+
 use std::future::Future;
 use std::time::Duration;
 
@@ -81,6 +83,7 @@ pub struct RetryPolicy {
     /// Random jitter added to every backoff, uniformly sampled from
     /// `jitter_min..=jitter_max`, to avoid many clients retrying in lockstep.
     pub jitter_min: Duration,
+    /// Inclusive upper bound of the random delay added to each backoff.
     pub jitter_max: Duration,
 }
 

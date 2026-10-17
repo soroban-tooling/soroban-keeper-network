@@ -1,6 +1,7 @@
-//! Typed event decoders for all Keeper Registry contract events (Issue #336).
+//! Typed event decoders for Keeper Registry contract events.
 
-use soroban_sdk::{Address, Bytes, Symbol};
+use soroban_sdk::xdr::ScVal;
+use soroban_sdk::{Address, Bytes, Env, Symbol, TryFromVal, Val};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TaskRegisteredEvent {
@@ -51,6 +52,7 @@ pub struct PausedEvent {
 pub struct FeesSweptEvent {
     pub recipient: Address,
     pub amount: i128,
+    pub remaining: i128,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,4 +81,102 @@ pub enum EventDecodeError {
     UnknownTopic(Symbol, Symbol),
     #[error("Malformed event payload")]
     MalformedPayload,
+}
+
+/// Decode one registry contract event returned by Soroban RPC `getEvents`.
+///
+/// The first two topics identify the event. The payload is decoded using the
+/// same Soroban tuple representation emitted by the contract. Unknown topics
+/// and malformed values are errors so callers never silently lose an event.
+pub fn decode_event(
+    env: &Env,
+    topics: &[ScVal],
+    value: &ScVal,
+) -> Result<KeeperEvent, EventDecodeError> {
+    if topics.len() < 2 {
+        return Err(EventDecodeError::MalformedPayload);
+    }
+
+    let first: Symbol = decode(env, &topics[0])?;
+    let second: Symbol = decode(env, &topics[1])?;
+    let pair = (
+        first.to_string().to_string(),
+        second.to_string().to_string(),
+    );
+
+    match (pair.0.as_str(), pair.1.as_str()) {
+        ("reg", "task") => {
+            let (task_id, owner, reward, deadline) = decode(env, value)?;
+            Ok(KeeperEvent::TaskRegistered(TaskRegisteredEvent {
+                task_id,
+                owner,
+                reward,
+                deadline,
+            }))
+        }
+        ("claim", "task") => {
+            let (task_id, keeper, ledger_sequence) = decode(env, value)?;
+            Ok(KeeperEvent::TaskClaimed(TaskClaimedEvent {
+                task_id,
+                keeper,
+                ledger_sequence,
+            }))
+        }
+        ("exec", "task") => {
+            let (task_id, keeper, net_reward, proof) = decode(env, value)?;
+            Ok(KeeperEvent::TaskExecuted(TaskExecutedEvent {
+                task_id,
+                keeper,
+                net_reward,
+                proof,
+            }))
+        }
+        ("exp", "task") => {
+            let (task_id,) = decode(env, value)?;
+            Ok(KeeperEvent::TaskExpired(TaskExpiredEvent { task_id }))
+        }
+        ("cancel", "task") => {
+            let (task_id, owner) = decode(env, value)?;
+            Ok(KeeperEvent::TaskCancelled(TaskCancelledEvent {
+                task_id,
+                owner,
+            }))
+        }
+        ("wdraw", "reward") => {
+            let (keeper, amount) = decode(env, value)?;
+            Ok(KeeperEvent::RewardsWithdrawn(RewardsWithdrawnEvent {
+                keeper,
+                amount,
+            }))
+        }
+        ("paused", "admin") => {
+            let (paused,) = decode(env, value)?;
+            Ok(KeeperEvent::Paused(PausedEvent { paused }))
+        }
+        ("sweep", "admin") => {
+            let (recipient, amount, remaining) = decode(env, value)?;
+            Ok(KeeperEvent::FeesSwept(FeesSweptEvent {
+                recipient,
+                amount,
+                remaining,
+            }))
+        }
+        ("init", "admin") => {
+            let (admin, reward_token, fee_bps) = decode(env, value)?;
+            Ok(KeeperEvent::Initialized(InitializedEvent {
+                admin,
+                reward_token,
+                fee_bps,
+            }))
+        }
+        _ => Err(EventDecodeError::UnknownTopic(first, second)),
+    }
+}
+
+fn decode<T>(env: &Env, value: &ScVal) -> Result<T, EventDecodeError>
+where
+    T: TryFromVal<Env, Val>,
+{
+    let value = Val::try_from_val(env, value).map_err(|_| EventDecodeError::MalformedPayload)?;
+    T::try_from_val(env, &value).map_err(|_| EventDecodeError::MalformedPayload)
 }

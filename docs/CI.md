@@ -15,6 +15,7 @@ without blocking your PR.
 | `bot-v2` | Required | The production keeper bot v2 (`examples/keeper-bot-v2`) must build, lint, and pass its test suite against an ephemeral Postgres service container. See [The keeper-bot-v2 job](#the-keeper-bot-v2-job). |
 | `indexer` | Required | The indexer service (`indexer/`) must format, build, and pass its test suite, including the database-backed tests. See [The indexer job](#the-indexer-job). |
 | `rust-sdk` | Required | The Rust SDK crate (`rust-sdk/`) must compile and pass all unit and integration tests. |
+| `rust-sdk-quickstart` | Advisory (`continue-on-error: true`) | On pushes to `main`, deploys the registry to a local Stellar Quickstart network and runs the opt-in Rust SDK lifecycle test. |
 | `indexer-client` | Required | The indexer's TypeScript client (`packages/indexer-client`) must typecheck, build, test and lint, and its generated types must match `indexer/openapi.yaml`. |
 | `clippy` | Advisory (`continue-on-error: true`) | Lints are useful but subjective enough that a maintainer should decide case-by-case, not have every PR blocked by a new upstream lint. |
 | `audit` | Advisory (`continue-on-error: true`) | A new upstream dependency CVE should notify maintainers, not fail every open PR the moment it's published. |
@@ -38,6 +39,28 @@ make ci
 `make ci` covers blocking checks only, so it does not lint the SDK. `make check`
 runs `make ci` plus the advisory lints (`make lint` for clippy, `make sdk-ts-lint`
 for the SDK's ESLint).
+
+## Rust SDK Quickstart integration
+
+`rust-sdk/tests/integration_quickstart.rs` deploys a fresh registry to a local
+Quickstart network and drives register, claim, execute, and withdraw through
+`KeeperRegistryClient`. It checks the registry's native-token balance after
+every transition. The test is opt-in so ordinary local and pull-request test
+runs do not require Docker or a live RPC.
+
+Run it after starting a local Quickstart network and building the contract:
+
+```bash
+cargo build --locked --release --target wasm32-unknown-unknown --package keeper-registry
+SKN_INTEGRATION_RPC_URL=http://localhost:8000/rpc \
+  cargo test --locked --package soroban-keeper-sdk \
+  --test integration_quickstart -- --nocapture
+```
+
+When `SKN_INTEGRATION_RPC_URL` is unset, the test prints a visible skip notice
+and returns successfully. The advisory `rust-sdk-quickstart` job sets it and
+runs only on pushes to `main`; outages or image/toolchain drift are reported
+without becoming part of the required `ci-required` aggregate.
 
 ## SDK typecheck and lint
 

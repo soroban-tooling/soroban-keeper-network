@@ -1,23 +1,29 @@
 //! High-level typed client for the Keeper Registry Soroban contract (Issues #333, #334, #340).
 
+#![warn(missing_docs)]
+
 use crate::error::CallContext;
 use crate::retry::{default_classify, ErrorClass, RetryPolicy, RpcCallError, TransportError};
 use crate::signing::TransactionSigner;
 pub use crate::types::{BatchTaskParams, PendingCredit, SlashRecord, Task, UnbondRequest};
 use keeper_registry::KeeperError;
 use soroban_sdk::xdr::ScVal;
-use soroban_sdk::{Address, Env, Symbol, TryFromVal, Val, Vec};
+use soroban_sdk::{Address, Bytes, Env, IntoVal, Symbol, TryFromVal, TryIntoVal, Val, Vec};
 use std::future::Future;
 use std::time::Duration;
 
 /// High-level client wrapping all contract interactions for integrators and keepers.
 pub struct KeeperClient<'a, S: TransactionSigner> {
+    /// Soroban host environment used for contract invocation and decoding.
     pub env: &'a Env,
+    /// Address of the deployed keeper registry contract.
     pub contract_id: Address,
+    /// Signer whose address authorizes state-changing calls.
     pub signer: &'a S,
 }
 
 impl<'a, S: TransactionSigner> KeeperClient<'a, S> {
+    /// Create an in-process client for `contract_id` using `signer`.
     pub fn new(env: &'a Env, contract_id: Address, signer: &'a S) -> Self {
         Self {
             env,
@@ -403,15 +409,20 @@ impl<'a, S: TransactionSigner> KeeperClient<'a, S> {
 }
 
 #[derive(Debug, thiserror::Error)]
+/// Errors produced by the in-process [`KeeperClient`].
 pub enum ClientError {
+    /// The contract host or contract implementation rejected an invocation.
     #[error("Contract call failed: {0}")]
     ContractError(String),
+    /// The configured signer could not sign the invocation payload.
     #[error("Signer error: {0}")]
     SigningFailed(#[from] crate::signing::SignerError),
     /// Any of the above, wrapped with which call produced it (issue #345).
     #[error("{context}: {source}")]
     InCall {
+        /// Method name and redacted argument diagnostics for the failed call.
         context: CallContext,
+        /// Underlying client failure.
         #[source]
         source: Box<ClientError>,
     },
@@ -494,6 +505,7 @@ pub struct InvocationRequest {
 /// entries) that a mutating call must sign.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SimulationOutcome {
+    /// XDR return value produced by contract simulation.
     pub return_value: ScVal,
     /// Bytes handed to [`TransactionSigner::sign_payload`]. Building the
     /// envelope and the network-id-prefixed signature payload is the
@@ -504,8 +516,11 @@ pub struct SimulationOutcome {
 /// A simulated transaction plus the signer's signature over it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SignedTransaction {
+    /// Invocation whose simulated transaction was signed.
     pub request: InvocationRequest,
+    /// Simulated transaction envelope or signature payload bytes.
     pub transaction: std::vec::Vec<u8>,
+    /// Signature bytes returned by the configured signer.
     pub signature: std::vec::Vec<u8>,
 }
 
@@ -518,11 +533,13 @@ pub struct SignedTransaction {
 /// the contract returned a `#[contracterror]` code, which the client decodes
 /// into [`KeeperError`] and never retries.
 pub trait RpcTransport {
+    /// Simulate an invocation and return its value and assembled transaction.
     fn simulate(
         &self,
         request: &InvocationRequest,
     ) -> impl Future<Output = Result<SimulationOutcome, RpcCallError<u32>>> + Send;
 
+    /// Submit a signed transaction and return its contract result value.
     fn submit(
         &self,
         signed: &SignedTransaction,
@@ -544,16 +561,22 @@ pub trait RpcTransport {
 /// policy). `Decode` means a response arrived but was not the expected shape.
 #[derive(Debug, thiserror::Error)]
 pub enum RegistryClientError {
+    /// A known keeper-registry contract error.
     #[error("contract rejected the call: {0:?}")]
     Contract(KeeperError),
+    /// A contract error code not represented by this SDK version.
     #[error("contract returned unknown error code {0}")]
     UnknownContractError(u32),
+    /// RPC transport failed before a usable result was returned.
     #[error("RPC transport failure: {0:?}")]
     Transport(TransportError),
+    /// A successful RPC response did not match the method's expected type.
     #[error("could not decode response: {0}")]
     Decode(String),
+    /// A mutating call was attempted without a configured signer.
     #[error("no signer configured; call `with_signer` before a mutating call")]
     NoSigner,
+    /// The configured signer failed to sign the simulated transaction.
     #[error("signing failed: {0}")]
     Signing(#[from] crate::signing::SignerError),
     /// Any of the above, wrapped with which call produced it (issue #345).
@@ -561,7 +584,9 @@ pub enum RegistryClientError {
     /// `read`/`write` caller - gets it for free.
     #[error("{context}: {source}")]
     InCall {
+        /// Method name and redacted argument diagnostics for the failed call.
         context: CallContext,
+        /// Underlying registry-client failure.
         #[source]
         source: Box<RegistryClientError>,
     },
@@ -658,14 +683,17 @@ impl<T: RpcTransport> KeeperRegistryClient<T> {
         self
     }
 
+    /// Deployed registry contract id used by this client.
     pub fn contract_id(&self) -> &str {
         &self.contract_id
     }
 
+    /// Soroban RPC endpoint associated with this client.
     pub fn rpc_url(&self) -> &str {
         &self.rpc_url
     }
 
+    /// Network passphrase used when assembling transaction signatures.
     pub fn network_passphrase(&self) -> &str {
         &self.network_passphrase
     }
@@ -684,6 +712,13 @@ impl<T: RpcTransport> KeeperRegistryClient<T> {
             .map_err(|e| RegistryClientError::Decode(format!("{e:?}")))?;
         R::try_from_val(&self.env, &val)
             .map_err(|_| RegistryClientError::Decode(format!("unexpected value {value:?}")))
+    }
+
+    fn encode<V: IntoVal<Env, Val>>(&self, value: V) -> Result<ScVal, RegistryClientError> {
+        let value: Val = value.into_val(&self.env);
+        value
+            .try_into_val(&self.env)
+            .map_err(|e| RegistryClientError::Decode(format!("could not encode argument: {e:?}")))
     }
 
     async fn simulate(
@@ -785,5 +820,75 @@ impl<T: RpcTransport> KeeperRegistryClient<T> {
             .map_err(|e| e.in_call(CallContext::new("set_fee_bps", crate::call_args![new_bps])))?;
         self.write("set_fee_bps", vec![admin, ScVal::U32(new_bps)])
             .await
+    }
+
+    /// Register and fund a new task for the configured signer.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn register_task(
+        &self,
+        task_type: crate::types::TaskType,
+        calldata: Bytes,
+        reward: i128,
+        deadline: u64,
+        ttl_ledgers: u32,
+        lock_ledgers: u32,
+        verifier: Option<Address>,
+    ) -> Result<u64, RegistryClientError> {
+        let owner = self.signer_arg().map_err(|e| {
+            e.in_call(CallContext::new(
+                "register_task",
+                crate::call_args![reward, deadline, ttl_ledgers, lock_ledgers],
+            ))
+        })?;
+        self.write(
+            "register_task",
+            vec![
+                owner,
+                self.encode(task_type)?,
+                self.encode(calldata)?,
+                ScVal::I128(soroban_sdk::xdr::Int128Parts {
+                    hi: (reward >> 64) as i64,
+                    lo: reward as u64,
+                }),
+                ScVal::U64(deadline),
+                ScVal::U32(ttl_ledgers),
+                ScVal::U32(lock_ledgers),
+                self.encode(verifier)?,
+            ],
+        )
+        .await
+    }
+
+    /// Claim a pending task for the configured signer.
+    pub async fn claim_task(&self, task_id: u64) -> Result<(), RegistryClientError> {
+        let keeper = self
+            .signer_arg()
+            .map_err(|e| e.in_call(CallContext::new("claim_task", crate::call_args![task_id])))?;
+        self.write("claim_task", vec![keeper, ScVal::U64(task_id)])
+            .await
+    }
+
+    /// Execute a claimed task and submit its proof as the configured signer.
+    pub async fn execute_task(
+        &self,
+        task_id: u64,
+        proof: Bytes,
+    ) -> Result<(), RegistryClientError> {
+        let keeper = self
+            .signer_arg()
+            .map_err(|e| e.in_call(CallContext::new("execute_task", crate::call_args![task_id])))?;
+        self.write(
+            "execute_task",
+            vec![keeper, ScVal::U64(task_id), self.encode(proof)?],
+        )
+        .await
+    }
+
+    /// Withdraw the configured signer's accrued keeper rewards.
+    pub async fn withdraw_rewards(&self) -> Result<i128, RegistryClientError> {
+        let keeper = self
+            .signer_arg()
+            .map_err(|e| e.in_call(CallContext::new("withdraw_rewards", std::vec::Vec::new())))?;
+        self.write("withdraw_rewards", vec![keeper]).await
     }
 }

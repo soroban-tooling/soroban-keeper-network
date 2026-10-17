@@ -906,6 +906,38 @@ jobs:
       - name: Rust SDK tests
         run: cargo test --package soroban-keeper-sdk --locked
 
+  # ADVISORY - exercises the Rust SDK against a real local RPC on main only.
+  rust-sdk-quickstart:
+    name: Rust SDK Quickstart (advisory)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Start Stellar Quickstart
+        uses: stellar/quickstart@main
+        with:
+          tag: testing
+          network: local
+          enable: core,horizon,rpc
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@v23.0.1
+
+      - name: Build registry contract
+        run: cargo build --locked --release --target wasm32-unknown-unknown --package keeper-registry
+
+      - name: Run Quickstart integration test
+        env:
+          SKN_INTEGRATION_RPC_URL: http://localhost:8000/rpc
+        run: cargo test --locked --package soroban-keeper-sdk --test integration_quickstart -- --nocapture
+
   # ───────────────────────────────────────────────────────────────────────────
   # Aggregate gate. Branch protection should require only this single check;
   # it passes when all REQUIRED jobs pass and ignores advisory outcomes.
@@ -927,4 +959,3 @@ jobs:
             fi
           done
           echo "All required checks passed."
-

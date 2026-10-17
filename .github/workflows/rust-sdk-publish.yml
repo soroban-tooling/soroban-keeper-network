@@ -1,0 +1,134 @@
+name: Publish Rust SDK
+
+on:
+  pull_request:
+    paths:
+      - "rust-sdk/**"
+      - "contracts/keeper-registry/**"
+      - "contracts/treasury/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust-sdk-publish.yml"
+  push:
+    tags: ["rust-sdk-v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing rust-sdk-v* tag to publish"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    name: Package dry run
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify support packages
+        run: |
+          cargo publish --dry-run --locked --manifest-path contracts/treasury/Cargo.toml
+          cargo publish --dry-run --locked --manifest-path contracts/keeper-registry/Cargo.toml
+
+      - name: Verify crates.io package
+        shell: bash
+        run: |
+          set +e
+          cargo publish --dry-run --locked --manifest-path rust-sdk/Cargo.toml \
+            >rust-sdk-publish-dry-run.log 2>&1
+          status=$?
+          set -e
+          cat rust-sdk-publish-dry-run.log
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          fi
+
+          # The initial release cannot verify against crates.io until the two
+          # versioned support crates have been published. Still validate the
+          # package file set; reject every other dry-run failure.
+          if ! grep -Fq 'no matching package named `keeper-registry` found' \
+            rust-sdk-publish-dry-run.log; then
+            exit "$status"
+          fi
+          cargo package --list --locked --manifest-path rust-sdk/Cargo.toml
+
+  publish:
+    name: Test and publish to crates.io
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: crates-io-publish
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify tag matches crate version
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "soroban-keeper-sdk") | .version')
+          expected="rust-sdk-v${version}"
+          if [ "$TAG" != "$expected" ]; then
+            echo "::error::tag '$TAG' does not match rust-sdk/Cargo.toml version (expected '$expected')"
+            exit 1
+          fi
+
+      - name: Test Rust SDK
+        run: cargo test --locked --package soroban-keeper-sdk
+
+      - name: Publish versioned support crates when needed
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.RUST_SDK_CRATES_IO_TOKEN }}
+        shell: bash
+        run: |
+          publish_if_missing() {
+            local crate_name="$1"
+            local manifest="$2"
+            local version
+            version=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r --arg name "$crate_name" \
+                '.packages[] | select(.name == $name) | .version')
+
+            if curl --fail --silent --show-error \
+              "https://crates.io/api/v1/crates/${crate_name}/${version}" \
+              >/dev/null; then
+              echo "${crate_name} ${version} is already published"
+              return
+            fi
+
+            cargo publish --locked --manifest-path "$manifest"
+            for attempt in $(seq 1 30); do
+              if curl --fail --silent --show-error \
+                "https://crates.io/api/v1/crates/${crate_name}/${version}" \
+                >/dev/null; then
+                echo "${crate_name} ${version} is available on crates.io"
+                return
+              fi
+              echo "Waiting for ${crate_name} ${version} to reach the index (${attempt}/30)"
+              sleep 10
+            done
+            echo "::error::${crate_name} ${version} did not become available on crates.io"
+            exit 1
+          }
+
+          publish_if_missing keeper-treasury contracts/treasury/Cargo.toml
+          publish_if_missing keeper-registry contracts/keeper-registry/Cargo.toml
+
+      - name: Verify crates.io package
+        run: cargo publish --dry-run --locked --manifest-path rust-sdk/Cargo.toml
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.RUST_SDK_CRATES_IO_TOKEN }}
+        run: cargo publish --locked --manifest-path rust-sdk/Cargo.toml
