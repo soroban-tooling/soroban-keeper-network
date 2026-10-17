@@ -3,6 +3,11 @@
 //! Provides typed client wrappers, event decoders, batch operations, pluggable signing,
 //! network configurations, retry policies, and cross-contract call builders.
 
+use core::ops::RangeInclusive;
+
+/// Contract `VERSION` values this SDK was built and tested against.
+pub const SUPPORTED_CONTRACT_VERSIONS: RangeInclusive<u32> = 1..=6;
+
 pub mod client;
 pub mod cross_contract;
 pub mod error;

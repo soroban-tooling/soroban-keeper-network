@@ -2,7 +2,7 @@
 //! refund paths (owner cancel and permissionless expiry).
 //!
 //! `register_task`'s arity (owner, task_type, calldata, reward, deadline,
-//! ttl_ledgers, lock_ledgers, verifier) is inherent to the ABI: every field is
+//! ttl_ledgers, lock_ledgers, verifier, condition) is inherent to the ABI: every field is
 //! a distinct scalar a caller must supply, and a params struct would just move
 //! them without improving anything. The allow below is module-level, not on
 //! the function itself, because `#[contractimpl]` generates its spec entry
@@ -19,6 +19,7 @@ use crate::internal::*;
 use crate::reputation::{record_missed_claim, record_success, require_reputation_floor};
 use crate::types::{DataKey, Task, TaskStatus, TaskType};
 use crate::verifier::KeeperVerifierClient;
+use crate::TaskConditionClient;
 use crate::{KeeperRegistry, KeeperRegistryArgs, KeeperRegistryClient};
 
 #[contractimpl]
@@ -46,6 +47,10 @@ impl KeeperRegistry {
     //                  this function's own behavior — only `execute_task`
     //                  consumes it. Any address is accepted (verifiers are
     //                  permissionless).
+    //   condition    — optional pre-claim predicate implementing
+    //                  `ITaskCondition::is_met(task_id)`. `None` preserves the
+    //                  original path; false or failed evaluation leaves the
+    //                  task Pending and returns `ConditionNotMet`.
     //
     // Returns the new task_id.
 
@@ -59,6 +64,7 @@ impl KeeperRegistry {
         ttl_ledgers: u32,
         lock_ledgers: u32,
         verifier: Option<Address>,
+        condition: Option<Address>,
     ) -> Result<u64, KeeperError> {
         require_not_paused(&e)?;
         owner.require_auth();
@@ -71,6 +77,7 @@ impl KeeperRegistry {
             calldata.len(),
             ttl_ledgers,
             lock_ledgers,
+            &condition,
         )?;
 
         bump_instance(&e);
@@ -92,9 +99,10 @@ impl KeeperRegistry {
             claim_ledger: None,
             lock_ledgers,
             verifier,
+            condition: condition.clone(),
         };
         save_task(&e, task_id, &task);
-        emit_task_registered(&e, task_id, &owner, reward, deadline);
+        emit_task_registered(&e, task_id, &owner, reward, deadline, condition);
 
         Ok(task_id)
     }
@@ -244,6 +252,17 @@ impl KeeperRegistry {
             _ => return Err(KeeperError::InvalidTaskStatus),
         };
         require_reputation_floor(&e, &keeper)?;
+
+        if let Some(condition) = task.condition.clone() {
+            let is_met = matches!(
+                TaskConditionClient::new(&e, &condition).try_is_met(&task_id),
+                Ok(Ok(true))
+            );
+            if !is_met {
+                emit_condition_not_met(&e, task_id, &condition);
+                return Err(KeeperError::ConditionNotMet);
+            }
+        }
 
         bump_instance(&e);
         if let Some(missed) = missed_claimer {

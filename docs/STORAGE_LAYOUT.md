@@ -23,6 +23,40 @@ Two mechanics matter here:
 So the lever this repo has is: which fields get re-serialized on writes they
 don't need, and does the field count justify a second entry's fixed overhead.
 
+## Current persisted `Task` record (contract VERSION 6)
+
+`DataKey::Task(task_id)` stores one `Task` value with the following fields:
+
+| Field | Type | Registration default / source |
+|---|---|---|
+| `owner` | `Address` | Authorized task registrant |
+| `task_type` | `TaskType` | Caller-supplied task category |
+| `calldata` | `Bytes` | Caller-supplied, bounded payload |
+| `reward` | `i128` | Positive escrow amount |
+| `deadline` | `u64` | Caller-supplied Unix timestamp |
+| `ttl_ledgers` | `u32` | Caller-supplied bounded TTL |
+| `status` | `TaskStatus` | `Pending` |
+| `claimer` | `Option<Address>` | `None` |
+| `claim_ledger` | `Option<u32>` | `None` |
+| `lock_ledgers` | `u32` | Caller-supplied bounded lock window |
+| `verifier` | `Option<Address>` | Caller-supplied; `None` skips proof verification |
+| `condition` | `Option<Address>` | Caller-supplied; `None` preserves unconditional claiming |
+
+### Condition-field schema evolution
+
+Adding `condition` to the `#[contracttype]` struct is not a backward-compatible
+storage decode. A VERSION 6 contract cannot deserialize the old eleven-field
+record as the new twelve-field `Task`; `None` is the registration default, not
+an implicit value injected while decoding old XDR. The regression test
+[`pre_condition_task_encoding_requires_explicit_migration`](../contracts/keeper-registry/src/test/condition.rs)
+serializes the exact pre-condition shape and proves that decoding it as the new
+shape fails.
+
+Deployments with existing task records must therefore use an explicit migration
+that writes `condition: None`, or deploy a replacement registry and keep old
+sessions routed to their original contract. The VERSION 6 bump is the public
+compatibility signal; an in-place WASM update alone is not a migration.
+
 ## Q1 — Is `claim_ledger` (or any field) redundant?
 
 **No.** `claim_ledger` is read every time `lock_expired` is evaluated

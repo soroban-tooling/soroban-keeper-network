@@ -79,6 +79,7 @@ fn test_lock_window_extending_past_deadline_is_blocked_by_deadline_first() {
         &DEFAULT_TTL_LEDGERS,
         &1_000u32,
         &None,
+        &None,
     );
     s.registry.claim_task(&first, &id);
 

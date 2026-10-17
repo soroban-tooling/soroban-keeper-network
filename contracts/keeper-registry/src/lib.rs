@@ -69,6 +69,7 @@ use soroban_sdk::contract;
 
 mod admin;
 mod batch;
+mod condition;
 mod constants;
 mod errors;
 mod events;
@@ -80,6 +81,7 @@ mod types;
 mod verifier;
 mod views;
 
+pub use condition::{ITaskCondition, TaskConditionClient};
 pub use constants::*;
 pub use errors::KeeperError;
 pub use events::*;

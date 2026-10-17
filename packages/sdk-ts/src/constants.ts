@@ -24,7 +24,7 @@
  */
 export const SUPPORTED_CONTRACT_VERSIONS = {
   min: 1,
-  max: 3,
+  max: 6,
 } as const;
 /** Maximum `proof` length in bytes accepted by `execute_task`. */
 export const MAX_PROOF_LEN = 256;

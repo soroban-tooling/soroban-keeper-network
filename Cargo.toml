@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
+    "contracts/oracle-client",
+    "contracts/conditions/oracle-deviation",
     "contracts/keeper-registry",
     "contracts/treasury",
     "indexer",

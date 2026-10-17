@@ -1,0 +1,24 @@
+[package]
+name = "oracle-deviation-condition"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Immutable Reflector-backed price-deviation task condition"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+testutils = ["soroban-sdk/testutils", "keeper-oracle-client/testutils"]
+
+[dependencies]
+soroban-sdk = { version = "22.0.1" }
+keeper-oracle-client = { path = "../../oracle-client" }
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.1", features = ["testutils"] }
+keeper-oracle-client = { path = "../../oracle-client", features = ["testutils"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ["cfg(fuzzing)"] }

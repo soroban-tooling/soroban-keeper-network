@@ -139,6 +139,7 @@ fn stake_mid_unbond_does_not_back_claim_task() {
         &25_000,
         &20,
         &None,
+        &None,
     );
 
     // Fully bonded: 600_000 >= 500_000. Unbond 200_000 and the effective

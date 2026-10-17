@@ -1,0 +1,19 @@
+[package]
+name = "keeper-oracle-client"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Typed Reflector Pulse client for Keeper Network conditions"
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = []
+testutils = ["soroban-sdk/testutils"]
+
+[dependencies]
+soroban-sdk = { version = "22.0.1" }
+
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ["cfg(fuzzing)"] }

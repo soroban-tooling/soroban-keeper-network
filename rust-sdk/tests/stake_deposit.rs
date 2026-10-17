@@ -124,6 +124,7 @@ fn staking_executing_and_withdrawing_rewards_do_not_interfere() {
         &25_000,
         &20,
         &None,
+        &None,
     );
     s.registry.claim_task(&s.keeper, &id);
     s.registry

@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — task conditions (E10, VERSION bumped to 6)
+
+- `register_task` and each `batch_register_tasks` entry now accept an optional
+  `condition: Option<Address>` parameter. The persisted `Task` record exposes
+  the same field and defaults it to `None` for unconditional tasks.
+- `claim_task` evaluates `ITaskCondition::is_met(task_id)` before writing claim
+  state. A false or failed check rejects with `ConditionNotMet`, leaves the
+  task pending, and emits the versioned `ConditionNotMet` event containing the
+  task ID and condition address.
+- `TaskRegistered` now includes the optional condition address. Contract
+  `VERSION` is 6 because the registration ABI, stored task schema, and event
+  payload changed.
+
 ### Added — rust-sdk call context on every error (0345)
 
 - Every error `KeeperClient` and `KeeperRegistryClient` return now carries

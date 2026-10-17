@@ -3,14 +3,13 @@
 //! One module per area of behaviour, mirroring the source layout, so two
 //! contributors adding tests in different areas edit different files.
 
-#![cfg(test)]
-
 mod admin;
 mod batch;
 mod batch_reads;
 mod cancel;
 mod claim;
 mod common;
+mod condition;
 mod events;
 mod expire;
 mod fee_accrual;

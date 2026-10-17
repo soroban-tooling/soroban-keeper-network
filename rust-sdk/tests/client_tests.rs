@@ -110,6 +110,7 @@ fn test_batch_operations_and_queries() {
         deadline: env.ledger().timestamp() + 100,
         ttl_ledgers: 25_000,
         lock_ledgers: 20,
+        condition: None,
     });
 
     let task_ids = client
