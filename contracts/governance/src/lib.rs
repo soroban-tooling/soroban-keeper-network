@@ -10,12 +10,14 @@ pub const VERSION: u32 = 1;
 
 #[contractclient(name = "KeeperRegistryClient")]
 pub trait IKeeperRegistry {
-    fn set_fee_bps(env: Env, admin: Address, new_bps: u32) -> Result<(), u32>;
-    fn set_min_reward(env: Env, admin: Address, min_reward: i128) -> Result<(), u32>;
-    fn set_reputation_floor(env: Env, admin: Address, floor_bps: u32) -> Result<(), u32>;
-    fn pause(env: Env, admin: Address) -> Result<(), u32>;
-    fn unpause(env: Env, admin: Address) -> Result<(), u32>;
+    fn set_fee_bps(env: Env, admin: Address, new_bps: u32);
+    fn set_min_reward(env: Env, admin: Address, min_reward: i128);
+    fn set_reputation_floor(env: Env, admin: Address, floor_bps: u32);
+    fn pause(env: Env, admin: Address);
+    fn unpause(env: Env, admin: Address);
+    fn transfer_admin(env: Env, admin: Address, new_admin: Address);
 }
+
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -262,6 +264,36 @@ impl GovernanceContract {
         }
     }
 
+    /// Hands the registry admin role to this governance contract.
+    ///
+    /// Requires authorization from `current_admin`. When invoked, this governance
+    /// contract calls `registry.transfer_admin(&current_admin, &governance_address)`,
+    /// satisfying the dual-authorization requirement where both `current_admin` and
+    /// `new_admin` (this contract) must authorize the handover.
+    pub fn accept_admin(
+        env: Env,
+        current_admin: Address,
+        registry: Address,
+    ) -> Result<(), GovernanceError> {
+        current_admin.require_auth();
+
+        let governance_addr = env.current_contract_address();
+        let client = KeeperRegistryClient::new(&env, &registry);
+
+        if matches!(
+            client.try_transfer_admin(&current_admin, &governance_addr),
+            Ok(Ok(()))
+        ) {
+            env.events().publish(
+                (Symbol::new(&env, "admin_migrated"), current_admin, governance_addr),
+                registry,
+            );
+            Ok(())
+        } else {
+            Err(GovernanceError::RegistryCallFailed)
+        }
+    }
+
     fn dispatch_registry_call(
         env: &Env,
         registry_addr: &Address,
@@ -272,21 +304,22 @@ impl GovernanceContract {
 
         let success = match action {
             GovernableAction::SetFeeBps(new_bps) => {
-                matches!(client.try_set_fee_bps(&caller, new_bps), Ok(Ok(Ok(()))))
+                matches!(client.try_set_fee_bps(&caller, new_bps), Ok(Ok(())))
             }
             GovernableAction::SetMinReward(min_reward) => {
-                matches!(client.try_set_min_reward(&caller, min_reward), Ok(Ok(Ok(()))))
+                matches!(client.try_set_min_reward(&caller, min_reward), Ok(Ok(())))
             }
             GovernableAction::SetReputationFloor(floor_bps) => {
-                matches!(client.try_set_reputation_floor(&caller, floor_bps), Ok(Ok(Ok(()))))
+                matches!(client.try_set_reputation_floor(&caller, floor_bps), Ok(Ok(())))
             }
             GovernableAction::Pause => {
-                matches!(client.try_pause(&caller), Ok(Ok(Ok(()))))
+                matches!(client.try_pause(&caller), Ok(Ok(())))
             }
             GovernableAction::Unpause => {
-                matches!(client.try_unpause(&caller), Ok(Ok(Ok(()))))
+                matches!(client.try_unpause(&caller), Ok(Ok(())))
             }
         };
+
 
         if success {
             Ok(())

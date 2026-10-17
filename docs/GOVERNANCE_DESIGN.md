@@ -207,43 +207,123 @@ Cross-contract execution into `KeeperRegistry` or `Treasury` follows strict Chec
 
 ## 6. Migration Path: From Admin Key to Governance
 
-The transition from the current single-admin model to the decentralized governance contract occurs in 4 explicit, verifiable stages:
+The transition from the current single-admin model to the decentralized governance contract is an explicit, one-time migration that permanently decentralizes control of the protocol.
 
 ```
-[Phase 1: Deployment]
-  Deploy $KPRS Token Contract -> Mint Initial Supply -> Deploy Governance Contract
-             │
-[Phase 2: Authorization Handshake]
-  Current Admin calls registry.transfer_admin(admin, governance_contract)
-  Governance Contract authorizes receipt via accept_admin
-             │
-[Phase 3: Treasury Handshake]
-  Current Admin calls treasury.transfer_admin(admin, governance_contract)
-  Governance Contract authorizes receipt via accept_admin
-             │
-[Phase 4: Complete Decentralization]
-  Single admin key permanently relinquished; all parameters governed by $KPRS proposals
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           MIGRATION ARCHITECTURE                                │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│ [Phase 1: Deployment & Parameter Initialization]                                │
+│   Deploy $KPRS Token -> Mint Initial Supply -> Deploy Governance Contract       │
+│                                      │                                          │
+│ [Phase 2: Two-Sided Authorization Handshake]                                    │
+│   Current Admin signs call to governance.accept_admin(current_admin, registry)  │
+│   Governance Contract invokes registry.transfer_admin(current_admin, gov_addr) │
+│   Both current_admin auth and governance_addr contract auth satisfied          │
+│                                      │                                          │
+│ [Phase 3: Immediate Admin Lockout]                                              │
+│   original_admin key permanently revoked across all 13 admin entry points       │
+│                                      │                                          │
+│ [Phase 4: Full Protocol Decentralization & Irreversibility]                     │
+│   Registry parameters governable exclusively via timelocked $KPRS proposals     │
+└─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 6.1 The Two-Sided Authorization Handshake
+### 6.1 Step-by-Step Migration Procedure
 
-Both `KeeperRegistry::transfer_admin` and `Treasury::transfer_admin` require:
+1. **Pre-flight Configuration & Environment Verification**:
+   - Verify the `KeeperRegistry` contract is live and its instance storage records the deployer's address as `DataKey::Admin`:
+     ```bash
+     stellar contract invoke --id $REGISTRY_ID --source-account $ADMIN_KEY -- admin
+     # Returns: "$ADMIN_ADDRESS"
+     ```
+   - Ensure the $KPRS token contract (`contracts/governance-token`) is deployed and funded per §2.
+   - Deploy the `GovernanceContract` (`contracts/governance`) and initialize it with initial governance parameters, the $KPRS token address, and the `KeeperRegistry` address.
+
+2. **Executing the Handshake via `accept_admin`**:
+   - The current registry admin invokes `accept_admin` on the `GovernanceContract`:
+     ```bash
+     stellar contract invoke \
+       --id $GOVERNANCE_CONTRACT_ID \
+       --source-account $ADMIN_KEY \
+       -- \
+       accept_admin \
+       --current_admin $ADMIN_ADDRESS \
+       --registry $REGISTRY_ID
+     ```
+   - **Internal Execution Flow**:
+     1. `GovernanceContract` enforces `current_admin.require_auth()`, ensuring the transaction was signed by the current registry admin.
+     2. `GovernanceContract` resolves its own contract address `governance_addr = env.current_contract_address()`.
+     3. `GovernanceContract` calls `KeeperRegistryClient::transfer_admin(&current_admin, &governance_addr)`.
+     4. Inside `KeeperRegistry::transfer_admin`:
+        - `require_admin(&e, &current_admin)` passes because `current_admin` authorized the outer call and matches `DataKey::Admin`.
+        - `new_admin.require_auth()` passes because `new_admin` is the executing contract itself (`governance_addr`), satisfying contract-level authorization in the call tree.
+        - `KeeperRegistry` writes `DataKey::Admin = governance_addr` and emits the `AdminTransferred(old_admin, new_admin)` event.
+     5. `GovernanceContract` emits the `admin_migrated(current_admin, governance_addr)` event.
+
+3. **Post-Migration Verification**:
+   - Verify registry admin view returns the governance contract address:
+     ```bash
+     stellar contract invoke --id $REGISTRY_ID -- admin
+     # Returns: "$GOVERNANCE_CONTRACT_ID"
+     ```
+   - Verify that attempts by the former admin to invoke any admin-gated function are immediately rejected with `KeeperError::Unauthorized`:
+     ```bash
+     stellar contract invoke --id $REGISTRY_ID --source-account $ADMIN_KEY -- pause --admin $ADMIN_KEY
+     # Fails with error: KeeperError::Unauthorized (Code 2)
+     ```
+
+### 6.2 The Two-Sided Authorization Handshake & Contract Auth
+
+`KeeperRegistry::transfer_admin` enforces a two-sided authorization check:
 ```rust
 require_admin(&e, &admin)?;
 new_admin.require_auth();
 ```
-Because `new_admin` must authorize the transfer, the governance contract exposes an explicit `accept_admin(contract: Address)` entry point:
-1. Current admin invokes `governance.accept_admin(registry_address)`.
-2. Inside `accept_admin`, the governance contract invokes `registry.transfer_admin(admin, governance_address)`.
-3. Because the governance contract is executing the call, its own authorization (`governance.require_auth()`) is granted.
-4. Control passes cleanly to the governance contract address.
+This guard ensures administrative control can never be transferred to an unconsenting recipient or black hole address.
 
-### 6.2 Verifiability
+**Why a Dedicated Entry Point is Required**:
+- A human admin signs transactions with a public/private keypair.
+- A smart contract has no private key and cannot sign off-chain cryptographic signatures.
+- Under Soroban's authorization framework, a contract address satisfies `require_auth()` only when the contract itself is currently executing in the call stack.
+- Attempting to call `registry.transfer_admin(admin, governance_addr)` directly from a CLI keypair would fail because `governance_addr.require_auth()` cannot be signed by the external key.
+- By exposing `accept_admin(current_admin, registry)`, the governance contract initiates the downstream call to `transfer_admin`. Its contract address is the active caller, cleanly satisfying `new_admin.require_auth()` while verifying `current_admin.require_auth()` from the incoming transaction envelope.
 
-A dedicated test suite in `contracts/governance/src/test.rs` verifies that:
-- Prior to transfer, the original admin can modify parameters and governance cannot.
-- Following `transfer_admin`, the original admin's calls fail with `KeeperError::Unauthorized`.
-- Parameter changes succeed only when dispatched from the governance contract through a passed, timelocked proposal.
+### 6.3 Explicit Statement of Irreversibility
+
+> [!CAUTION]
+> **PERMANENT AND IRREVERSIBLE ACTION**
+> Once `accept_admin` executes, administrative control of `KeeperRegistry` is permanently relinquished by the single human admin key.
+> 
+> - **No Backdoor or Fallback Key**: The `KeeperRegistry` storage maintains a single `DataKey::Admin` slot. Following migration, this slot holds the `GovernanceContract` address.
+> - **Closed Action Enum**: The governance engine's `GovernableAction` enum (Issue #490 / 0360) is strictly closed and does **not** include an action to transfer admin back to an external address or individual keypair.
+> - **No Return Path**: There is no mechanism for an individual, team member, or original deployer to reclaim administrative control. The only mechanism that could alter registry administration is a community-wide governance proposal passing `UpgradeRegistry` after full public review and the mandatory 48-hour timelock delay.
+
+### 6.4 Verification and Test Coverage
+
+The migration procedure and its security properties are validated by automated tests in `contracts/governance/src/test.rs`:
+- `test_one_time_admin_migration_full_lifecycle_and_irreversibility`:
+  1. Validates that the original admin exercises administrative power prior to migration (`set_fee_bps`, `set_min_reward`).
+  2. Executes `accept_admin` and verifies registry ownership updates to `GovernanceContract`.
+  3. Verifies that the original admin is rejected with `KeeperError::Unauthorized` across all admin-gated functions:
+     - `set_fee_bps`
+     - `set_min_reward`
+     - `set_reputation_floor`
+     - `pause`
+     - `unpause`
+     - `set_min_stake`
+     - `set_dispute_window`
+     - `transfer_admin`
+     - `upgrade`
+     - `sweep_fees`
+     - `slash`
+     - `resolve_slash_appeal`
+     - `resolve_execution_dispute`
+  4. Verifies parameter updates succeed exclusively through passed and timelocked governance proposals (`SetFeeBps`, `Pause`).
+  5. Proves irreversibility by asserting that any attempt to repeat migration or re-assign admin fails with `GovernanceError::RegistryCallFailed`.
+- `test_admin_migration_dual_auth_enforcement`:
+  1. Verifies that an imposter or unauthorized account cannot invoke `accept_admin`.
+  2. Verifies that only the authorized current admin can initiate the handover.
 
 ---
 
