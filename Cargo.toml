@@ -2,11 +2,13 @@
 resolver = "2"
 members = [
     "contracts/governance-token",
+    "contracts/governance",
     "contracts/keeper-registry",
     "contracts/treasury",
     "indexer",
     "rust-sdk",
 ]
+
 
 [workspace.dependencies]
 soroban-sdk = { version = "22.0.1", features = ["testutils"] }
