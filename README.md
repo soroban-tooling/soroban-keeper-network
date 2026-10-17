@@ -29,6 +29,7 @@
 | [Audit scope](docs/AUDIT_SCOPE.md) | Surfaces and primary artifacts an external auditor should review, including the verifier integration |
 | [Events for a future indexer](docs/EVENTS.md) | Verifier-related event schema (epic E14 scope), field-by-field indexer purpose |
 | [Treasury events](docs/TREASURY_EVENTS.md) | Treasury event topic pairs, distribution breakdown, rebuilding recipient configuration from events |
+| [Governance events](docs/GOVERNANCE_EVENTS.md) | Governance proposal lifecycle event topic pairs, full history reconstruction, voter transparency rationale |
 | [CI](docs/CI.md) | What each CI job checks and which are advisory vs. required |
 | [Deploying & running](docs/DEPLOYING.md) | Testnet deploy walkthrough and keeper-bot operator guide |
 | [Deployments](docs/DEPLOYMENTS.md) | Canonical record of on-chain addresses |
@@ -532,6 +533,22 @@ Notes:
 - `VerifierUpdated` follows the `FeeUpdated` / `MinRewardUpdated` before/after pattern with `(task_id, old_verifier, new_verifier)`.
 - `StakeDeposited`/`UnbondInitiated`/`StakeWithdrawn`/`Slashed`/`MinStakeUpdated`/`SlashAppealRaised`/`SlashAppealResolved` are the staking epic's events (E06, `docs/STAKING_DESIGN.md`). `Slashed`'s `reason` is a `Symbol`, not free text — see the design doc for the trust model behind `slash`'s authorization.
 - `DisputeWindowUpdated`/`ExecutionDisputed`/`ExecutionDisputeResolved`/`RewardsFinalized` cover the optional execution-dispute hold (E06, `docs/STAKING_DESIGN.md` §4.2). `RewardsFinalized` only fires for credits that actually go through a dispute-window hold; when the window is disabled (the default), `withdraw_rewards` behaves exactly as it did before this feature existed and this event is never emitted.
+
+#### Governance Events
+
+The governance contract (`contracts/governance`) emits structured lifecycle events for proposal tracking, voting auditability, and execution verification. Full specifications and the voter transparency rationale are documented in [docs/GOVERNANCE_EVENTS.md](docs/GOVERNANCE_EVENTS.md).
+
+| Event | Emitted by | Topics | Data (in order, with type) |
+|---|---|---|---|
+| `ProposalCreated` | `propose` | `("proposed", "gov")` | `(proposal_id: u64, proposer: Address, eta: u64)` |
+| `VoteCast` | `cast_vote` | `("vcast", "gov")` | `(proposal_id: u64, voter: Address, support: u32, voting_power: i128)` |
+| `ProposalPassed` | `record_outcome` | `("passed", "gov")` | `(proposal_id: u64, votes_for: i128, votes_against: i128, votes_abstain: i128)` |
+| `ProposalDefeated` | `record_outcome` | `("defeat", "gov")` | `(proposal_id: u64, votes_for: i128, votes_against: i128, votes_abstain: i128)` |
+| `ProposalQueued` | `queue_proposal` | `("queued", "gov")` | `(proposal_id: u64, eta: u64)` |
+| `ProposalExecuted` | `execute_proposal` | `("executed", "gov")` | `(proposal_id: u64,)` |
+| `ProposalExecutionFailed` | `execute_proposal` | `("exfail", "gov")` | `(proposal_id: u64, error_code: u32)` |
+| `ProposalCancelled` | `cancel_proposal` | `("cancel", "gov")` | `(proposal_id: u64,)` |
+| `AdminMigrated` | `accept_admin` | `("admin_migrated", current_admin, governance_addr)` | `(registry: Address,)` |
 
 #### Task Lifecycle State Machine
 
