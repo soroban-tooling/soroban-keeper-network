@@ -50,6 +50,7 @@ pub enum DataKey {
     Vesting(Address),
 }
 
+pub const VERSION: u32 = 1;
 pub const DECIMALS: u32 = 7;
 pub const ONE_TOKEN: i128 = 10_000_000; // 10^7 stroops / base units
 
@@ -408,6 +409,10 @@ impl GovernanceToken {
 
     pub fn symbol(env: Env) -> String {
         String::from_str(&env, "KPRS")
+    }
+
+    pub fn version(_env: Env) -> u32 {
+        VERSION
     }
 
     // ── Internal Helpers ───────────────────────────────────────────────────

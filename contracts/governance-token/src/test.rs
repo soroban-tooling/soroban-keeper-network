@@ -203,3 +203,11 @@ fn test_on_chain_vesting_enforces_cliff_and_linear_schedule() {
     assert_eq!(client.balance(&core_team), 0);
     assert_eq!(client.balance(&recipient), ALLOC_CORE_TEAM);
 }
+
+#[test]
+fn test_governance_token_version() {
+    let Setup { client, .. } = setup();
+    assert_eq!(client.version(), 1);
+    assert_eq!(VERSION, 1);
+}
+

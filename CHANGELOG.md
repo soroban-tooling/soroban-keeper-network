@@ -6,6 +6,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — registry admin migration to decentralized governance (E09, issue 0368 / #496)
+
+- Administrative control over the `KeeperRegistry` contract has permanently moved from a single privileged admin key to the decentralized `GovernanceContract` (`contracts/governance`). This is the single most significant architectural milestone in the registry's history to date, decentralizing ownership of all 13 protocol admin entry points (`set_fee_bps`, `set_min_reward`, `set_reputation_floor`, `pause`, `unpause`, `set_min_stake`, `set_dispute_window`, `transfer_admin`, `upgrade`, `sweep_fees`, `slash`, `resolve_slash_appeal`, `resolve_execution_dispute`).
+- **Migration Handshake & Dual Authorization**: Admin transition is executed via `accept_admin(current_admin, registry)` on the governance contract. This satisfies Soroban's two-sided authorization invariant: the current admin signs the external transaction (`current_admin.require_auth()`), and the governance contract satisfies `new_admin.require_auth()` as the active caller invoking `KeeperRegistry::transfer_admin`.
+- **Immediate and Irreversible Lockout**: Following the execution of `accept_admin`, the former admin key is locked out from all admin functions with `KeeperError::Unauthorized (2)`. Registry storage `DataKey::Admin` stores the governance contract address, and parameter updates can only occur through community-voted, timelocked governance proposals.
+- **Registry-Side Changes**: No breaking ABI modifications or storage migrations were required in `contracts/keeper-registry`. `transfer_admin` already validated both `require_admin` and `new_admin.require_auth()`, ensuring full backward and forward compatibility.
+- See [`docs/GOVERNANCE_DESIGN.md`](docs/GOVERNANCE_DESIGN.md) for the full architectural specification, step-by-step procedure, security invariants, and test coverage.
+
+### Added — governance contract initial release (E09, issues 0362–0367, 0371 / #490–#497)
+
+- New `contracts/governance` crate (`keeper-governance`, `VERSION = 1`): on-chain proposal state engine, voting mechanism, timelock queue, and cross-contract parameter dispatcher.
+- Proposal lifecycle entry points: `propose`, `cast_vote`, `record_outcome`, `queue_proposal`, `execute_proposal`, `cancel_proposal`, and `accept_admin`.
+- Read-only views: `version`, `admin`, `kprs_token`, `registry`, `get_proposal`, `proposal_count`, `has_voted`, `get_vote`.
+- Token-weighted voting: 1 KPRS token = 1 vote snapshotted at proposal creation ledger. Quorum is 4% of total supply (4,000,000 KPRS / 400 bps), requiring a simple majority of non-abstaining votes (>50% For) to pass.
+- Safety and Timelock: Mandatory 48-hour timelock delay (~28,800 ledgers) before permissionless execution, adhering to Checks-Effects-Interactions (CEI) to eliminate reentrancy and prevent double-execution.
+- Event Log: Emits structured two-topic `(verb, "gov")` events across all lifecycle transitions (`ProposalCreated`, `VoteCast`, `ProposalPassed`, `ProposalDefeated`, `ProposalQueued`, `ProposalExecuted`, `ProposalExecutionFailed`, `ProposalCancelled`, and `AdminMigrated`). Individual ballots are emitted publicly for full DAO auditability and keeper accountability. See [`docs/GOVERNANCE_EVENTS.md`](docs/GOVERNANCE_EVENTS.md).
+
+### Added — KPRS governance token contract initial release (E09, issue 0361 / #489)
+
+- New `contracts/governance-token` crate (`keeper-governance-token`, `VERSION = 1`): SEP-41 compliant fungible token with on-chain vesting enforcement.
+- Token Economics: Fixed total supply of 100,000,000 KPRS (`1_000_000_000_000_000` base units at 7 decimals precision).
+- Initial allocation: 40% (40M KPRS) to early keepers retroactive distribution, 25% (25M KPRS) to DAO treasury reserve, 20% (20M KPRS) to core team with 2-year linear vesting and 6-month cliff enforced on-chain, and 15% (15M KPRS) to public liquidity.
+- Token entry points: `initialize`, `transfer`, `transfer_from`, `approve`, `burn`, `burn_from`, and views `balance`, `spendable_balance`, `vested_balance`, `unvested_balance`, `allowance`, `decimals`, `name`, `symbol`, and `version`.
+- Any transfer exceeding the unvested schedule is rejected at contract execution time with `TokenError::TokensLocked (5)`.
+
 ### Added — rust-sdk call context on every error (0345)
 
 - Every error `KeeperClient` and `KeeperRegistryClient` return now carries
