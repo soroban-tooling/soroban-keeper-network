@@ -80,3 +80,25 @@ pub struct EventFeedResponse {
 
 /// Current registry configuration, folded from admin event history.
 pub type AdminConfigResponse = AdminConfig;
+
+/// A task grouped by its oracle feed (oracle address + asset).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TaskByFeed {
+    pub task_id: u64,
+    pub owner: String,
+    pub status: String,
+    #[schema(value_type = String)]
+    pub reward: crate::events::I128,
+}
+
+/// Open tasks grouped by oracle feed (oracle address + asset combination).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct FeedTasksResponse {
+    /// Oracle address + asset identifier (e.g., "GORACLE:USD")
+    pub feed: String,
+    /// Price threshold that triggers these tasks
+    #[schema(value_type = String)]
+    pub threshold: crate::events::I128,
+    /// Open (pending or claimed) tasks depending on this feed
+    pub tasks: Vec<TaskByFeed>,
+}

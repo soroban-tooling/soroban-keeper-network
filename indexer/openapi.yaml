@@ -23,6 +23,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminConfig'
+  /feeds/open-tasks:
+    get:
+      tags:
+      - indexer
+      summary: Open tasks grouped by oracle feed.
+      operationId: open_tasks_by_feed
+      responses:
+        '200':
+          description: Open tasks grouped by oracle feed
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FeedTasksResponse'
   /events:
     get:
       tags:
@@ -545,6 +560,28 @@ components:
             type: string
             enum:
             - reputation_updated
+      - type: object
+        required:
+        - task_id
+        - oracle
+        - asset
+        - threshold
+        - type
+        properties:
+          asset:
+            type: string
+          oracle:
+            type: string
+          task_id:
+            type: integer
+            format: int64
+            minimum: 0
+          threshold:
+            type: string
+          type:
+            type: string
+            enum:
+            - oracle_price_condition_set
       description: |-
         The decoded payload of one event.
 
@@ -575,6 +612,7 @@ components:
       - initialized
       - upgraded
       - reputation_updated
+      - oracle_price_condition_set
     HealthResponse:
       type: object
       description: Service liveness and how far ingestion has reached.
@@ -811,6 +849,11 @@ components:
       - net_reward
       - last_ledger
       properties:
+        asset:
+          type:
+          - string
+          - 'null'
+          description: Asset identifier for oracle-price-threshold conditions, once set.
         claim_ledger:
           type:
           - integer
@@ -836,6 +879,16 @@ components:
         net_reward:
           type: string
           description: Net reward paid on execution, once executed.
+        oracle_address:
+          type:
+          - string
+          - 'null'
+          description: Oracle address for oracle-price-threshold conditions, once set.
+        oracle_threshold:
+          type:
+          - string
+          - 'null'
+          description: Price threshold for oracle-price-threshold conditions, once set.
         owner:
           type: string
         reward:
@@ -856,6 +909,44 @@ components:
       - executed
       - cancelled
       - expired
+    TaskByFeed:
+      type: object
+      description: A task grouped by its oracle feed (oracle address + asset).
+      required:
+      - task_id
+      - owner
+      - status
+      - reward
+      properties:
+        owner:
+          type: string
+        reward:
+          type: string
+        status:
+          type: string
+        task_id:
+          type: integer
+          format: int64
+          minimum: 0
+    FeedTasksResponse:
+      type: object
+      description: Open tasks grouped by oracle feed (oracle address + asset combination).
+      required:
+      - feed
+      - threshold
+      - tasks
+      properties:
+        feed:
+          type: string
+          description: Oracle address + asset identifier (e.g., "GORACLE:USD")
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskByFeed'
+          description: Open (pending or claimed) tasks depending on this feed
+        threshold:
+          type: string
+          description: Price threshold that triggers these tasks
 tags:
 - name: indexer
   description: Indexed registry data

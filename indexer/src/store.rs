@@ -298,6 +298,100 @@ impl Store {
         Ok(())
     }
 
+    /// Open tasks (Pending or Claimed) grouped by oracle feed (oracle address + asset).
+    ///
+    /// Returns tasks that have an oracle price condition set, grouped by the
+    /// (oracle_address, asset) pair. Within each feed, tasks are ordered by
+    /// task_id descending.
+    pub async fn open_tasks_by_feed(
+        &self,
+    ) -> Result<Vec<(String, String, i128, Vec<(u64, String, i128)>)>> {
+        // Get all OraclePriceConditionSet events
+        let rows = sqlx::query(
+            "SELECT cursor, ledger, ledger_close_time, tx_hash, event_index, payload
+             FROM events
+             WHERE event_type = 'oracle_price_condition_set'
+             ORDER BY cursor ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("reading oracle condition events")?;
+
+        let events: Vec<IndexedEvent> = rows.iter().map(row_to_event).collect::<Result<_>>()?;
+
+        // Build a map of task_id -> (oracle, asset, threshold)
+        let mut task_feeds: std::collections::HashMap<u64, (String, String, i128)> =
+            std::collections::HashMap::new();
+
+        for event in &events {
+            if let crate::events::EventPayload::OraclePriceConditionSet {
+                task_id,
+                oracle,
+                asset,
+                threshold,
+            } = &event.payload
+            {
+                task_feeds.insert(*task_id, (oracle.clone(), asset.clone(), threshold.0));
+            }
+        }
+
+        // Get all open tasks (pending or claimed) with their state
+        let open_tasks = sqlx::query(
+            "SELECT DISTINCT task_id FROM events
+             WHERE (event_type = 'task_registered' OR event_type = 'task_claimed')
+             AND task_id IS NOT NULL",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("reading open tasks")?;
+
+        let mut result: std::collections::HashMap<
+            String,
+            (String, String, i128, Vec<(u64, String, i128)>),
+        > = std::collections::HashMap::new();
+
+        for row in open_tasks {
+            let task_id = row.get::<i64, _>("task_id") as u64;
+
+            // Only include tasks that have an oracle condition set
+            if let Some((oracle, asset, threshold)) = task_feeds.get(&task_id) {
+                // Get the task state to verify it's actually open
+                if let Some(state) = self.task_state(task_id).await? {
+                    // Only include if status is Pending or Claimed
+                    if state.status == crate::state::TaskStatus::Pending
+                        || state.status == crate::state::TaskStatus::Claimed
+                    {
+                        let feed_key = format!("{}:{}", oracle, asset);
+                        let entry = result
+                            .entry(feed_key.clone())
+                            .or_insert_with(|| {
+                                (oracle.clone(), asset.clone(), *threshold, Vec::new())
+                            });
+                        entry
+                            .3
+                            .push((task_id, state.owner.clone(), state.reward.0));
+                    }
+                }
+            }
+        }
+
+        // Convert to sorted result
+        let mut result_vec: Vec<_> = result
+            .into_iter()
+            .map(|(_, (oracle, asset, threshold, mut tasks))| {
+                tasks.sort_by(|a, b| b.0.cmp(&a.0)); // Sort tasks by id descending
+                (oracle, asset, threshold, tasks)
+            })
+            .collect();
+
+        // Sort by oracle address, then asset
+        result_vec.sort_by(|a, b| {
+            a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1))
+        });
+
+        Ok(result_vec)
+    }
+
     /// The pool, for queries defined in other modules.
     pub fn pool(&self) -> &SqlitePool {
         &self.pool

@@ -95,6 +95,7 @@ export interface RoundSummary {
     unprofitable: bigint[];
     noExecutor: bigint[];
     pastDeadline: bigint[];
+    conditionNotMet: bigint[]; // Tasks skipped due to unmet oracle conditions
     other: bigint[];
   };
   errors: Array<{

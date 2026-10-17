@@ -33,6 +33,7 @@ pub fn routes() -> Router<ApiState> {
         .route("/owners/{owner}/tasks", get(tasks_by_owner))
         .route("/keepers/{keeper}/tasks", get(tasks_by_keeper))
         .route("/admin/config", get(admin_config))
+        .route("/feeds/open-tasks", get(open_tasks_by_feed))
         .route("/leaderboard", get(keeper_leaderboard))
         .route("/events", get(event_feed))
 }
@@ -205,6 +206,40 @@ pub async fn admin_config(
         .await
         .map_err(internal)?;
     Ok(Json(config))
+}
+
+/// Open tasks grouped by oracle feed.
+#[utoipa::path(
+    get,
+    path = "/feeds/open-tasks",
+    tag = "indexer",
+    responses((status = 200, description = "Open tasks grouped by oracle feed", body = Vec<FeedTasksResponse>))
+)]
+pub async fn open_tasks_by_feed(
+    State(state): State<ApiState>,
+) -> Result<Json<Vec<super::types::FeedTasksResponse>>, Failure> {
+    let store = state.ingestor.store();
+    let feed_data = store.open_tasks_by_feed().await.map_err(internal)?;
+
+    let mut result = Vec::new();
+    for (oracle, asset, threshold, tasks) in feed_data {
+        let mut task_list = Vec::new();
+        for (task_id, owner, reward) in tasks {
+            task_list.push(super::types::TaskByFeed {
+                task_id,
+                owner,
+                status: "open".to_string(),
+                reward: crate::events::I128(reward),
+            });
+        }
+        result.push(super::types::FeedTasksResponse {
+            feed: format!("{}:{}", oracle, asset),
+            threshold: crate::events::I128(threshold),
+            tasks: task_list,
+        });
+    }
+
+    Ok(Json(result))
 }
 
 /// Default entries returned by the leaderboard.

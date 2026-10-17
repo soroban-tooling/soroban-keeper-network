@@ -96,6 +96,34 @@ export class MetricsCollector {
     tt.skippedByReason[reason] = (tt.skippedByReason[reason] || 0) + 1;
   }
 
+  /**
+   * Record a task skipped due to unmet oracle condition (issue #665)
+   */
+  public recordSkipConditionNotMet(taskType: string): void {
+    this.recordSkip(taskType, "condition_not_met");
+  }
+
+  /**
+   * Record a task skipped due to being unprofitable
+   */
+  public recordSkipUnprofitable(taskType: string): void {
+    this.recordSkip(taskType, "unprofitable");
+  }
+
+  /**
+   * Record a task skipped due to no available executor
+   */
+  public recordSkipNoExecutor(taskType: string): void {
+    this.recordSkip(taskType, "no_executor");
+  }
+
+  /**
+   * Record a task skipped due to past deadline
+   */
+  public recordSkipPastDeadline(taskType: string): void {
+    this.recordSkip(taskType, "past_deadline");
+  }
+
   public recordRpcError(errorType: string): void {
     this.rpcErrors[errorType] = (this.rpcErrors[errorType] || 0) + 1;
   }

@@ -248,3 +248,21 @@ pub fn emit_reputation_floor_updated(e: &Env, old_floor_bps: u32, new_floor_bps:
         (old_floor_bps, new_floor_bps),
     );
 }
+
+// ─── E11 — Oracle Integration ──────────────────────────────────────────
+// Oracle-backed task condition events go here.
+
+/// Emitted when a task's oracle price condition is set or updated.
+/// Contains the oracle address, asset identifier, and price threshold.
+pub fn emit_oracle_price_condition_set(
+    e: &Env,
+    task_id: u64,
+    oracle: &Address,
+    asset: &Symbol,
+    threshold: i128,
+) {
+    e.events().publish(
+        (symbol_short!("oracond"), symbol_short!("task")),
+        (task_id, oracle.clone(), asset.clone(), threshold),
+    );
+}

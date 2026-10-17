@@ -59,6 +59,7 @@ pub struct ApiState {
         rest::tasks_by_owner,
         rest::tasks_by_keeper,
         rest::admin_config,
+        rest::open_tasks_by_feed,
         rest::event_feed,
         rest::keeper_leaderboard,
     ),
@@ -78,6 +79,8 @@ pub struct ApiState {
         types::HealthResponse,
         types::TaskDetail,
         types::TaskListResponse,
+        types::FeedTasksResponse,
+        types::TaskByFeed,
     )),
     tags((name = "indexer", description = "Indexed registry data"))
 )]
@@ -121,6 +124,7 @@ mod tests {
             "/owners/{owner}/tasks",
             "/keepers/{keeper}/tasks",
             "/admin/config",
+            "/feeds/open-tasks",
             "/events",
             "/leaderboard",
         ] {

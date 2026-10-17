@@ -48,6 +48,13 @@ pub struct TaskState {
     pub net_reward: Option<I128>,
     /// Ledger of the most recent event for this task.
     pub last_ledger: u32,
+    /// Oracle address for oracle-price-threshold conditions, once set.
+    pub oracle_address: Option<String>,
+    /// Asset identifier for oracle-price-threshold conditions, once set.
+    pub asset: Option<String>,
+    /// Price threshold for oracle-price-threshold conditions, once set.
+    #[schema(value_type = Option<String>)]
+    pub oracle_threshold: Option<I128>,
 }
 
 impl TaskState {
@@ -77,6 +84,9 @@ impl TaskState {
                         claim_ledger: None,
                         net_reward: None,
                         last_ledger: event.ledger,
+                        oracle_address: None,
+                        asset: None,
+                        oracle_threshold: None,
                     });
                 }
                 other => {
@@ -111,6 +121,16 @@ impl TaskState {
                         }
                         EventPayload::DeadlineExtended { new_deadline, .. } => {
                             state.deadline = *new_deadline;
+                        }
+                        EventPayload::OraclePriceConditionSet {
+                            oracle,
+                            asset,
+                            threshold,
+                            ..
+                        } => {
+                            state.oracle_address = Some(oracle.clone());
+                            state.asset = Some(asset.clone());
+                            state.oracle_threshold = Some(*threshold);
                         }
                         _ => continue,
                     }

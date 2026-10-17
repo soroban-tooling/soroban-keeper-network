@@ -93,6 +93,12 @@ pub fn parse_event(raw: &RawEvent) -> Result<Option<EventPayload>> {
             admin: address_at(v, 0, event_type)?,
             new_wasm_hash: bytes_at(v, 1, event_type)?,
         },
+        EventType::OraclePriceConditionSet => EventPayload::OraclePriceConditionSet {
+            task_id: u64_at(v, 0, event_type)?,
+            oracle: address_at(v, 1, event_type)?,
+            asset: symbol_at(v, 2, event_type)?,
+            threshold: i128_at(v, 3, event_type)?.into(),
+        },
         // Recognised in the type system for the API's sake, but not parseable
         // from the wire yet: the contract's only reputation event today is
         // `reputation_floor_updated` (a different shape), and `RawValue` has
@@ -162,6 +168,13 @@ fn bytes_at(values: &[RawValue], index: usize, event: EventType) -> Result<Strin
     match at(values, index, event)? {
         RawValue::Bytes(v) => Ok(v.clone()),
         other => Err(type_error(event, index, "bytes", other)),
+    }
+}
+
+fn symbol_at(values: &[RawValue], index: usize, event: EventType) -> Result<String> {
+    match at(values, index, event)? {
+        RawValue::Symbol(v) => Ok(v.clone()),
+        other => Err(type_error(event, index, "symbol", other)),
     }
 }
 
