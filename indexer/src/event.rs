@@ -11,12 +11,14 @@
 //! this line in the indexer works on these types, so the storage and
 //! aggregation logic can be tested without a network or a contract.
 
+use serde::{Deserialize, Serialize};
+
 /// Where in the chain an event was observed.
 ///
 /// Kept on every row so ingestion is replay-safe: the `(ledger, tx_index,
 /// event_index)` triple is unique and totally ordered, which is what both the
 /// idempotency constraint and the "full history in order" requirement rest on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EventCursor {
     pub ledger: u32,
     pub tx_index: u32,
@@ -171,6 +173,28 @@ pub enum EventPayload {
         action: String,
         score: i128,
     },
+
+    // ── governance (issue #504 / #505) ───────────────────────────────────────
+    /// `(proposed, proposer, proposal_id)` — `(eta,)`
+    ProposalCreated {
+        proposal_id: u64,
+        proposer: String,
+        eta: u64,
+        action: Option<String>,
+    },
+    /// `(vote_cast, voter, proposal_id)` — `(support,)`
+    VoteCast {
+        proposal_id: u64,
+        voter: String,
+        support: u32,
+        voting_power: Option<i128>,
+    },
+    /// `(proposal_executed, proposal_id)`
+    ProposalExecuted { proposal_id: u64 },
+    /// `(proposal_exec_failed, proposal_id)`
+    ProposalExecutionFailed { proposal_id: u64 },
+    /// `(proposal_cancelled, proposal_id)`
+    ProposalCancelled { proposal_id: u64 },
 }
 
 impl EventPayload {
@@ -202,6 +226,11 @@ impl EventPayload {
             Self::StakeWithdrawn { .. } => ("wdraw", "stake"),
             Self::Slashed { .. } => ("slash", "stake"),
             Self::ReputationUpdated { .. } => ("update", "reputation"),
+            Self::ProposalCreated { .. } => ("proposed", "gov"),
+            Self::VoteCast { .. } => ("vote_cast", "gov"),
+            Self::ProposalExecuted { .. } => ("proposal_executed", "gov"),
+            Self::ProposalExecutionFailed { .. } => ("proposal_exec_failed", "gov"),
+            Self::ProposalCancelled { .. } => ("proposal_cancelled", "gov"),
         };
         EventTopic { verb, noun }
     }

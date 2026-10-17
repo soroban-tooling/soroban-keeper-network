@@ -29,6 +29,7 @@
 //! `docs/INDEXER_DEPLOYMENT.md` for running one.
 
 pub mod address;
+pub mod alerts;
 pub mod api;
 pub mod backfill;
 pub mod cache;
@@ -44,6 +45,11 @@ pub mod rpc;
 pub mod state;
 pub mod store;
 
+pub use alerts::{
+    Alert, AlertError, AlertManager, AlertRule, AlertSeverity, AlertSystemConfig, AlertTransport,
+    InMemoryTransport, NewProposalRule, NoopTransport, VotingWindowClosingSoonRule,
+    WebhookTransport,
+};
 pub use backfill::Backfiller;
 pub use config::Config;
 pub use events::{EventPayload, EventType, IndexedEvent};
