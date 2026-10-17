@@ -5,7 +5,8 @@ use keeper_registry::{
     KeeperError, KeeperRegistry, KeeperRegistryClient as RegistryTestClient,
 };
 use soroban_sdk::{
-    testutils::Address as _, testutils::Ledger as _, token, Address, BytesN, Env, Symbol,
+    symbol_short, testutils::Address as _, testutils::Events as _, testutils::Ledger as _, token,
+    Address, BytesN, Env, Symbol, TryIntoVal,
 };
 
 #[allow(dead_code)]
@@ -456,4 +457,341 @@ fn test_admin_migration_dual_auth_enforcement() {
     client.accept_admin(&original_admin, &registry_id);
     assert_eq!(registry_client.admin(), Some(governance_id));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Epic E09 — Issue #497: Full Proposal Lifecycle Event Coverage
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn get_event_topics(
+    env: &Env,
+    topics: &soroban_sdk::Vec<soroban_sdk::Val>,
+) -> (Option<Symbol>, Option<Symbol>) {
+    let t0 = topics.get(0).and_then(|v| v.try_into_val(env).ok());
+    let t1 = topics.get(1).and_then(|v| v.try_into_val(env).ok());
+    (t0, t1)
+}
+
+#[test]
+fn test_event_proposal_created_and_queued() {
+    let TestSetup {
+        env,
+        client,
+        ..
+    } = setup();
+
+    let proposer = Address::generate(&env);
+    let now = env.ledger().timestamp();
+    let eta = now + 100_000;
+
+    let proposal_id = client.create_proposal(
+        &proposer,
+        &GovernableAction::SetFeeBps(400),
+        &eta,
+    );
+
+    let mut found_created = false;
+    let mut found_queued = false;
+
+    for (_contract, topics, data) in env.events().all().iter() {
+        let (t0, t1) = get_event_topics(&env, &topics);
+        if t1 == Some(symbol_short!("gov")) {
+            if t0 == Some(symbol_short!("proposed")) {
+                let (id, p_addr, p_eta): (u64, Address, u64) = data.try_into_val(&env).unwrap();
+                assert_eq!(id, proposal_id);
+                assert_eq!(p_addr, proposer);
+                assert_eq!(p_eta, eta);
+                found_created = true;
+            } else if t0 == Some(symbol_short!("queued")) {
+                let (id, q_eta): (u64, u64) = data.try_into_val(&env).unwrap();
+                assert_eq!(id, proposal_id);
+                assert_eq!(q_eta, eta);
+                found_queued = true;
+            }
+        }
+    }
+
+    assert!(found_created, "ProposalCreated event ('proposed', 'gov') was not emitted");
+    assert!(found_queued, "ProposalQueued event ('queued', 'gov') was not emitted");
+}
+
+#[test]
+fn test_event_vote_cast_and_transparency() {
+    let TestSetup {
+        env,
+        client,
+        token_id,
+        ..
+    } = setup();
+
+    let proposer = Address::generate(&env);
+    let voter = Address::generate(&env);
+    let now = env.ledger().timestamp();
+    let eta = now + 100_000;
+
+    // Mint 250,000 KPRS tokens to voter
+    let mint_power = 2_500_000_000_000i128;
+    token::StellarAssetClient::new(&env, &token_id).mint(&voter, &mint_power);
+
+    let proposal_id = client.create_proposal(
+        &proposer,
+        &GovernableAction::SetFeeBps(400),
+        &eta,
+    );
+
+    // Cast vote: Support = 1 (For)
+    let power = client.cast_vote(&voter, &proposal_id, &1u32);
+    assert_eq!(power, mint_power);
+
+    // Assert VoteCast event
+    let mut found_vote = false;
+    for (_contract, topics, data) in env.events().all().iter() {
+        let (t0, t1) = get_event_topics(&env, &topics);
+        if t0 == Some(symbol_short!("vcast")) && t1 == Some(symbol_short!("gov")) {
+            let (id, v_addr, support, v_power): (u64, Address, u32, i128) =
+                data.try_into_val(&env).unwrap();
+            assert_eq!(id, proposal_id);
+            assert_eq!(v_addr, voter);
+            assert_eq!(support, 1u32);
+            assert_eq!(v_power, mint_power);
+            found_vote = true;
+        }
+    }
+    assert!(found_vote, "VoteCast event ('vcast', 'gov') was not emitted");
+
+    // Double voting must fail
+    let duplicate_res = client.try_cast_vote(&voter, &proposal_id, &1u32);
+    assert_eq!(duplicate_res, Err(Ok(GovernanceError::AlreadyVoted)));
+
+    // Invalid support value (> 2) must fail
+    let stranger = Address::generate(&env);
+    let invalid_support_res = client.try_cast_vote(&stranger, &proposal_id, &3u32);
+    assert_eq!(invalid_support_res, Err(Ok(GovernanceError::InvalidSupportValue)));
+}
+
+#[test]
+fn test_event_proposal_passed_and_defeated() {
+    let TestSetup {
+        env,
+        client,
+        ..
+    } = setup();
+
+    let proposer = Address::generate(&env);
+    let now = env.ledger().timestamp();
+    let eta = now + 100_000;
+
+    let p1 = client.create_proposal(
+        &proposer,
+        &GovernableAction::SetFeeBps(400),
+        &eta,
+    );
+
+    // Record outcome: Passed (e.g. 5M For, 1M Against, 100k Abstain)
+    client.record_outcome(&p1, &true, &5_000_000, &1_000_000, &100_000);
+
+    let mut found_passed = false;
+    for (_contract, topics, data) in env.events().all().iter() {
+        let (t0, t1) = get_event_topics(&env, &topics);
+        if t0 == Some(symbol_short!("passed")) && t1 == Some(symbol_short!("gov")) {
+            let (id, v_for, v_against, v_abstain): (u64, i128, i128, i128) =
+                data.try_into_val(&env).unwrap();
+            assert_eq!(id, p1);
+            assert_eq!(v_for, 5_000_000);
+            assert_eq!(v_against, 1_000_000);
+            assert_eq!(v_abstain, 100_000);
+            found_passed = true;
+        }
+    }
+    assert!(found_passed, "ProposalPassed event ('passed', 'gov') was not emitted");
+
+    let p2 = client.create_proposal(
+        &proposer,
+        &GovernableAction::SetFeeBps(500),
+        &eta,
+    );
+
+    // Record outcome: Defeated
+    client.record_outcome(&p2, &false, &1_000_000, &4_000_000, &50_000);
+
+    let mut found_defeated = false;
+    for (_contract, topics, data) in env.events().all().iter() {
+        let (t0, t1) = get_event_topics(&env, &topics);
+        if t0 == Some(symbol_short!("defeat")) && t1 == Some(symbol_short!("gov")) {
+            let (id, v_for, v_against, v_abstain): (u64, i128, i128, i128) =
+                data.try_into_val(&env).unwrap();
+            assert_eq!(id, p2);
+            assert_eq!(v_for, 1_000_000);
+            assert_eq!(v_against, 4_000_000);
+            assert_eq!(v_abstain, 50_000);
+            found_defeated = true;
+        }
+    }
+    assert!(found_defeated, "ProposalDefeated event ('defeat', 'gov') was not emitted");
+}
+
+#[test]
+fn test_event_proposal_executed_and_exec_failed() {
+    let TestSetup {
+        env,
+        client,
+        ..
+    } = setup();
+
+    let proposer = Address::generate(&env);
+    let now = env.ledger().timestamp();
+
+    // 1. Valid proposal executed
+    let p_valid = client.create_proposal(
+        &proposer,
+        &GovernableAction::SetFeeBps(500),
+        &now,
+    );
+    client.execute_proposal(&p_valid);
+
+    let mut found_exec = false;
+    for (_contract, topics, data) in env.events().all().iter() {
+        let (t0, t1) = get_event_topics(&env, &topics);
+        if t0 == Some(symbol_short!("executed")) && t1 == Some(symbol_short!("gov")) {
+            let (id,): (u64,) = data.try_into_val(&env).unwrap();
+            assert_eq!(id, p_valid);
+            found_exec = true;
+        }
+    }
+    assert!(found_exec, "ProposalExecuted event ('executed', 'gov') was not emitted");
+
+    // 2. Invalid proposal failing execution
+    let p_invalid = client.create_proposal(
+        &proposer,
+        &GovernableAction::SetFeeBps(20_000), // invalid fee
+        &now,
+    );
+    let _ = client.try_execute_proposal(&p_invalid);
+
+    let mut found_failed = false;
+    for (_contract, topics, data) in env.events().all().iter() {
+        let (t0, t1) = get_event_topics(&env, &topics);
+        if t0 == Some(symbol_short!("exfail")) && t1 == Some(symbol_short!("gov")) {
+            let (id, err_code): (u64, u32) = data.try_into_val(&env).unwrap();
+            assert_eq!(id, p_invalid);
+            assert_eq!(err_code, 8u32);
+            found_failed = true;
+        }
+    }
+    assert!(found_failed, "ProposalExecutionFailed event ('exfail', 'gov') was not emitted");
+}
+
+#[test]
+fn test_event_proposal_cancelled() {
+    let TestSetup {
+        env,
+        client,
+        admin,
+        ..
+    } = setup();
+
+    let proposer = Address::generate(&env);
+    let now = env.ledger().timestamp();
+    let eta = now + 100_000;
+
+    let p_id = client.create_proposal(
+        &proposer,
+        &GovernableAction::Pause,
+        &eta,
+    );
+
+    // Cancel by proposer
+    client.cancel_proposal(&proposer, &p_id);
+
+    let mut found_cancel = false;
+    for (_contract, topics, data) in env.events().all().iter() {
+        let (t0, t1) = get_event_topics(&env, &topics);
+        if t0 == Some(symbol_short!("cancel")) && t1 == Some(symbol_short!("gov")) {
+            let (id,): (u64,) = data.try_into_val(&env).unwrap();
+            assert_eq!(id, p_id);
+            found_cancel = true;
+        }
+    }
+    assert!(found_cancel, "ProposalCancelled event ('cancel', 'gov') was not emitted");
+
+    // Re-cancelling fails
+    let res = client.try_cancel_proposal(&admin, &p_id);
+    assert_eq!(res, Err(Ok(GovernanceError::ProposalAlreadyCancelled)));
+}
+
+#[test]
+fn test_full_lifecycle_history_reconstruction_from_events() {
+    let TestSetup {
+        env,
+        client,
+        token_id,
+        ..
+    } = setup();
+
+    let proposer = Address::generate(&env);
+    let voter_a = Address::generate(&env);
+    let voter_b = Address::generate(&env);
+    let now = env.ledger().timestamp();
+    let eta = now + 10_000;
+
+    // Mint voting power
+    let asset_client = token::StellarAssetClient::new(&env, &token_id);
+    asset_client.mint(&voter_a, &1_000_000i128);
+    asset_client.mint(&voter_b, &2_000_000i128);
+
+    let mut has_proposed = false;
+    let mut has_queued = false;
+    let mut has_vote = false;
+    let mut has_passed = false;
+    let mut has_executed = false;
+
+    // 1. Create proposal
+    let pid = client.create_proposal(&proposer, &GovernableAction::SetFeeBps(420), &eta);
+    for (_contract, topics, _data) in env.events().all().iter() {
+        let (t0, t1) = get_event_topics(&env, &topics);
+        if t1 == Some(symbol_short!("gov")) {
+            if t0 == Some(symbol_short!("proposed")) {
+                has_proposed = true;
+            } else if t0 == Some(symbol_short!("queued")) {
+                has_queued = true;
+            }
+        }
+    }
+
+    // 2. Cast votes
+    client.cast_vote(&voter_a, &pid, &1u32); // For
+    for (_contract, topics, _data) in env.events().all().iter() {
+        let (t0, t1) = get_event_topics(&env, &topics);
+        if t1 == Some(symbol_short!("gov")) && t0 == Some(symbol_short!("vcast")) {
+            has_vote = true;
+        }
+    }
+    client.cast_vote(&voter_b, &pid, &1u32); // For
+
+    // 3. Record passing outcome
+    client.record_outcome(&pid, &true, &3_000_000, &0, &0);
+    for (_contract, topics, _data) in env.events().all().iter() {
+        let (t0, t1) = get_event_topics(&env, &topics);
+        if t1 == Some(symbol_short!("gov")) && t0 == Some(symbol_short!("passed")) {
+            has_passed = true;
+        }
+    }
+
+    // 4. Advance time and execute
+    env.ledger().set_timestamp(eta);
+    client.execute_proposal(&pid);
+    for (_contract, topics, _data) in env.events().all().iter() {
+        let (t0, t1) = get_event_topics(&env, &topics);
+        if t1 == Some(symbol_short!("gov")) && t0 == Some(symbol_short!("executed")) {
+            has_executed = true;
+        }
+    }
+
+    assert!(has_proposed, "ProposalCreated event must be present");
+    assert!(has_queued, "ProposalQueued event must be present");
+    assert!(has_vote, "VoteCast event must be present");
+    assert!(has_passed, "ProposalPassed event must be present");
+    assert!(has_executed, "ProposalExecuted event must be present");
+}
+
+
 

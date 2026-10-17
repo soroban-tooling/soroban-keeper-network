@@ -165,6 +165,17 @@ Every parameter is strictly validated upon proposal creation AND before executio
   - Calculated as: $\text{Votes}_{\text{For}} > \text{Votes}_{\text{Against}}$.
   - Abstain votes count towards quorum but do not affect the For/Against majority ratio.
 
+### 4.4 Voter Transparency vs. Privacy (Public Ballots)
+
+Upon calling `cast_vote`, the governance contract emits the `VoteCast` event:
+`("vcast", "gov") -> (proposal_id, voter, support, voting_power)`.
+
+**Design Decision Rationale**:
+- **Full Public Verifiability**: Transparent governance demands that any community member or node operator can independently compute and verify the ballot sum against the final proposal tally.
+- **Keeper & Delegate Accountability**: Active network participants and foundation delegates are held accountable by the community for their voting track records.
+- **Attack Analysis**: Transparent ballot weights allow immediate off-chain monitoring for flash-loan or governance takeover attempts prior to execution timelock expiration.
+- For complete event specifications and full proposal history reconstruction from events alone, see [docs/GOVERNANCE_EVENTS.md](GOVERNANCE_EVENTS.md).
+
 ---
 
 ## 5. Timelock & Execution Architecture
