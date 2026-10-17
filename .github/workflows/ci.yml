@@ -63,6 +63,16 @@ jobs:
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
+      - name: cargo fmt --check (governance contracts)
+        if: hashFiles('contracts/governance-token/Cargo.toml', 'contracts/governance/Cargo.toml') != ''
+        run: |
+          if [ -f contracts/governance-token/Cargo.toml ] && ! grep -q 'contracts/governance-token' Cargo.toml; then
+            cargo fmt --manifest-path contracts/governance-token/Cargo.toml -- --check
+          fi
+          if [ -f contracts/governance/Cargo.toml ] && ! grep -q 'contracts/governance' Cargo.toml; then
+            cargo fmt --manifest-path contracts/governance/Cargo.toml -- --check
+          fi
+
       - name: How to fix
         if: failure()
         run: |
@@ -93,6 +103,16 @@ jobs:
 
       - name: cargo test
         run: cargo test --workspace --locked
+
+      - name: cargo test (governance contracts)
+        if: hashFiles('contracts/governance-token/Cargo.toml', 'contracts/governance/Cargo.toml') != ''
+        run: |
+          if [ -f contracts/governance-token/Cargo.toml ] && ! grep -q 'contracts/governance-token' Cargo.toml; then
+            cargo test --manifest-path contracts/governance-token/Cargo.toml --locked
+          fi
+          if [ -f contracts/governance/Cargo.toml ] && ! grep -q 'contracts/governance' Cargo.toml; then
+            cargo test --manifest-path contracts/governance/Cargo.toml --locked
+          fi
 
   # ───────────────────────────────────────────────────────────────────────────
   # REQUIRED — the contract must compile to WASM
@@ -147,6 +167,39 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      - name: Build release WASM (governance-token)
+        if: hashFiles('contracts/governance-token/Cargo.toml') != ''
+        run: |
+          cargo build --locked --release \
+            --target wasm32-unknown-unknown \
+            --package governance-token
+
+      - name: Upload governance-token WASM artifact
+        if: hashFiles('contracts/governance-token/Cargo.toml') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: governance-token-wasm
+          path: target/wasm32-unknown-unknown/release/governance_token.wasm
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Build release WASM (governance)
+        if: hashFiles('contracts/governance/Cargo.toml') != ''
+        run: |
+          PACKAGE_NAME=$(grep -m1 '^name = ' contracts/governance/Cargo.toml | cut -d'"' -f2)
+          cargo build --locked --release \
+            --target wasm32-unknown-unknown \
+            --package "$PACKAGE_NAME"
+
+      - name: Upload governance WASM artifact
+        if: hashFiles('contracts/governance/Cargo.toml') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: governance-wasm
+          path: target/wasm32-unknown-unknown/release/*governance*.wasm
+          retention-days: 14
+          if-no-files-found: error
+
   # ───────────────────────────────────────────────────────────────────────────
   # ADVISORY — clippy. Findings appear as inline PR annotations.
   # ───────────────────────────────────────────────────────────────────────────
@@ -177,6 +230,16 @@ jobs:
       # whether a given lint is worth acting on.
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked
+
+      - name: cargo clippy (governance contracts)
+        if: hashFiles('contracts/governance-token/Cargo.toml', 'contracts/governance/Cargo.toml') != ''
+        run: |
+          if [ -f contracts/governance-token/Cargo.toml ] && ! grep -q 'contracts/governance-token' Cargo.toml; then
+            cargo clippy --manifest-path contracts/governance-token/Cargo.toml --all-targets --locked
+          fi
+          if [ -f contracts/governance/Cargo.toml ] && ! grep -q 'contracts/governance' Cargo.toml; then
+            cargo clippy --manifest-path contracts/governance/Cargo.toml --all-targets --locked
+          fi
 
   # ───────────────────────────────────────────────────────────────────────────
   # ADVISORY — dependency advisories. A new upstream CVE should notify us,

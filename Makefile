@@ -37,6 +37,8 @@ lint: ## Run clippy with warnings denied (stricter than CI)
 wasm: ## Build the release WASM contracts (matches CI)
 	cargo build --locked --release --target wasm32-unknown-unknown --package keeper-registry
 	cargo build --locked --release --target wasm32-unknown-unknown --package keeper-treasury
+	@if [ -f contracts/governance-token/Cargo.toml ]; then cargo build --locked --release --target wasm32-unknown-unknown --package governance-token; fi
+	@if [ -f contracts/governance/Cargo.toml ]; then PKG=$$(grep -m1 '^name = ' contracts/governance/Cargo.toml | cut -d'"' -f2); cargo build --locked --release --target wasm32-unknown-unknown --package "$$PKG"; fi
 
 optimize: wasm ## Build and optimize the WASM for deployment
 	stellar contract optimize --wasm $(WASM)
