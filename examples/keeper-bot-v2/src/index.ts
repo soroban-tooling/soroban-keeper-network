@@ -31,6 +31,7 @@ export * from "./db/schema.js";
 export * from "./db/store.js";
 export * from "./executors/interface.js";
 export * from "./executors/registry.js";
+export * from "./cli.js";
 
 class TtlExtensionExecutor implements TaskExecutor {
   public readonly taskType = "ttl_extension";
