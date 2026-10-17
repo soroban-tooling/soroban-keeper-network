@@ -146,6 +146,19 @@ jobs:
           path: target/wasm32-unknown-unknown/release/keeper_treasury.wasm
           retention-days: 14
           if-no-files-found: error
+      - name: Build release WASM (time-window-condition)
+        run: |
+          cargo build --locked --release \
+            --target wasm32-unknown-unknown \
+            --package time-window-condition
+
+      - name: Upload time-window-condition WASM artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: time-window-condition-wasm
+          path: target/wasm32-unknown-unknown/release/time_window_condition.wasm
+          retention-days: 14
+          if-no-files-found: error
 
   # ───────────────────────────────────────────────────────────────────────────
   # ADVISORY — clippy. Findings appear as inline PR annotations.

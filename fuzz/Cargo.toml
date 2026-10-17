@@ -99,8 +99,20 @@ bench = false
 [[bin]]
 name = "treasury_distribution"
 path = "fuzz_targets/treasury_distribution.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "staking"
 path = "fuzz_targets/staking.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "conditioned_claim"
+path = "fuzz_targets/conditioned_claim.rs"
 test = false
 doc = false
 bench = false

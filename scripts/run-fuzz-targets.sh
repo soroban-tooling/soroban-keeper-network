@@ -39,6 +39,10 @@ cd "$REPO_ROOT"
   echo "|---|---|---|---|---|---|"
 } >>"$SUMMARY"
 
+# Auto-discovers every `fuzz/fuzz_targets/*.rs` file, so a newly-added
+# target (e.g. `conditioned_claim`) is included automatically once it is
+# also registered as a `[[bin]]` in fuzz/Cargo.toml — the only manual step
+# for the runner to pick it up.
 for target_path in fuzz/fuzz_targets/*.rs; do
   target="$(basename "$target_path" .rs)"
   corpus_dir="fuzz/corpus/$target"

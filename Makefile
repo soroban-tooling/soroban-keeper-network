@@ -37,6 +37,7 @@ lint: ## Run clippy with warnings denied (stricter than CI)
 wasm: ## Build the release WASM contracts (matches CI)
 	cargo build --locked --release --target wasm32-unknown-unknown --package keeper-registry
 	cargo build --locked --release --target wasm32-unknown-unknown --package keeper-treasury
+	cargo build --locked --release --target wasm32-unknown-unknown --package time-window-condition
 
 optimize: wasm ## Build and optimize the WASM for deployment
 	stellar contract optimize --wasm $(WASM)
