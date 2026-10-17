@@ -6,6 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — optional on-chain condition parameter (VERSION bumped to 6)
+
+- `register_task` now takes a required tenth parameter, `condition: Option<Address>`.
+  `None` behaves exactly as before this change; `Some(addr)` attaches an
+  optional conditional executor that `execute_task` may consult before execution.
+  Any address is permitted — conditions are permissionless, like keepers.
+- `BatchTaskParams` now includes `verifier: Option<Address>` and
+  `condition: Option<Address>` fields (previously, batch registration always
+  attached `None` for verifier and has no condition support yet; this slice
+  enables both).
+- `KeeperRegistryCrossContract::register_task` builder in `rust-sdk` updated
+  with `verifier` and `condition` parameters.
+- **This is a breaking ABI change** — every existing `register_task` call site
+  must add the new `condition` argument. Batch registration parameters also
+  now include two new fields.
+- `VERSION` bumped from 5 to 6.
+
 ### Added — rust-sdk call context on every error (0345)
 
 - Every error `KeeperClient` and `KeeperRegistryClient` return now carries

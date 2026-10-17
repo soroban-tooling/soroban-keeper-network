@@ -29,6 +29,8 @@ fn batch_entry(env: &Env, reward: i128) -> BatchTaskParams {
         deadline: env.ledger().timestamp() + 3_600,
         ttl_ledgers: DEFAULT_TTL_LEDGERS,
         lock_ledgers: 120,
+        verifier: None,
+        condition: None,
     }
 }
 

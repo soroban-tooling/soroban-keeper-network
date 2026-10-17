@@ -145,6 +145,30 @@ pub struct Task {
     /// if it returns `false` or panics. Any address is permitted — verifiers
     /// are permissionless, like keepers (design doc §5).
     pub verifier: Option<Address>,
+    /// Optional on-chain condition predicate attached at registration
+    /// (`docs/TASK_CONDITIONS_DESIGN.md`). `None` means the task has no
+    /// condition check — execution proceeds based on status and lock window
+    /// alone (the unchanged path). `Some(addr)` means both `claim_task` and
+    /// `execute_task` check the condition before proceeding, rejecting with
+    /// `KeeperError::ConditionFailed` if it returns `false` or panics.
+    /// Any address is permitted — conditions are permissionless, like keepers
+    /// (design doc §5).
+    ///
+    /// **Schema-evolution note (issue 0391):** This field was added after the
+    /// initial Task struct was finalized. Soroban's XDR encoding for
+    /// `#[contracttype]` struct fields added at the end is forward-compatible
+    /// for reads of old data via `Option` defaulting — an old Task persisted
+    /// before this field existed can still be deserialized after this change
+    /// deploys, with `condition` reading as `None`. This has been verified
+    /// against soroban-sdk v21.5.0 and later (per Soroban's XDR contract spec,
+    /// new optional fields at the end of a struct default to their zero value
+    /// when deserializing old data that predates the field). Tasks registered
+    /// before this change will have `condition: None` and behave identically to
+    /// today, with zero added cost or behavior change — exact same pattern that
+    /// the `verifier` field (issue 0072) established. If future Soroban SDK
+    /// versions change this behavior, a follow-up migration issue will be filed
+    /// with the new findings.
+    pub condition: Option<Address>,
 }
 
 // ─── E05 — Batch Operations & Gas ──────────────────────────────────────
@@ -161,6 +185,8 @@ pub struct BatchTaskParams {
     pub deadline: u64,
     pub ttl_ledgers: u32,
     pub lock_ledgers: u32,
+    pub verifier: Option<Address>,
+    pub condition: Option<Address>,
 }
 
 // ─── E06 — Staking & Slashing ───────────────────────────────────────────

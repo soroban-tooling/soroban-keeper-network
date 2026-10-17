@@ -175,6 +175,7 @@ impl VerifierTestHarness {
         &self,
         owner: &Address,
         verifier: Option<Address>,
+        condition: Option<Address>,
         reward: i128,
         deadline: u64,
         calldata: &Bytes,
@@ -189,9 +190,7 @@ impl VerifierTestHarness {
             &(1000u32), // high ledger delta to avoid expiry during test
         );
 
-        // Register the task without verifier (verifier feature not yet in contract)
-        // TODO: Once issue 0073 is merged, add verifier parameter:
-        // client.try_register_task(&owner, &TaskType::Custom, calldata, &reward, &deadline, &1000u32, &100u32, &verifier)
+        // Register the task with verifier and condition attached
         client.try_register_task(
             owner,
             &TaskType::Custom,
@@ -200,6 +199,8 @@ impl VerifierTestHarness {
             &deadline,
             &1000u32, // ttl_ledgers
             &100u32,  // lock_ledgers
+            &verifier,
+            &condition,
         )
     }
 

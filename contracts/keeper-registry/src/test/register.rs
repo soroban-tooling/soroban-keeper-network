@@ -37,6 +37,7 @@ fn test_register_task_success() {
         &DEFAULT_TTL_LEDGERS,
         &120u32,
         &None,
+        &None,
     );
 
     assert_eq!(task_id, 1u64);
@@ -77,6 +78,7 @@ fn test_register_task_escrows_reward() {
         &(env.ledger().timestamp() + 3_600),
         &DEFAULT_TTL_LEDGERS,
         &120u32,
+        &None,
         &None,
     );
 
@@ -170,6 +172,7 @@ fn test_register_increments_task_counter() {
             &DEFAULT_TTL_LEDGERS,
             &60u32,
             &None,
+            &None,
         );
         assert_eq!(id, expected_id);
     }
@@ -237,6 +240,7 @@ fn test_register_task_with_max_calldata_succeeds() {
         &(env.ledger().timestamp() + 3_600),
         &DEFAULT_TTL_LEDGERS,
         &120u32,
+        &None,
         &None,
     );
     assert_eq!(registry.get_task(&id).calldata.len(), MAX_CALLDATA_LEN);
@@ -329,6 +333,7 @@ fn test_expire_task_succeeds_past_old_ttl_boundary() {
         &(required as u32),
         &120u32,
         &None,
+        &None,
     );
     s.registry.claim_task(&keeper, &id); // claimed but never executed
 
@@ -368,6 +373,7 @@ fn test_register_task_with_empty_calldata_succeeds() {
         &DEFAULT_TTL_LEDGERS,
         &120u32,
         &None,
+        &None,
     );
     assert_eq!(registry.get_task(&id).calldata.len(), 0);
 }
@@ -404,6 +410,7 @@ fn test_register_task_lock_ledgers_at_min_succeeds() {
         &DEFAULT_TTL_LEDGERS,
         &MIN_LOCK_LEDGERS,
         &None,
+        &None,
     );
     assert_eq!(s.registry.get_task(&task_id).lock_ledgers, MIN_LOCK_LEDGERS);
 }
@@ -439,6 +446,7 @@ fn test_register_task_lock_ledgers_at_max_succeeds() {
         &deadline,
         &DEFAULT_TTL_LEDGERS,
         &MAX_LOCK_LEDGERS,
+        &None,
         &None,
     );
     assert_eq!(s.registry.get_task(&task_id).lock_ledgers, MAX_LOCK_LEDGERS);

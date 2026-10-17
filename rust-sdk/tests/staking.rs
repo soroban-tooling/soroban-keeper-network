@@ -232,6 +232,7 @@ fn test_dispute_window_hold_and_upheld_dispute_forfeits_reward() {
         &18_000u32,
         &120u32,
         &None,
+        &None,
     );
     raw.claim_task(&keeper_addr, &task_id);
     raw.execute_task(

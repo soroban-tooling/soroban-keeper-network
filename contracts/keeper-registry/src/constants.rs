@@ -82,7 +82,7 @@ pub(crate) const KEEPER_BALANCE_BUMP_THRESHOLD: u32 = 50_000;
 ///   Additive only — no existing entry point's signature changed, so a
 ///   v2-family contract upgrade is not required just to keep existing
 ///   functionality working. See `docs/STAKING_DESIGN.md`.
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 
 /// Maximum `calldata` length, in bytes. Sized to hold an encoded contract
 /// call — a target address, a function symbol, and a handful of scalar or

@@ -26,6 +26,8 @@ impl CallingContract {
         deadline: u64,
         ttl_ledgers: u32,
         lock_ledgers: u32,
+        verifier: Option<Address>,
+        condition: Option<Address>,
     ) -> Result<u64, KeeperError> {
         owner.require_auth();
 
@@ -38,6 +40,8 @@ impl CallingContract {
             deadline,
             ttl_ledgers,
             lock_ledgers,
+            &verifier,
+            &condition,
         );
 
         invocation.invoke()
@@ -64,6 +68,8 @@ mod test {
             1_000,
             10_000,
             100,
+            &None,
+            &None,
         );
 
         assert_eq!(inv.contract, registry);

@@ -57,6 +57,8 @@ impl<'a> KeeperRegistryCrossContract<'a> {
         deadline: u64,
         ttl_ledgers: u32,
         lock_ledgers: u32,
+        verifier: &Option<Address>,
+        condition: &Option<Address>,
     ) -> CrossContractInvocation<'a> {
         let args = vec![
             self.env,
@@ -67,6 +69,8 @@ impl<'a> KeeperRegistryCrossContract<'a> {
             deadline.into_val(self.env),
             ttl_ledgers.into_val(self.env),
             lock_ledgers.into_val(self.env),
+            verifier.into_val(self.env),
+            condition.into_val(self.env),
         ];
         CrossContractInvocation::new(self.env, self.contract.clone(), "register_task", args)
     }
@@ -168,6 +172,8 @@ mod tests {
         let deadline = 10_000u64;
         let ttl_ledgers = 50_000u32;
         let lock_ledgers = 100u32;
+        let verifier: Option<Address> = None;
+        let condition: Option<Address> = None;
 
         let builder = KeeperRegistryCrossContract::new(&env, registry_id.clone());
         let invocation = builder.register_task(
@@ -178,6 +184,8 @@ mod tests {
             deadline,
             ttl_ledgers,
             lock_ledgers,
+            &verifier,
+            &condition,
         );
 
         assert_eq!(invocation.contract, registry_id);
@@ -191,6 +199,8 @@ mod tests {
             deadline,
             ttl_ledgers,
             lock_ledgers,
+            verifier,
+            condition,
         )
             .into_val(&env);
 

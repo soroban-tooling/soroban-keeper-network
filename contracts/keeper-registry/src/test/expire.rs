@@ -55,6 +55,7 @@ fn test_expire_task_reentrancy_pays_refund_exactly_once() {
         &DEFAULT_TTL_LEDGERS,
         &120u32,
         &None,
+        &None,
     );
     assert_eq!(token.balance(&admin), 4_000_000i128); // escrowed
     assert_eq!(token.balance(&registry_id), 1_000_000i128);

@@ -2,12 +2,13 @@
 //! refund paths (owner cancel and permissionless expiry).
 //!
 //! `register_task`'s arity (owner, task_type, calldata, reward, deadline,
-//! ttl_ledgers, lock_ledgers, verifier) is inherent to the ABI: every field is
-//! a distinct scalar a caller must supply, and a params struct would just move
-//! them without improving anything. The allow below is module-level, not on
-//! the function itself, because `#[contractimpl]` generates its spec entry
-//! and client method as sibling items in this module, not nested inside the
-//! `impl` block, so a function- or impl-level attribute does not cover them.
+//! ttl_ledgers, lock_ledgers, verifier, condition) is inherent to the ABI:
+//! every field is a distinct scalar a caller must supply, and a params struct
+//! would just move them without improving anything. The allow below is
+//! module-level, not on the function itself, because `#[contractimpl]`
+//! generates its spec entry and client method as sibling items in this module,
+//! not nested inside the `impl` block, so a function- or impl-level attribute
+//! does not cover them.
 #![allow(clippy::too_many_arguments)]
 
 use soroban_sdk::{contractimpl, log, Address, Bytes, Env};
@@ -46,6 +47,11 @@ impl KeeperRegistry {
     //                  this function's own behavior — only `execute_task`
     //                  consumes it. Any address is accepted (verifiers are
     //                  permissionless).
+    //   condition    — optional on-chain conditional executor. `None` behaves
+    //                  exactly as before this parameter existed; `Some(addr)` is
+    //                  stored on the task but does not change this function's own
+    //                  behavior — only `execute_task` consumes it. Any address is
+    //                  accepted (conditions are permissionless).
     //
     // Returns the new task_id.
 
@@ -59,6 +65,7 @@ impl KeeperRegistry {
         ttl_ledgers: u32,
         lock_ledgers: u32,
         verifier: Option<Address>,
+        condition: Option<Address>,
     ) -> Result<u64, KeeperError> {
         require_not_paused(&e)?;
         owner.require_auth();
@@ -92,6 +99,7 @@ impl KeeperRegistry {
             claim_ledger: None,
             lock_ledgers,
             verifier,
+            condition,
         };
         save_task(&e, task_id, &task);
         emit_task_registered(&e, task_id, &owner, reward, deadline);
