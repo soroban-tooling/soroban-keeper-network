@@ -210,9 +210,13 @@ interface RawTask {
   claimer: string | null | undefined;
   claim_ledger: number | bigint | null | undefined;
   lock_ledgers: number | bigint;
+  verifier: string | null | undefined;
+  condition: string | null | undefined;
 }
 
 function toTask(raw: RawTask): Task {
+  const verifier = optional(raw.verifier);
+  const condition = optional(raw.condition);
   return {
     owner: raw.owner,
     taskType: Number(raw.task_type) as TaskType,
@@ -229,6 +233,8 @@ function toTask(raw: RawTask): Task {
     claimer: optional(raw.claimer),
     claimLedger: raw.claim_ledger == null ? undefined : Number(raw.claim_ledger),
     lockLedgers: Number(raw.lock_ledgers),
+    ...(verifier === undefined ? {} : { verifier }),
+    ...(condition === undefined ? {} : { condition }),
   };
 }
 

@@ -38,6 +38,13 @@ export interface TaskRegisteredEvent {
   owner: string;
   reward: bigint;
   deadline: number;
+  condition?: string;
+}
+
+export interface ConditionNotMetEvent {
+  type: "ConditionNotMet";
+  taskId: number;
+  condition: string;
 }
 
 export interface TaskClaimedEvent {
@@ -78,6 +85,7 @@ export type TaskEvent =
   | TaskExecutedEvent
   | TaskExpiredEvent
   | TaskCancelledEvent
+  | ConditionNotMetEvent
   | UnknownTaskEvent;
 
 /** Matches `contracts/keeper-registry/src/events.rs::emit_task_registered`'s topic pair. */
@@ -90,13 +98,28 @@ export const TASK_EXECUTED_TOPIC = [topicSymbol("exec"), topicSymbol("task")];
 export const TASK_EXPIRED_TOPIC = [topicSymbol("exp"), topicSymbol("task")];
 /** Matches `emit_task_cancelled`. */
 export const TASK_CANCELLED_TOPIC = [topicSymbol("cancel"), topicSymbol("task")];
+/** Matches `emit_condition_not_met`. */
+export const CONDITION_NOT_MET_TOPIC = [topicSymbol("condfail"), topicSymbol("task")];
 
 const DECODERS = new Map<string, (value: xdr.ScVal) => TaskEvent>([
   [
     topicKey(TASK_REGISTERED_TOPIC),
     (value) => {
-      const [taskId, owner, reward, deadline] = scValToNative(value) as [bigint, string, bigint, bigint];
-      return { type: "TaskRegistered", taskId: Number(taskId), owner, reward, deadline: Number(deadline) };
+      const [taskId, owner, reward, deadline, condition] = scValToNative(value) as [
+        bigint,
+        string,
+        bigint,
+        bigint,
+        string | null | undefined,
+      ];
+      return {
+        type: "TaskRegistered",
+        taskId: Number(taskId),
+        owner,
+        reward,
+        deadline: Number(deadline),
+        ...(condition == null ? {} : { condition }),
+      };
     },
   ],
   [
@@ -125,6 +148,13 @@ const DECODERS = new Map<string, (value: xdr.ScVal) => TaskEvent>([
     (value) => {
       const [taskId, owner] = scValToNative(value) as [bigint, string];
       return { type: "TaskCancelled", taskId: Number(taskId), owner };
+    },
+  ],
+  [
+    topicKey(CONDITION_NOT_MET_TOPIC),
+    (value) => {
+      const [taskId, condition] = scValToNative(value) as [bigint, string];
+      return { type: "ConditionNotMet", taskId: Number(taskId), condition };
     },
   ],
 ]);

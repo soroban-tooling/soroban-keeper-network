@@ -37,6 +37,7 @@ fn test_register_task_success() {
         &DEFAULT_TTL_LEDGERS,
         &120u32,
         &None,
+        &None,
     );
 
     assert_eq!(task_id, 1u64);
@@ -78,6 +79,7 @@ fn test_register_task_escrows_reward() {
         &DEFAULT_TTL_LEDGERS,
         &120u32,
         &None,
+        &None,
     );
 
     // Owner balance decreased by the escrowed reward.
@@ -109,6 +111,7 @@ fn test_register_task_zero_reward_fails() {
             &DEFAULT_TTL_LEDGERS,
             &120u32,
             &None,
+            &None,
         ),
         Err(Ok(KeeperError::InvalidReward))
     );
@@ -138,6 +141,7 @@ fn test_register_task_past_deadline_fails() {
             &past,
             &DEFAULT_TTL_LEDGERS,
             &120u32,
+            &None,
             &None,
         ),
         Err(Ok(KeeperError::DeadlinePassed))
@@ -169,6 +173,7 @@ fn test_register_increments_task_counter() {
             &deadline,
             &DEFAULT_TTL_LEDGERS,
             &60u32,
+            &None,
             &None,
         );
         assert_eq!(id, expected_id);
@@ -205,6 +210,7 @@ fn test_register_task_ttl_shorter_than_deadline_fails() {
             &17_280u32, // ~1 day of ledgers — nowhere near enough
             &120u32,
             &None,
+            &None,
         ),
         Err(Ok(KeeperError::TtlTooShort))
     );
@@ -238,6 +244,7 @@ fn test_register_task_with_max_calldata_succeeds() {
         &DEFAULT_TTL_LEDGERS,
         &120u32,
         &None,
+        &None,
     );
     assert_eq!(registry.get_task(&id).calldata.len(), MAX_CALLDATA_LEN);
 }
@@ -266,6 +273,7 @@ fn test_register_task_over_max_calldata_fails() {
             &(env.ledger().timestamp() + 3_600),
             &DEFAULT_TTL_LEDGERS,
             &120u32,
+            &None,
             &None,
         ),
         Err(Ok(KeeperError::CalldataTooLarge))
@@ -329,6 +337,7 @@ fn test_expire_task_succeeds_past_old_ttl_boundary() {
         &(required as u32),
         &120u32,
         &None,
+        &None,
     );
     s.registry.claim_task(&keeper, &id); // claimed but never executed
 
@@ -368,6 +377,7 @@ fn test_register_task_with_empty_calldata_succeeds() {
         &DEFAULT_TTL_LEDGERS,
         &120u32,
         &None,
+        &None,
     );
     assert_eq!(registry.get_task(&id).calldata.len(), 0);
 }
@@ -385,6 +395,7 @@ fn test_register_task_lock_ledgers_below_min_fails() {
             &deadline,
             &DEFAULT_TTL_LEDGERS,
             &(MIN_LOCK_LEDGERS - 1),
+            &None,
             &None,
         ),
         Err(Ok(KeeperError::InvalidTaskParams))
@@ -404,6 +415,7 @@ fn test_register_task_lock_ledgers_at_min_succeeds() {
         &DEFAULT_TTL_LEDGERS,
         &MIN_LOCK_LEDGERS,
         &None,
+        &None,
     );
     assert_eq!(s.registry.get_task(&task_id).lock_ledgers, MIN_LOCK_LEDGERS);
 }
@@ -421,6 +433,7 @@ fn test_register_task_lock_ledgers_above_max_fails() {
             &deadline,
             &DEFAULT_TTL_LEDGERS,
             &(MAX_LOCK_LEDGERS + 1),
+            &None,
             &None,
         ),
         Err(Ok(KeeperError::InvalidTaskParams))
@@ -440,6 +453,7 @@ fn test_register_task_lock_ledgers_at_max_succeeds() {
         &DEFAULT_TTL_LEDGERS,
         &MAX_LOCK_LEDGERS,
         &None,
+        &None,
     );
     assert_eq!(s.registry.get_task(&task_id).lock_ledgers, MAX_LOCK_LEDGERS);
 }
@@ -457,6 +471,7 @@ fn test_register_task_ttl_ledgers_below_min_fails() {
             &deadline,
             &(MIN_TTL_LEDGERS - 1),
             &120u32,
+            &None,
             &None,
         ),
         Err(Ok(KeeperError::InvalidTaskParams))
@@ -482,6 +497,7 @@ fn test_register_task_ttl_ledgers_at_min_is_subsumed_by_deadline_rule() {
             &deadline,
             &MIN_TTL_LEDGERS,
             &120u32,
+            &None,
             &None,
         ),
         Err(Ok(KeeperError::TtlTooShort))

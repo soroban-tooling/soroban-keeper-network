@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   decodeTaskEvent,
+  CONDITION_NOT_MET_TOPIC,
   TASK_CANCELLED_TOPIC,
   TASK_CLAIMED_TOPIC,
   TASK_EXECUTED_TOPIC,
@@ -28,6 +29,30 @@ describe("decodeTaskEvent", () => {
       owner: SAMPLE_ADDRESS,
       reward: 1_000_000n,
       deadline: 1_800_000_000,
+    });
+  });
+
+  it("decodes TaskRegistered with its optional condition", () => {
+    const value = nativeToScVal(
+      [42n, SAMPLE_ADDRESS, 1_000_000n, 1_800_000_000n, OTHER_ADDRESS],
+      { type: ["u64", "address", "i128", "u64", "address"] },
+    );
+    expect(decodeTaskEvent(TASK_REGISTERED_TOPIC, value)).toEqual({
+      type: "TaskRegistered",
+      taskId: 42,
+      owner: SAMPLE_ADDRESS,
+      reward: 1_000_000n,
+      deadline: 1_800_000_000,
+      condition: OTHER_ADDRESS,
+    });
+  });
+
+  it("decodes ConditionNotMet", () => {
+    const value = nativeToScVal([42n, OTHER_ADDRESS], { type: ["u64", "address"] });
+    expect(decodeTaskEvent(CONDITION_NOT_MET_TOPIC, value)).toEqual({
+      type: "ConditionNotMet",
+      taskId: 42,
+      condition: OTHER_ADDRESS,
     });
   });
 
@@ -90,6 +115,7 @@ describe("decodeTaskEvent", () => {
       TASK_EXECUTED_TOPIC,
       TASK_EXPIRED_TOPIC,
       TASK_CANCELLED_TOPIC,
+      CONDITION_NOT_MET_TOPIC,
     ];
     expect(new Set(topics.map((t) => t.map((s) => s.toXDR("base64")).join(":"))).size).toBe(topics.length);
   });

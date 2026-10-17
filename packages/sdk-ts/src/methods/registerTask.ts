@@ -55,6 +55,8 @@ export interface RegisterTaskParams extends SignedCallOptions {
    * what the contract stores when this argument is `None`.
    */
   verifier?: string;
+  /** Optional `C...` condition contract evaluated before a claim is accepted. */
+  condition?: string;
 }
 
 /**
@@ -82,7 +84,17 @@ export async function registerTask(
   caller: ContractCaller,
   params: RegisterTaskParams,
 ): Promise<bigint> {
-  const { owner, taskType, calldata, reward, ttlLedgers, lockLedgers, verifier, signer } = params;
+  const {
+    owner,
+    taskType,
+    calldata,
+    reward,
+    ttlLedgers,
+    lockLedgers,
+    verifier,
+    condition,
+    signer,
+  } = params;
   const deadline = toUnixSeconds(params.deadline, "deadline");
 
   validateRegisterTaskParams(params, deadline);
@@ -99,6 +111,7 @@ export async function registerTask(
       u32Arg(ttlLedgers, "ttlLedgers"),
       u32Arg(lockLedgers, "lockLedgers"),
       optionalAddressArg(verifier, "verifier"),
+      optionalAddressArg(condition, "condition"),
     ],
     ...(signer ? { signer } : {}),
   });

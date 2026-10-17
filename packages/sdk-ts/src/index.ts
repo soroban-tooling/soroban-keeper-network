@@ -102,6 +102,17 @@ export {
   type ProofInput,
 } from "./methods/executeTask.js";
 export { registerTask, type RegisterTaskParams } from "./methods/registerTask.js";
+export {
+  decodeTaskEvent,
+  CONDITION_NOT_MET_TOPIC,
+  TASK_CANCELLED_TOPIC,
+  TASK_CLAIMED_TOPIC,
+  TASK_EXECUTED_TOPIC,
+  TASK_EXPIRED_TOPIC,
+  TASK_REGISTERED_TOPIC,
+  type ConditionNotMetEvent,
+  type TaskEvent,
+} from "./events.js";
 export { increaseReward, type IncreaseRewardParams } from "./methods/increaseReward.js";
 export {
   claimTask,

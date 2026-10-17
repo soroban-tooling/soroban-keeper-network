@@ -84,5 +84,6 @@ describe("KeeperErrorCode", () => {
     expect(KeeperErrorCode.BatchTooLarge).toBe(21);
     expect(KeeperErrorCode.EmptyBatch).toBe(22);
     expect(KeeperErrorCode.BatchRewardCeilingExceeded).toBe(23);
+    expect(KeeperErrorCode.ConditionNotMet).toBe(40);
   });
 });

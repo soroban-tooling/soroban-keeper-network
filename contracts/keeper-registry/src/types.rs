@@ -145,6 +145,10 @@ pub struct Task {
     /// if it returns `false` or panics. Any address is permitted — verifiers
     /// are permissionless, like keepers (design doc §5).
     pub verifier: Option<Address>,
+    /// Optional on-chain predicate evaluated before a claim is written.
+    /// `None` preserves the original claim path. A configured condition must
+    /// implement `ITaskCondition`; false or failed calls reject the claim.
+    pub condition: Option<Address>,
 }
 
 // ─── E05 — Batch Operations & Gas ──────────────────────────────────────
@@ -161,6 +165,9 @@ pub struct BatchTaskParams {
     pub deadline: u64,
     pub ttl_ledgers: u32,
     pub lock_ledgers: u32,
+    /// Optional condition, with the same validation and semantics as
+    /// `register_task`'s `condition` argument.
+    pub condition: Option<Address>,
 }
 
 // ─── E06 — Staking & Slashing ───────────────────────────────────────────

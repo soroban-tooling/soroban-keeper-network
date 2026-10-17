@@ -69,6 +69,7 @@ impl KeeperRegistry {
                 params.calldata.len(),
                 params.ttl_ledgers,
                 params.lock_ledgers,
+                &params.condition,
             )?;
             total_reward = total_reward
                 .checked_add(params.reward)
@@ -107,9 +108,17 @@ impl KeeperRegistry {
                 // verifier to a batch-registered task is backlog issue 0102,
                 // separate from this batch-registration slice.
                 verifier: None,
+                condition: params.condition.clone(),
             };
             save_task(&e, task_id, &task);
-            emit_task_registered(&e, task_id, &owner, params.reward, params.deadline);
+            emit_task_registered(
+                &e,
+                task_id,
+                &owner,
+                params.reward,
+                params.deadline,
+                params.condition,
+            );
             task_ids.push_back(task_id);
         }
 

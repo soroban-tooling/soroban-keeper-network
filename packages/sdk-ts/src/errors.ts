@@ -117,6 +117,8 @@ export enum KeeperErrorCode {
   ReputationBelowFloor = 38,
   /** `set_reputation_floor` was given a floor above the maximum a keeper can ever reach. */
   InvalidReputationFloor = 39,
+  /** The task's condition returned false or could not be evaluated. */
+  ConditionNotMet = 40,
 }
 
 /** Human-readable name, so an unknown future code still prints usefully. */

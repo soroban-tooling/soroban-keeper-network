@@ -133,6 +133,7 @@ fn register_verified_task(s: &TestSetup, verifier: &Address) -> u64 {
         &DEFAULT_TTL_LEDGERS,
         &120u32,
         &Some(verifier.clone()),
+        &None,
     )
 }
 

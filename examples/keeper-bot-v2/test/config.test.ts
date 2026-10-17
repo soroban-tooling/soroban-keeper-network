@@ -33,6 +33,7 @@ describe("Keeper Bot v2 Configuration Validation", () => {
       assert.strictEqual(config.network, "testnet");
       assert.strictEqual(config.maxConcurrentTasks, 1);
       assert.strictEqual(config.maxTasksPerRound, 5);
+      assert.strictEqual(config.conditionBackoffMs, 60_000);
       assert.strictEqual(config.signingKeys.length, 1);
       assert.strictEqual(config.minProfitMarginStroops, 0n);
       assert.strictEqual(config.feeCeilingStroops, 1000000n);
@@ -114,6 +115,10 @@ describe("Keeper Bot v2 Configuration Validation", () => {
       assert.throws(
         () => validateConfig({ ...VALID_BASE_ENV, POLL_INTERVAL_MS: "500" }),
         /POLL_INTERVAL_MS.*must be >= 1000/
+      );
+      assert.throws(
+        () => validateConfig({ ...VALID_BASE_ENV, CONDITION_BACKOFF_MS: "999" }),
+        /CONDITION_BACKOFF_MS.*must be >= 1000/
       );
       assert.throws(
         () => validateConfig({ ...VALID_BASE_ENV, MAX_TASKS_PER_ROUND: "0" }),

@@ -102,6 +102,7 @@ export interface KeeperBotV2Config {
   maxConcurrentTasks: number;
   maxTasksPerRound: number;
   pollIntervalMs: number;
+  conditionBackoffMs: number;
   minProfitMarginStroops: bigint;
   feeCeilingStroops: bigint;
   withdrawThreshold: bigint;
@@ -245,6 +246,16 @@ export function validateConfig(rawEnv: Record<string, string | undefined> = proc
     fallback: 10000,
   });
 
+  const conditionBackoffMs = requireEnvValue<number>(rawEnv, "CONDITION_BACKOFF_MS", {
+    parse: (v) => {
+      const parsed = parseInt(v, 10);
+      if (isNaN(parsed)) throw new Error("must be an integer");
+      return parsed;
+    },
+    validate: { fn: (v) => v >= 1_000, reason: "must be >= 1000" },
+    fallback: 60_000,
+  });
+
   const minProfitMarginStroops = requireEnvValue<bigint>(rawEnv, "MIN_PROFIT_MARGIN_STROOPS", {
     parse: (v) => BigInt(v),
     validate: { fn: (v) => v >= 0n, reason: "must be >= 0" },
@@ -371,6 +382,7 @@ export function validateConfig(rawEnv: Record<string, string | undefined> = proc
     maxConcurrentTasks,
     maxTasksPerRound,
     pollIntervalMs,
+    conditionBackoffMs,
     minProfitMarginStroops,
     feeCeilingStroops,
     withdrawThreshold,

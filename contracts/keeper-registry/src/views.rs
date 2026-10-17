@@ -10,6 +10,7 @@ use crate::errors::KeeperError;
 use crate::internal::*;
 use crate::reputation::reputation_floor_bps;
 use crate::types::{DataKey, Task, TaskStatus};
+use crate::TaskConditionClient;
 use crate::{KeeperRegistry, KeeperRegistryArgs, KeeperRegistryClient};
 
 #[contractimpl]
@@ -86,10 +87,20 @@ impl KeeperRegistry {
                 if e.ledger().timestamp() >= task.deadline {
                     return false;
                 }
-                match task.status {
+                let state_allows_claim = match task.status {
                     TaskStatus::Pending => true,
                     TaskStatus::Claimed => lock_expired(&e, &task),
                     _ => false,
+                };
+                if !state_allows_claim {
+                    return false;
+                }
+                match task.condition {
+                    Some(condition) => matches!(
+                        TaskConditionClient::new(&e, &condition).try_is_met(&task_id),
+                        Ok(Ok(true))
+                    ),
+                    None => true,
                 }
             }
             Err(_) => false,

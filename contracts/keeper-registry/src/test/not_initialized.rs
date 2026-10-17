@@ -36,6 +36,7 @@ fn test_register_task_before_init_fails() {
             &DEFAULT_TTL_LEDGERS,
             &120u32,
             &None,
+            &None,
         ),
         Err(Ok(KeeperError::NotInitialized))
     );

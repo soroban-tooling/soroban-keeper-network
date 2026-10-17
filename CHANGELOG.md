@@ -6,6 +6,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — task conditions (E10, VERSION bumped to 6)
+
+- Tasks may carry an optional condition contract implementing
+  `ITaskCondition::is_met(task_id) -> bool`. `claim_task` evaluates it before
+  writing claim state; `false`, a missing contract, or a failed invocation
+  rejects with `ConditionNotMet` and leaves the task pending.
+- `batch_register_tasks` accepts a condition on every entry and uses the same
+  validation helper as `register_task`. Mixed conditioned and unconditional
+  batches are covered by contract tests.
+- `TaskRegistered` now includes the optional condition address and rejected
+  checks emit `ConditionNotMet` with `(task_id, condition)`. The indexer stores
+  both, returns the condition from `GET /tasks/{task_id}`, and counts condition
+  rejections. Historical four-field registration events decode with a null
+  condition.
+- Contract `VERSION` is now 6 because the task struct, registration argument,
+  and registration event payload changed. See
+  `docs/TASK_CONDITIONS_DESIGN.md` and
+  `docs/TASK_CONDITIONS_SECURITY_REVIEW.md` for the interface, trust boundary,
+  security review, and E10 retrospective.
+
 ### Added — rust-sdk call context on every error (0345)
 
 - Every error `KeeperClient` and `KeeperRegistryClient` return now carries

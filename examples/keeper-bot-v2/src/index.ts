@@ -14,6 +14,7 @@
 export * from "./types.js";
 export * from "./profitability.js";
 export * from "./ranking.js";
+export * from "./task_source.js";
 
 // Main loop and integration points will be added as v2 development progresses
 import "dotenv/config";

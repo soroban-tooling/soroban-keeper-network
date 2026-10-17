@@ -44,6 +44,8 @@ export interface Task {
   claimer: string | undefined;
   claimLedger: number | undefined;
   lockLedgers: number;
+  verifier?: string;
+  condition?: string;
 }
 
 /**

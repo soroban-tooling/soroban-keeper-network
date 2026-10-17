@@ -8,6 +8,7 @@ import {
   MIN_TTL_LEDGERS,
 } from "../src/constants.js";
 import { KeeperContractError, KeeperErrorCode, isKeeperError } from "../src/errors.js";
+import { CONDITION_NOT_MET_TOPIC, decodeTaskEvent } from "../src/events.js";
 import { TaskType } from "../src/types.js";
 import { CONTRACT_ID, KEEPER, OWNER, testClient } from "./support/client.js";
 
@@ -76,11 +77,12 @@ describe("client.registerTask", () => {
 
     await client.registerTask(validParams());
 
-    // `register_task` takes eight positional arguments as of contract VERSION 4;
+    // `register_task` takes nine positional arguments as of contract VERSION 6;
     // omitting the trailing Option would shift nothing here but would silently
     // change the entry point's arity.
-    expect(rpc.onlyCall.rawArgs).toHaveLength(8);
+    expect(rpc.onlyCall.rawArgs).toHaveLength(9);
     expect(rpc.onlyCall.rawArgs[7]?.switch().name).toBe("scvVoid");
+    expect(rpc.onlyCall.rawArgs[8]?.switch().name).toBe("scvVoid");
   });
 
   it("passes a verifier through as Some(address)", async () => {
@@ -90,6 +92,25 @@ describe("client.registerTask", () => {
 
     expect(rpc.onlyCall.rawArgs[7]?.switch().name).toBe("scvAddress");
     expect(rpc.onlyCall.args[7]).toBe(CONTRACT_ID);
+  });
+
+  it("registers a conditioned task and decodes its rejection event", async () => {
+    const { client, rpc } = ownerClient();
+
+    await client.registerTask({ ...validParams(), condition: CONTRACT_ID });
+
+    expect(rpc.onlyCall.rawArgs[8]?.switch().name).toBe("scvAddress");
+    expect(rpc.onlyCall.args[8]).toBe(CONTRACT_ID);
+
+    const event = decodeTaskEvent(
+      CONDITION_NOT_MET_TOPIC,
+      nativeToScVal([TASK_ID, CONTRACT_ID], { type: ["u64", "address"] }),
+    );
+    expect(event).toEqual({
+      type: "ConditionNotMet",
+      taskId: Number(TASK_ID),
+      condition: CONTRACT_ID,
+    });
   });
 
   it("rejects a non-positive reward locally, without building a transaction", async () => {
