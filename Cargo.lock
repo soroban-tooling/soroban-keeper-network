@@ -1532,6 +1532,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "keeper-governance"
+version = "0.1.0"
+dependencies = [
+ "keeper-registry",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "keeper-indexer"
 version = "0.1.0"
 dependencies = [

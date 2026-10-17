@@ -27,9 +27,11 @@ cargo-fuzz = true
 # behavior was removed to make "which deps does this feature turn on"
 # unambiguous) — omitting `dep:` is what made this manifest fail to parse.
 arbitrary = ["dep:arbitrary"]
+libfuzzer-sys = ["dep:libfuzzer-sys"]
 
 [dependencies]
 keeper-registry = { path = "../contracts/keeper-registry" }
+keeper-governance = { path = "../contracts/governance" }
 soroban-sdk = { version = "22.0.1", features = ["testutils"] }
 libfuzzer-sys = { version = "0.4", optional = true }
 arbitrary = { version = "1", features = ["derive"], optional = true }
@@ -99,10 +101,23 @@ bench = false
 [[bin]]
 name = "treasury_distribution"
 path = "fuzz_targets/treasury_distribution.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "staking"
 path = "fuzz_targets/staking.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "governance"
+path = "fuzz_targets/governance.rs"
+test = false
+doc = false
+bench = false
+
 
 
