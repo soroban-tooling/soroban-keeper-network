@@ -171,6 +171,28 @@ pub enum EventPayload {
         action: String,
         score: i128,
     },
+
+    // ── governance (issue #504) ──────────────────────────────────────────────
+    /// `(proposed, proposer, proposal_id)` — `(eta,)`
+    ProposalCreated {
+        proposal_id: u64,
+        proposer: String,
+        eta: u64,
+        action: Option<String>,
+    },
+    /// `(vote_cast, voter, proposal_id)` — `(support,)`
+    VoteCast {
+        proposal_id: u64,
+        voter: String,
+        support: u32,
+        voting_power: Option<i128>,
+    },
+    /// `(proposal_executed, proposal_id)`
+    ProposalExecuted { proposal_id: u64 },
+    /// `(proposal_exec_failed, proposal_id)`
+    ProposalExecutionFailed { proposal_id: u64 },
+    /// `(proposal_cancelled, proposal_id)`
+    ProposalCancelled { proposal_id: u64 },
 }
 
 impl EventPayload {
@@ -202,6 +224,11 @@ impl EventPayload {
             Self::StakeWithdrawn { .. } => ("wdraw", "stake"),
             Self::Slashed { .. } => ("slash", "stake"),
             Self::ReputationUpdated { .. } => ("update", "reputation"),
+            Self::ProposalCreated { .. } => ("proposed", "gov"),
+            Self::VoteCast { .. } => ("vote_cast", "gov"),
+            Self::ProposalExecuted { .. } => ("proposal_executed", "gov"),
+            Self::ProposalExecutionFailed { .. } => ("proposal_exec_failed", "gov"),
+            Self::ProposalCancelled { .. } => ("proposal_cancelled", "gov"),
         };
         EventTopic { verb, noun }
     }
