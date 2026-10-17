@@ -118,6 +118,7 @@ proptest! {
                 &DEFAULT_TTL_LEDGERS,
                 &120u32,
                 &verifier,
+                &None,
             );
             task_ids.push(id);
 
@@ -269,6 +270,7 @@ proptest! {
                         &deadline,
                         &1_000_000u32,
                         &120u32,
+                        &None,
                         &None,
                     );
                     task_ids.push(id);
@@ -479,6 +481,7 @@ proptest! {
             &deadline,
             &ttl_ledgers,
             &120u32,
+            &None,
             &None,
         );
 

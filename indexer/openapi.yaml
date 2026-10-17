@@ -282,6 +282,10 @@ components:
         - deadline
         - type
         properties:
+          condition:
+            type:
+            - string
+            - 'null'
           deadline:
             type: integer
             format: int64
@@ -298,6 +302,22 @@ components:
             type: string
             enum:
             - task_registered
+      - type: object
+        required:
+        - task_id
+        - condition
+        - type
+        properties:
+          condition:
+            type: string
+          task_id:
+            type: integer
+            format: int64
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - condition_not_met
       - type: object
         required:
         - task_id
@@ -560,6 +580,7 @@ components:
         `(verb, noun)` topic pair.
       enum:
       - task_registered
+      - condition_not_met
       - task_claimed
       - task_executed
       - task_expired
@@ -808,6 +829,7 @@ components:
       - status
       - reward
       - deadline
+      - condition_rejection_count
       - net_reward
       - last_ledger
       properties:
@@ -817,6 +839,16 @@ components:
           - 'null'
           format: int32
           description: Ledger the claim was taken at.
+          minimum: 0
+        condition:
+          type:
+          - string
+          - 'null'
+          description: Optional on-chain condition configured when the task was registered.
+        condition_rejection_count:
+          type: integer
+          format: int64
+          description: Number of indexed claim attempts rejected by the condition.
           minimum: 0
         deadline:
           type: integer

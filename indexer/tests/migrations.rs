@@ -83,6 +83,7 @@ async fn migrating_an_existing_database_with_data_loses_nothing() {
                 owner: "GOWNER".into(),
                 reward: 500.into(),
                 deadline: 9_000,
+                condition: None,
             },
         )
         .await

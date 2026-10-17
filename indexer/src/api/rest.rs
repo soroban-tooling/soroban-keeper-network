@@ -371,6 +371,11 @@ mod tests {
                 owner: "GOWNER".into(),
                 reward: I128(1_000),
                 deadline: 9_000,
+                condition: Some("CCONDITION".into()),
+            },
+            EventPayload::ConditionNotMet {
+                task_id: 1,
+                condition: "CCONDITION".into(),
             },
             EventPayload::TaskClaimed {
                 task_id: 1,
@@ -516,7 +521,9 @@ mod tests {
         // Reward is a string so large values survive a browser's JSON parse.
         assert_eq!(body["task"]["reward"], "1000");
         assert_eq!(body["task"]["net_reward"], "990");
-        assert_eq!(body["history"].as_array().expect("history").len(), 3);
+        assert_eq!(body["task"]["condition"], "CCONDITION");
+        assert_eq!(body["task"]["condition_rejection_count"], 1);
+        assert_eq!(body["history"].as_array().expect("history").len(), 4);
     }
 
     #[tokio::test]
@@ -584,7 +591,7 @@ mod tests {
         let app = app_with_events().await;
         let (_, body) = get_json(&app, "/v1/events?limit=100").await;
 
-        assert_eq!(body["events"].as_array().expect("events").len(), 4);
+        assert_eq!(body["events"].as_array().expect("events").len(), 5);
         assert!(body["next_cursor"].is_null(), "end of feed");
     }
 

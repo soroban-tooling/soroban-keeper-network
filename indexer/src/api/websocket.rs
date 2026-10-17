@@ -267,6 +267,7 @@ mod tests {
             owner: owner.into(),
             reward: I128(100),
             deadline: 900,
+            condition: None,
         }
     }
 

@@ -39,6 +39,10 @@ pub struct TaskState {
     pub reward: I128,
     /// Live deadline: the registered deadline with every `DeadlineExtended` applied.
     pub deadline: u64,
+    /// Optional on-chain condition configured when the task was registered.
+    pub condition: Option<String>,
+    /// Number of indexed claim attempts rejected by the condition.
+    pub condition_rejection_count: u64,
     /// Keeper holding the claim, once claimed.
     pub keeper: Option<String>,
     /// Ledger the claim was taken at.
@@ -65,6 +69,7 @@ impl TaskState {
                     owner,
                     reward,
                     deadline,
+                    condition,
                     ..
                 } => {
                     state = Some(Self {
@@ -73,6 +78,8 @@ impl TaskState {
                         status: TaskStatus::Pending,
                         reward: *reward,
                         deadline: *deadline,
+                        condition: condition.clone(),
+                        condition_rejection_count: 0,
                         keeper: None,
                         claim_ledger: None,
                         net_reward: None,
@@ -111,6 +118,10 @@ impl TaskState {
                         }
                         EventPayload::DeadlineExtended { new_deadline, .. } => {
                             state.deadline = *new_deadline;
+                        }
+                        EventPayload::ConditionNotMet { .. } => {
+                            state.condition_rejection_count =
+                                state.condition_rejection_count.saturating_add(1);
                         }
                         _ => continue,
                     }
@@ -280,6 +291,7 @@ mod tests {
                     owner: "GOWNER".into(),
                     reward: I128(100),
                     deadline: 1_000,
+                    condition: None,
                 },
             ),
             event(
@@ -317,6 +329,44 @@ mod tests {
     }
 
     #[test]
+    fn condition_and_rejections_fold_into_task_state() {
+        let history = vec![
+            event(
+                1,
+                1,
+                EventPayload::TaskRegistered {
+                    task_id: 4,
+                    owner: "GOWNER".into(),
+                    reward: I128(100),
+                    deadline: 1_000,
+                    condition: Some("CCONDITION".into()),
+                },
+            ),
+            event(
+                2,
+                2,
+                EventPayload::ConditionNotMet {
+                    task_id: 4,
+                    condition: "CCONDITION".into(),
+                },
+            ),
+            event(
+                3,
+                3,
+                EventPayload::ConditionNotMet {
+                    task_id: 4,
+                    condition: "CCONDITION".into(),
+                },
+            ),
+        ];
+
+        let state = TaskState::fold(4, &history).expect("registered task");
+        assert_eq!(state.condition.as_deref(), Some("CCONDITION"));
+        assert_eq!(state.condition_rejection_count, 2);
+        assert_eq!(state.status, TaskStatus::Pending);
+    }
+
+    #[test]
     fn the_full_lifecycle_ends_executed_with_its_net_reward() {
         let history = vec![
             event(
@@ -327,6 +377,7 @@ mod tests {
                     owner: "GOWNER".into(),
                     reward: I128(1_000),
                     deadline: 5_000,
+                    condition: None,
                 },
             ),
             event(
@@ -369,6 +420,7 @@ mod tests {
                 owner: "GOWNER".into(),
                 reward: I128(10),
                 deadline: 100,
+                condition: None,
             },
         );
 
@@ -529,6 +581,7 @@ mod tests {
                 owner: "GOWNER".into(),
                 reward: I128(1),
                 deadline: 1,
+                condition: None,
             },
         );
         assert_eq!(registered.event_type, EventType::TaskRegistered);

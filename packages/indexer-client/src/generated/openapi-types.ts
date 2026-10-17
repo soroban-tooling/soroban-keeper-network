@@ -179,6 +179,7 @@ export interface components {
          *     silently lose precision on a bare number.
          */
         EventPayload: {
+            condition?: string | null;
             /** Format: int64 */
             deadline: number;
             owner: string;
@@ -187,6 +188,12 @@ export interface components {
             task_id: number;
             /** @enum {string} */
             type: "task_registered";
+        } | {
+            condition: string;
+            /** Format: int64 */
+            task_id: number;
+            /** @enum {string} */
+            type: "condition_not_met";
         } | {
             /**
              * Format: int32
@@ -289,7 +296,7 @@ export interface components {
          *     `(verb, noun)` topic pair.
          * @enum {string}
          */
-        EventType: "task_registered" | "task_claimed" | "task_executed" | "task_expired" | "task_cancelled" | "reward_increased" | "deadline_extended" | "rewards_withdrawn" | "paused" | "fee_updated" | "admin_transferred" | "min_reward_updated" | "fees_swept" | "initialized" | "upgraded" | "reputation_updated";
+        EventType: "task_registered" | "condition_not_met" | "task_claimed" | "task_executed" | "task_expired" | "task_cancelled" | "reward_increased" | "deadline_extended" | "rewards_withdrawn" | "paused" | "fee_updated" | "admin_transferred" | "min_reward_updated" | "fees_swept" | "initialized" | "upgraded" | "reputation_updated";
         /** @description Service liveness and how far ingestion has reached. */
         HealthResponse: {
             /** @description Whether the initial catch-up has finished. */
@@ -438,6 +445,13 @@ export interface components {
              * @description Ledger the claim was taken at.
              */
             claim_ledger?: number | null;
+            /** @description Optional on-chain condition configured when the task was registered. */
+            condition?: string | null;
+            /**
+             * Format: int64
+             * @description Number of indexed claim attempts rejected by the condition.
+             */
+            condition_rejection_count: number;
             /**
              * Format: int64
              * @description Live deadline: the registered deadline with every `DeadlineExtended` applied.

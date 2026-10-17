@@ -287,6 +287,7 @@ pub(crate) fn accrue_fee(e: &Env, amount: i128) -> Result<(), KeeperError> {
 /// `min_reward` is passed in rather than read here: a batch validates N
 /// entries against the same floor, and re-reading instance storage per entry
 /// would charge the caller N times for one unchanging value.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn validate_task_params(
     e: &Env,
     reward: i128,
@@ -295,6 +296,7 @@ pub(crate) fn validate_task_params(
     calldata_len: u32,
     ttl_ledgers: u32,
     lock_ledgers: u32,
+    condition: &Option<Address>,
 ) -> Result<(), KeeperError> {
     if reward <= 0 || reward < min_reward {
         return Err(KeeperError::InvalidReward);
@@ -314,6 +316,11 @@ pub(crate) fn validate_task_params(
     if (ttl_ledgers as u64) < required_ttl_ledgers(e, deadline) {
         return Err(KeeperError::TtlTooShort);
     }
+    // Conditions are permissionless by design. Registration validates their
+    // ABI shape (`Option<Address>`) but deliberately does not invoke an
+    // untrusted contract or maintain an allowlist. Both single and batch
+    // registration pass through this helper so that policy cannot diverge.
+    let _ = condition;
     Ok(())
 }
 

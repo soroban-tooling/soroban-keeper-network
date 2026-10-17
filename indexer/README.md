@@ -86,17 +86,19 @@ no RPC endpoint or external database is needed.
 
 ## Event coverage
 
-All fifteen events the contract emits are ingested with their exact payload
+All sixteen parseable registry events are ingested with their exact payload
 fields, in the order `contracts/keeper-registry/src/events.rs` publishes them:
 
-`TaskRegistered`, `TaskClaimed`, `TaskExecuted`, `TaskExpired`,
+`TaskRegistered`, `ConditionNotMet`, `TaskClaimed`, `TaskExecuted`, `TaskExpired`,
 `TaskCancelled`, `RewardIncreased`, `DeadlineExtended`, `RewardsWithdrawn`,
 `Paused`, `FeeUpdated`, `AdminTransferred`, `MinRewardUpdated`, `FeesSwept`,
 `Initialized`, `Upgraded`.
 
 Fields the events do not carry are not reconstructed. `TaskClaimed` has no
 reward, so a consumer needing the claim and the reward together joins against
-the task's `TaskRegistered` event rather than reading an invented value.
+the task's `TaskRegistered` event rather than reading an invented value. The
+registration payload's optional `condition` is `null` for historical four-field
+events, and each `ConditionNotMet` carries exactly `(task_id, condition)`.
 
 ## Caching
 

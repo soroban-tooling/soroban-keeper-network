@@ -139,6 +139,8 @@ pub struct BatchTaskParams {
     pub deadline: u64,
     pub ttl_ledgers: u32,
     pub lock_ledgers: u32,
+    /// Optional pre-claim condition. `None` preserves the original behavior.
+    pub condition: Option<Address>,
 }
 
 /// Registers every entry in `tasks` under a single owner auth. Rejects the
@@ -172,6 +174,13 @@ plus `ContractPaused` and `InvalidReward` for a non-positive
 `max_total_reward`. Per-entry validation is shared with `register_task`
 through one internal helper, so the two paths cannot drift into accepting
 different task shapes.
+
+The shared helper also receives each entry's optional `condition`. Condition
+addresses are permissionless, exactly as they are in `register_task`: the
+registry validates the bounded `Option<Address>` shape at registration and
+evaluates a configured contract only when a keeper claims the task. A mixed
+batch may therefore contain conditioned and unconditional entries. Omitting the
+field (`None`) behaves exactly like the pre-condition batch path.
 
 **Validation happens before any transfer.** The implementation sweeps every
 entry and totals the rewards up front, then checks the ceiling, and only then
@@ -242,6 +251,7 @@ for position_id in positions.iter() {
         deadline: env.ledger().timestamp() + 3600,
         ttl_ledgers: 17_280,
         lock_ledgers: 120,
+        condition: None,
     });
 }
 

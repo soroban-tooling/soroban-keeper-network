@@ -120,7 +120,7 @@ A **shared, permissionless, on-chain coordination layer** where:
 
 - [x] **On-chain execution verifier interface** — target contracts implement `IKeeperVerifier` and `execute_task` calls them before crediting the keeper (see [docs/VERIFIER_DESIGN.md](docs/VERIFIER_DESIGN.md)); an admin-curated allowlist and the reference verifiers (signature/oracle/tx-inclusion) remain open follow-up issues
 - [x] **Batch task registration** — `batch_register_tasks` registers up to `MAX_BATCH_SIZE` tasks in one transaction under a single owner auth, with a `max_total_reward` escrow ceiling (see [docs/BATCH_OPERATIONS.md](docs/BATCH_OPERATIONS.md))
-- [ ] **EIP-like task conditions** — on-chain `checkUpkeep` callback before claiming
+- [x] **Task conditions** — optional fail-closed `ITaskCondition::is_met` callback before claiming, including batch registration and indexed rejection telemetry (see [docs/TASK_CONDITIONS_DESIGN.md](docs/TASK_CONDITIONS_DESIGN.md))
 - [ ] **Keeper reputation scores** — slash stake for missed executions
 - [ ] **Keeper staking** — stake XLM or governance token for priority and dispute resolution
 - [ ] **Governance token ($KPRS)** — vote on fee parameters, upgrades, whitelists
@@ -226,7 +226,7 @@ A **shared, permissionless, on-chain coordination layer** where:
 - `calldata` MUST NOT exceed `MAX_CALLDATA_LEN` (1024 bytes), rejected with
   `CalldataTooLarge` otherwise. Empty `calldata` is accepted.
 - `reward` MUST be greater than zero.
-- MUST emit `TaskRegistered` event with `(task_id, owner, reward, deadline)`.
+- MUST emit `TaskRegistered` with `(task_id, owner, reward, deadline, condition)`.
 
 #### FR-2: Task Claiming
 - `claim_task` MUST be callable by any address (permissionless).
@@ -492,7 +492,8 @@ without breaking existing consumers.
 | Event | Emitted by | Topics | Data (in order, with type) |
 |-------|-----------|--------|----------------------------|
 | `Initialized` | `initialize` | `("init", "admin")` | `(admin: Address, reward_token: Address, fee_bps: u32)` — emitted at most once |
-| `TaskRegistered` | `register_task` | `("reg", "task")` | `(task_id: u64, owner: Address, reward: i128, deadline: u64)` |
+| `TaskRegistered` | `register_task` / `batch_register_tasks` | `("reg", "task")` | `(task_id: u64, owner: Address, reward: i128, deadline: u64, condition: Option<Address>)` |
+| `ConditionNotMet` | `claim_task` | `("condfail", "task")` | `(task_id: u64, condition: Address)` — emitted when a condition returns false or cannot be evaluated |
 | `VerifierAttached` | `register_task` | `("vattach", "task")` | `(task_id: u64, verifier: Address)` — emitted when a verifier is attached at registration |
 | `RewardIncreased` | `increase_reward` | `("topup", "task")` | `(task_id: u64, new_reward: i128)` — the new **total** reward, not the delta |
 | `DeadlineExtended` | `extend_deadline` | `("extend", "task")` | `(task_id: u64, new_deadline: u64)` |
@@ -528,7 +529,7 @@ Notes:
 - `("admin", "xfer")` is the only event whose first topic is `"admin"`; every
   other admin event uses `"admin"` as its *second* topic. Filter on both topics,
   not just one.
-- `VerifierAttached` is emitted on `register_task` when an optional verifier is attached, preserving the standard 4-tuple schema of `TaskRegistered` for backwards compatibility with existing event parsers.
+- `VerifierAttached` remains a separate event. Contract VERSION 6 expands `TaskRegistered` with the optional condition; the indexer accepts both the historical four-field payload and the new five-field payload.
 - `VerifierUpdated` follows the `FeeUpdated` / `MinRewardUpdated` before/after pattern with `(task_id, old_verifier, new_verifier)`.
 - `StakeDeposited`/`UnbondInitiated`/`StakeWithdrawn`/`Slashed`/`MinStakeUpdated`/`SlashAppealRaised`/`SlashAppealResolved` are the staking epic's events (E06, `docs/STAKING_DESIGN.md`). `Slashed`'s `reason` is a `Symbol`, not free text — see the design doc for the trust model behind `slash`'s authorization.
 - `DisputeWindowUpdated`/`ExecutionDisputed`/`ExecutionDisputeResolved`/`RewardsFinalized` cover the optional execution-dispute hold (E06, `docs/STAKING_DESIGN.md` §4.2). `RewardsFinalized` only fires for credits that actually go through a dispute-window hold; when the window is disabled (the default), `withdraw_rewards` behaves exactly as it did before this feature existed and this event is never emitted.

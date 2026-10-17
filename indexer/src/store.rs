@@ -86,8 +86,9 @@ impl Store {
         let inserted = sqlx::query(
             "INSERT INTO events (
                  ledger, ledger_close_time, tx_hash, event_index,
-                 event_type, task_id, owner_address, keeper_address, payload
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 event_type, task_id, owner_address, keeper_address,
+                 condition_address, payload
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (tx_hash, event_index) DO NOTHING
              RETURNING cursor",
         )
@@ -99,6 +100,7 @@ impl Store {
         .bind(payload.task_id().map(|id| id as i64))
         .bind(payload.owner())
         .bind(payload.keeper())
+        .bind(payload.condition())
         .bind(&encoded)
         .fetch_optional(&self.pool)
         .await
@@ -338,6 +340,7 @@ mod tests {
             owner: owner.into(),
             reward: I128(reward),
             deadline: 5_000,
+            condition: None,
         }
     }
 
@@ -629,6 +632,7 @@ mod tests {
                     "owner_address",
                     "keeper_address",
                     "payload",
+                    "condition_address",
                 ][..],
             ),
             (

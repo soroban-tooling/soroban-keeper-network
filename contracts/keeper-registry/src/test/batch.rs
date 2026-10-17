@@ -29,6 +29,7 @@ fn batch_entry(env: &Env, reward: i128) -> BatchTaskParams {
         deadline: env.ledger().timestamp() + 3_600,
         ttl_ledgers: DEFAULT_TTL_LEDGERS,
         lock_ledgers: 120,
+        condition: None,
     }
 }
 
@@ -66,6 +67,38 @@ fn test_batch_register_registers_all_and_returns_ids_in_order() {
     // Escrow for the whole batch is held by the registry.
     assert_eq!(token.balance(&s.registry.address), 3_000_000i128);
     assert_eq!(s.registry.task_count(), 3);
+}
+
+#[test]
+fn test_batch_register_persists_mixed_conditions() {
+    let s = setup();
+    let first_condition = Address::generate(&s.env);
+    let second_condition = Address::generate(&s.env);
+
+    let mut tasks = Vec::new(&s.env);
+    tasks.push_back(BatchTaskParams {
+        condition: Some(first_condition.clone()),
+        ..batch_entry(&s.env, 1_000_000)
+    });
+    tasks.push_back(batch_entry(&s.env, 1_000_000));
+    tasks.push_back(BatchTaskParams {
+        condition: Some(second_condition.clone()),
+        ..batch_entry(&s.env, 1_000_000)
+    });
+
+    let ids = s
+        .registry
+        .batch_register_tasks(&s.admin, &tasks, &3_000_000);
+
+    assert_eq!(
+        s.registry.get_task(&ids.get(0).unwrap()).condition,
+        Some(first_condition)
+    );
+    assert_eq!(s.registry.get_task(&ids.get(1).unwrap()).condition, None);
+    assert_eq!(
+        s.registry.get_task(&ids.get(2).unwrap()).condition,
+        Some(second_condition)
+    );
 }
 
 #[test]

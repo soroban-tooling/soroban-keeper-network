@@ -26,6 +26,7 @@ use stellar_xdr::curr::{Limits, ReadXdr, ScAddress, ScVal};
 /// in `parse.rs` rather than a runtime surprise.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RawValue {
+    Void,
     U32(u32),
     U64(u64),
     I128(i128),
@@ -195,6 +196,7 @@ fn decode_address(addr: &ScAddress) -> String {
 
 fn decode_scval(val: ScVal) -> Result<RawValue> {
     match val {
+        ScVal::Void => Ok(RawValue::Void),
         ScVal::U32(v) => Ok(RawValue::U32(v)),
         ScVal::U64(v) => Ok(RawValue::U64(v)),
         ScVal::I128(parts) => {

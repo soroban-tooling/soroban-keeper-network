@@ -13,10 +13,26 @@ use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Symbol};
 // ─── E01 — Contract Core Hardening: task lifecycle ─────────────────────
 // New task-lifecycle events go here.
 
-pub fn emit_task_registered(e: &Env, task_id: u64, owner: &Address, reward: i128, deadline: u64) {
+pub fn emit_task_registered(
+    e: &Env,
+    task_id: u64,
+    owner: &Address,
+    reward: i128,
+    deadline: u64,
+    condition: Option<Address>,
+) {
     e.events().publish(
         (symbol_short!("reg"), symbol_short!("task")),
-        (task_id, owner.clone(), reward, deadline),
+        (task_id, owner.clone(), reward, deadline, condition),
+    );
+}
+
+/// Emitted when an attached condition returns false or cannot be evaluated.
+/// No claim state has been written when this event is produced.
+pub fn emit_condition_not_met(e: &Env, task_id: u64, condition: &Address) {
+    e.events().publish(
+        (symbol_short!("condfail"), symbol_short!("task")),
+        (task_id, condition.clone()),
     );
 }
 

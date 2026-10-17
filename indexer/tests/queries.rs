@@ -24,6 +24,7 @@ async fn test_protocol_stats_and_address_activity() {
                 owner: owner.to_string(),
                 reward: I128(1_000_000),
                 deadline: 2000,
+                condition: None,
             },
         )
         .await

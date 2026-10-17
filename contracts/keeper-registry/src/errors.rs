@@ -137,4 +137,9 @@ pub enum KeeperError {
     /// `set_reputation_floor` was given a floor above
     /// [`crate::MAX_REPUTATION_FLOOR_BPS`], a score no keeper can ever reach.
     InvalidReputationFloor = 39,
+
+    // --- E10 - Task conditions -------------------------------------------
+    /// The attached task condition returned false or could not be evaluated.
+    /// The task remains in its previous claimable state.
+    ConditionNotMet = 40,
 }

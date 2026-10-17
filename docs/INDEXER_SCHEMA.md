@@ -53,6 +53,8 @@ The one table every other table and every derived view is built from.
 | `keeper_address` | `TEXT`, nullable | Denormalised the same way, for events carrying a keeper. |
 | `payload` | `TEXT NOT NULL` | The event's full typed payload as JSON, exactly the shape the REST feed and WebSocket feed both emit (`IndexedEvent.payload` in `indexer/openapi.yaml`) — decoding it once at ingestion and storing the result means neither API surface needs its own second parser. |
 
+| `condition_address` | `TEXT`, nullable | Condition carried by registration and rejection events. `NULL` for unconditioned tasks and historical events. Added by migration `0004_task_conditions.sql`. |
+
 Constraints and indexes:
 - `UNIQUE (tx_hash, event_index)` is the idempotency guarantee: re-ingesting
   an already-seen emission — from an overlapping backfill page or a retried
@@ -61,6 +63,7 @@ Constraints and indexes:
 - `idx_events_task`, `idx_events_owner`, `idx_events_keeper` are partial
   indexes (`WHERE ... IS NOT NULL`) over the three denormalised columns,
   backing `task_history`/`task_ids_by_owner`/`task_ids_by_keeper`.
+- `idx_events_condition` is a partial index over non-null condition addresses.
 - `idx_events_keeper_time` is a covering index over
   `(keeper_address, ledger_close_time)`, specifically for the leaderboard
   and keeper-balance queries, which both scan a keeper's executions over a
