@@ -145,6 +145,16 @@ pub struct Task {
     /// if it returns `false` or panics. Any address is permitted — verifiers
     /// are permissionless, like keepers (design doc §5).
     pub verifier: Option<Address>,
+    /// Optional on-chain condition predicate attached at registration
+    /// (`docs/TASK_CONDITIONS_DESIGN.md`). `None` means `claim_task` has no
+    /// additional gate beyond the usual checks (the current MVP path,
+    /// unchanged). `Some(addr)` means `claim_task` calls `addr`'s condition
+    /// callback (TBD interface) before allowing a claim; if it returns `false`
+    /// or panics, the task remains `Pending` and unclaimed, retryable once
+    /// the condition later becomes `true`. Any address is permitted —
+    /// conditions are permissionless. Distinct from `verifier`, which gates
+    /// `execute_task` after a claim has been made.
+    pub condition: Option<Address>,
 }
 
 // ─── E05 — Batch Operations & Gas ──────────────────────────────────────

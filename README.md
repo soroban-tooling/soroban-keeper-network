@@ -498,6 +498,7 @@ without breaking existing consumers.
 | `DeadlineExtended` | `extend_deadline` | `("extend", "task")` | `(task_id: u64, new_deadline: u64)` |
 | `VerifierUpdated` | `update_verifier` | `("vupdate", "task")` | `(task_id: u64, old_verifier: Option<Address>, new_verifier: Option<Address>)` — before/after update pattern (`None` clears/lacks verifier) |
 | `TaskClaimed` | `claim_task` | `("claim", "task")` | `(task_id: u64, keeper: Address, ledger_seq: u32)` |
+| `ConditionNotMet` | `claim_task` | `("cond", "fail")` | `(task_id: u64, condition: Address)` — emitted when a task's attached condition returns `false` during `claim_task`, and the task remains `Pending` and unclaimed. Only visible as a diagnostic event on failed transactions (see note below). |
 | `TaskExecuted` | `execute_task` | `("exec", "task")` | `(task_id: u64, keeper: Address, net_reward: i128, proof: Bytes)` |
 | `TaskCancelled` | `cancel_task` | `("cancel", "task")` | `(task_id: u64, owner: Address)` |
 | `TaskExpired` | `expire_task` | `("exp", "task")` | `(task_id: u64,)` |
@@ -530,6 +531,7 @@ Notes:
   not just one.
 - `VerifierAttached` is emitted on `register_task` when an optional verifier is attached, preserving the standard 4-tuple schema of `TaskRegistered` for backwards compatibility with existing event parsers.
 - `VerifierUpdated` follows the `FeeUpdated` / `MinRewardUpdated` before/after pattern with `(task_id, old_verifier, new_verifier)`.
+- **`ConditionNotMet` observability note (E10)**: Since `claim_task` returns an error (`KeeperError::ConditionNotMet`) when a condition rejects, the emitted `ConditionNotMet` event is only visible as a **diagnostic event** on failed transactions. It does not persist on-chain in the ledger. Keeper bots can read diagnostic events from their own `simulate` calls before submitting actual transactions, allowing them to learn whether a condition will reject and retry later. The error is still returned to the caller, enabling both on-chain and off-chain handling. See `docs/TASK_CONDITIONS_DESIGN.md` for the design rationale.
 - `StakeDeposited`/`UnbondInitiated`/`StakeWithdrawn`/`Slashed`/`MinStakeUpdated`/`SlashAppealRaised`/`SlashAppealResolved` are the staking epic's events (E06, `docs/STAKING_DESIGN.md`). `Slashed`'s `reason` is a `Symbol`, not free text — see the design doc for the trust model behind `slash`'s authorization.
 - `DisputeWindowUpdated`/`ExecutionDisputed`/`ExecutionDisputeResolved`/`RewardsFinalized` cover the optional execution-dispute hold (E06, `docs/STAKING_DESIGN.md` §4.2). `RewardsFinalized` only fires for credits that actually go through a dispute-window hold; when the window is disabled (the default), `withdraw_rewards` behaves exactly as it did before this feature existed and this event is never emitted.
 

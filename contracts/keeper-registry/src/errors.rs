@@ -137,4 +137,15 @@ pub enum KeeperError {
     /// `set_reputation_floor` was given a floor above
     /// [`crate::MAX_REPUTATION_FLOOR_BPS`], a score no keeper can ever reach.
     InvalidReputationFloor = 39,
+
+    // ─── E10 — Task Conditions ─────────────────────────────────────────
+    // New condition-related errors go here.
+    /// A task's attached condition returned `false` (or the call panicked).
+    /// The task remains `Pending` and unclaimed, retryable once the
+    /// condition later becomes `true`. Distinct from `VerificationFailed`
+    /// (which gates `execute_task`, checking a proof after the fact);
+    /// this gates `claim_task`, checking whether the task is even worth
+    /// attempting before any off-chain work happens. See
+    /// `docs/TASK_CONDITIONS_DESIGN.md`.
+    ConditionNotMet = 40,
 }

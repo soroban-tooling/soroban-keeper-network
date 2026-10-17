@@ -248,3 +248,18 @@ pub fn emit_reputation_floor_updated(e: &Env, old_floor_bps: u32, new_floor_bps:
         (old_floor_bps, new_floor_bps),
     );
 }
+
+// ─── E10 — Task Conditions ─────────────────────────────────────────────
+// New condition-related events go here.
+
+/// Emitted when a task's attached condition returns `false` (or the call
+/// panicked) during a `claim_task` attempt. Distinct from successful
+/// claims: a false condition emits this and returns `KeeperError::ConditionNotMet`
+/// without mutating the task (it remains `Pending` and unclaimed, retryable
+/// once the condition later becomes `true`). See `docs/TASK_CONDITIONS_DESIGN.md`.
+pub fn emit_condition_not_met(e: &Env, task_id: u64, condition: &Address) {
+    e.events().publish(
+        (symbol_short!("cond"), symbol_short!("fail")),
+        (task_id, condition.clone()),
+    );
+}

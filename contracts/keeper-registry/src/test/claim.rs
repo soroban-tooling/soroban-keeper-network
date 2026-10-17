@@ -428,3 +428,252 @@ fn test_expire_executed_task_fails() {
         Err(Ok(KeeperError::InvalidTaskStatus))
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// E10 — Task Conditions: claim_task rejects on false condition
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_claim_with_false_condition_rejects_with_event() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let always_false_condition = Address::generate(&s.env);
+    let id = s.registry.register_task(
+        &s.admin,
+        &TaskType::Liquidation,
+        &calldata(&s.env),
+        &1_000_000i128,
+        &(s.env.ledger().timestamp() + 3600),
+        &DEFAULT_TTL_LEDGERS,
+        &DEFAULT_LOCK_LEDGERS,
+        &None,
+        &Some(always_false_condition.clone()),
+    );
+
+    // Attempt to claim with false condition should fail and emit event.
+    assert_eq!(
+        s.registry.try_claim_task(&keeper, &id),
+        Err(Ok(KeeperError::ConditionNotMet))
+    );
+
+    // Task remains Pending and unclaimed.
+    let task = s.registry.get_task(&id);
+    assert_eq!(task.status, TaskStatus::Pending);
+    assert_eq!(task.claimer, None);
+
+    // ConditionNotMet event was emitted with correct topic and data.
+    let events = s.env.events().all();
+    let (contract, topics, data) = events.last().unwrap();
+    assert_eq!(contract, &s.registry.address);
+
+    let topic_0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&s.env).unwrap();
+    let topic_1: soroban_sdk::Symbol = topics.get(1).unwrap().try_into_val(&s.env).unwrap();
+    assert_eq!(topic_0, soroban_sdk::symbol_short!("cond"));
+    assert_eq!(topic_1, soroban_sdk::symbol_short!("fail"));
+
+    let (event_task_id, event_condition): (u64, Address) =
+        data.try_into_val(&s.env).unwrap();
+    assert_eq!(event_task_id, id);
+    assert_eq!(event_condition, always_false_condition);
+}
+
+#[test]
+fn test_claim_with_true_condition_succeeds() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let always_true_condition = Address::generate(&s.env);
+    let id = s.registry.register_task(
+        &s.admin,
+        &TaskType::Liquidation,
+        &calldata(&s.env),
+        &1_000_000i128,
+        &(s.env.ledger().timestamp() + 3600),
+        &DEFAULT_TTL_LEDGERS,
+        &DEFAULT_LOCK_LEDGERS,
+        &None,
+        &Some(always_true_condition.clone()),
+    );
+
+    // Claim with true condition should succeed.
+    s.registry.claim_task(&keeper, &id);
+
+    // Task is now Claimed by the keeper.
+    let task = s.registry.get_task(&id);
+    assert_eq!(task.status, TaskStatus::Claimed);
+    assert_eq!(task.claimer, Some(keeper.clone()));
+
+    // TaskClaimed event was emitted (no ConditionNotMet).
+    let events = s.env.events().all();
+    let (_, topics, _) = events.last().unwrap();
+    let topic_0: soroban_sdk::Symbol = topics.get(0).unwrap().try_into_val(&s.env).unwrap();
+    assert_eq!(topic_0, soroban_sdk::symbol_short!("claim"));
+}
+
+#[test]
+fn test_claim_without_condition_succeeds() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    // Register without a condition (None)
+    let id = s.registry.register_task(
+        &s.admin,
+        &TaskType::Liquidation,
+        &calldata(&s.env),
+        &1_000_000i128,
+        &(s.env.ledger().timestamp() + 3600),
+        &DEFAULT_TTL_LEDGERS,
+        &DEFAULT_LOCK_LEDGERS,
+        &None,
+        &None,
+    );
+
+    // Claim without condition should succeed (the MVP path).
+    s.registry.claim_task(&keeper, &id);
+
+    let task = s.registry.get_task(&id);
+    assert_eq!(task.status, TaskStatus::Claimed);
+    assert_eq!(task.claimer, Some(keeper));
+}
+
+#[test]
+fn test_false_condition_does_not_emit_event_on_other_rejections() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let paused_registry = s.registry.clone();
+
+    // Pause the contract
+    s.registry.pause(&s.admin);
+
+    let id = s.registry.register_task(
+        &s.admin,
+        &TaskType::Liquidation,
+        &calldata(&s.env),
+        &1_000_000i128,
+        &(s.env.ledger().timestamp() + 3600),
+        &DEFAULT_TTL_LEDGERS,
+        &DEFAULT_LOCK_LEDGERS,
+        &None,
+        &None,
+    );
+
+    // Attempt to claim when paused should fail with ContractPaused, not ConditionNotMet.
+    let result = paused_registry.try_claim_task(&keeper, &id);
+    assert_eq!(result, Err(Ok(KeeperError::ContractPaused)));
+
+    // No ConditionNotMet event should be emitted.
+    let events = s.env.events().all();
+    for (_, topics, _) in events.iter() {
+        if let Ok(topic_0) = topics.get(0) {
+            if let Ok(symbol) = topic_0.try_into_val::<_, soroban_sdk::Symbol>(&s.env) {
+                assert_ne!(symbol, soroban_sdk::symbol_short!("cond"));
+            }
+        }
+    }
+}
+
+#[test]
+fn test_repeated_false_condition_attempts_emit_multiple_events() {
+    let s = setup();
+    let keeper1 = Address::generate(&s.env);
+    let keeper2 = Address::generate(&s.env);
+    let always_false_condition = Address::generate(&s.env);
+    let id = s.registry.register_task(
+        &s.admin,
+        &TaskType::Liquidation,
+        &calldata(&s.env),
+        &1_000_000i128,
+        &(s.env.ledger().timestamp() + 3600),
+        &DEFAULT_TTL_LEDGERS,
+        &DEFAULT_LOCK_LEDGERS,
+        &None,
+        &Some(always_false_condition.clone()),
+    );
+
+    // First attempt with keeper1
+    let _ = s.registry.try_claim_task(&keeper1, &id);
+    
+    // Second attempt with keeper2
+    let _ = s.registry.try_claim_task(&keeper2, &id);
+
+    // Both attempts should have emitted ConditionNotMet events
+    let events = s.env.events().all();
+    let condition_not_met_count = events
+        .iter()
+        .filter(|(_, topics, _)| {
+            if let Ok(topic_0) = topics.get(0) {
+                if let Ok(symbol) = topic_0.try_into_val::<_, soroban_sdk::Symbol>(&s.env) {
+                    return symbol == soroban_sdk::symbol_short!("cond");
+                }
+            }
+            false
+        })
+        .count();
+    
+    assert!(condition_not_met_count >= 2);
+}
+
+#[test]
+fn test_claim_deadline_passed_does_not_emit_condition_not_met() {
+    let s = setup();
+    let keeper = Address::generate(&s.env);
+    let id = s.registry.register_task(
+        &s.admin,
+        &TaskType::Liquidation,
+        &calldata(&s.env),
+        &1_000_000i128,
+        &(s.env.ledger().timestamp() + 10), // very short deadline
+        &DEFAULT_TTL_LEDGERS,
+        &DEFAULT_LOCK_LEDGERS,
+        &None,
+        &None,
+    );
+
+    // Advance past deadline
+    advance(&s.env, 1, 11);
+
+    // Claim should fail with DeadlinePassed, not ConditionNotMet
+    assert_eq!(
+        s.registry.try_claim_task(&keeper, &id),
+        Err(Ok(KeeperError::DeadlinePassed))
+    );
+
+    // No ConditionNotMet event should be emitted
+    let events = s.env.events().all();
+    for (_, topics, _) in events.iter() {
+        if let Ok(topic_0) = topics.get(0) {
+            if let Ok(symbol) = topic_0.try_into_val::<_, soroban_sdk::Symbol>(&s.env) {
+                assert_ne!(symbol, soroban_sdk::symbol_short!("cond"));
+            }
+        }
+    }
+}
+
+#[test]
+fn test_claim_lock_period_active_does_not_emit_condition_not_met() {
+    let s = setup();
+    let first_keeper = Address::generate(&s.env);
+    let second_keeper = Address::generate(&s.env);
+    let id = register_default_task(&s);
+
+    // First keeper claims
+    s.registry.claim_task(&first_keeper, &id);
+
+    // Advance 100 ledgers (still within lock period of 120)
+    advance(&s.env, 100, 0);
+
+    // Second keeper tries to claim while lock is active
+    assert_eq!(
+        s.registry.try_claim_task(&second_keeper, &id),
+        Err(Ok(KeeperError::LockPeriodActive))
+    );
+
+    // No ConditionNotMet event should be emitted
+    let events = s.env.events().all();
+    for (_, topics, _) in events.iter() {
+        if let Ok(topic_0) = topics.get(0) {
+            if let Ok(symbol) = topic_0.try_into_val::<_, soroban_sdk::Symbol>(&s.env) {
+                assert_ne!(symbol, soroban_sdk::symbol_short!("cond"));
+            }
+        }
+    }
+}
+

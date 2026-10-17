@@ -69,6 +69,7 @@ use soroban_sdk::contract;
 
 mod admin;
 mod batch;
+mod condition;
 mod constants;
 mod errors;
 mod events;
@@ -83,6 +84,7 @@ mod views;
 pub use constants::*;
 pub use errors::KeeperError;
 pub use events::*;
+pub use condition::{ITaskCondition, TaskConditionClient};
 pub use reputation::{effective_record, ReputationRecord, REPUTATION_DECAY_HALF_LIFE_LEDGERS};
 pub use types::{
     BatchTaskParams, DataKey, PendingCredit, SlashRecord, Task, TaskStatus, TaskType, UnbondRequest,

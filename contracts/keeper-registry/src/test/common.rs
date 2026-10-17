@@ -18,6 +18,10 @@ use crate::{KeeperRegistry, KeeperRegistryClient, TaskType};
 /// See `required_ttl_ledgers` in `lib.rs`.
 pub(crate) const DEFAULT_TTL_LEDGERS: u32 = 18_000;
 
+/// Default `lock_ledgers` used in most tests. Used in `register_default_task` and
+/// other standard task registrations to keep tests concise.
+pub(crate) const DEFAULT_LOCK_LEDGERS: u32 = 120;
+
 pub(crate) struct TestSetup {
     pub(crate) env: Env,
     pub(crate) admin: Address,
@@ -111,7 +115,8 @@ pub(crate) fn register_reward_task(s: &TestSetup, reward: i128) -> u64 {
         &reward,
         &deadline,
         &DEFAULT_TTL_LEDGERS,
-        &120u32,
+        &DEFAULT_LOCK_LEDGERS,
+        &None,
         &None,
     )
 }
@@ -148,6 +153,7 @@ pub(crate) fn claim_with_lock(s: &TestSetup, keeper: &Address, lock_ledgers: u32
         &deadline,
         &DEFAULT_TTL_LEDGERS,
         &lock_ledgers,
+        &None,
         &None,
     );
     s.registry.claim_task(keeper, &id);

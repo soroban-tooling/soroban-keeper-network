@@ -13,6 +13,7 @@
 use soroban_sdk::{contractimpl, log, Address, Bytes, Env};
 
 use crate::constants::*;
+use crate::condition::TaskConditionClient;
 use crate::errors::KeeperError;
 use crate::events::*;
 use crate::internal::*;
@@ -46,6 +47,13 @@ impl KeeperRegistry {
     //                  this function's own behavior — only `execute_task`
     //                  consumes it. Any address is accepted (verifiers are
     //                  permissionless).
+    //   condition    — optional on-chain condition predicate
+    //                  (docs/TASK_CONDITIONS_DESIGN.md). `None` behaves exactly
+    //                  as before this parameter existed; `Some(addr)` is stored
+    //                  on the task and `claim_task` calls it, rejecting with
+    //                  `ConditionNotMet` if it returns `false`. Any address is
+    //                  accepted (conditions are permissionless, distinct from
+    //                  verifiers).
     //
     // Returns the new task_id.
 
@@ -59,6 +67,7 @@ impl KeeperRegistry {
         ttl_ledgers: u32,
         lock_ledgers: u32,
         verifier: Option<Address>,
+        condition: Option<Address>,
     ) -> Result<u64, KeeperError> {
         require_not_paused(&e)?;
         owner.require_auth();
@@ -92,6 +101,7 @@ impl KeeperRegistry {
             claim_ledger: None,
             lock_ledgers,
             verifier,
+            condition,
         };
         save_task(&e, task_id, &task);
         emit_task_registered(&e, task_id, &owner, reward, deadline);
@@ -244,6 +254,22 @@ impl KeeperRegistry {
             _ => return Err(KeeperError::InvalidTaskStatus),
         };
         require_reputation_floor(&e, &keeper)?;
+
+        // E10 (docs/TASK_CONDITIONS_DESIGN.md): If a task carries an
+        // on-chain condition, evaluate it before allowing a claim. A false
+        // result (or a panic caught by try_check) rejects the claim and emits
+        // an event without mutating the task state — it remains Pending and
+        // unclaimed, retryable once the condition later becomes true.
+        if let Some(condition_addr) = task.condition.clone() {
+            let approved = matches!(
+                TaskConditionClient::new(&e, &condition_addr).try_check(&task_id),
+                Ok(Ok(true))
+            );
+            if !approved {
+                emit_condition_not_met(&e, task_id, &condition_addr);
+                return Err(KeeperError::ConditionNotMet);
+            }
+        }
 
         bump_instance(&e);
         if let Some(missed) = missed_claimer {
