@@ -302,6 +302,46 @@ property tests in `test.rs` and the fuzz targets under `fuzz/fuzz_targets/`,
 so both call the same assertion logic instead of maintaining parallel
 copies that can drift apart.
 
+### Governance Invariants (E09)
+
+The governance contract introduces three invariants governing the proposal lifecycle, voting, and execution. These follow issue 0050's format for reference alongside other numbered invariants (I-1 through I-8, I-9 through I-11, T-1 through T-3).
+
+#### G-1: A proposal cannot execute before its timelock elapses
+
+**Statement.** For any proposal, `execute_proposal(proposal_id)` succeeds only if the current ledger sequence (or timestamp, per issue 0360's decision on time units) is greater than or equal to `proposal.eta`, where `eta = proposal.created_at + timelock_delay`. Before that point, `execute_proposal` is rejected with a typed error (`TimelockNotElapsed` or equivalent). Execution exactly at the boundary (ledger/timestamp == eta) is permitted; execution one ledger/second before is rejected.
+
+**Why.** The timelock gives task owners, keepers, and other affected parties a reaction window after a proposal passes but before its effect lands. Without it, a governance proposal to raise fees or transfer admin could execute immediately, leaving no time to exit or dispute. The timelock is the primary defense against governance capture or malicious flash proposals.
+
+**Enforced by.** The `execute_proposal` entry point in `contracts/governance/src/lib.rs` performs an explicit boundary check comparing current time against `eta` before making the cross-contract call to the registry (issue 0367's implementation). The check rejects execution if `now < eta` with a distinct error, and proceeds if `now >= eta`.
+
+**Verified by.** Issue 0366's boundary tests confirm execution is rejected at `eta - 1`, allowed at `eta`, and allowed at `eta + 1` (covering the exact boundary semantics). Issue 0373's property test exercises timelock correctness under randomized proposal and voting scenarios. No other governance action (cancellation, re-voting, a second proposal) can bypass or reduce the timelock.
+
+**Breaks if.** The boundary check is removed or reordered after the cross-contract call; the comparison uses `>` instead of `>=`, making execution impossible even exactly at eta; `eta` is computed incorrectly (e.g., subtraction instead of addition, or wrong time unit conversion).
+
+#### G-2: Voting power is fixed at proposal creation and cannot be manipulated after the fact
+
+**Statement.** When a proposal is created, the governance contract snapshots the voting power (balance and/or weighted voting capability per issue 0360's voting-power model) of every potential voter at the proposal-creation ledger/timestamp. Any subsequent `vote(proposal_id, choice)` call uses the snapshotted power from creation time, not the voter's current balance. A voter's balance can increase, decrease, or be transferred entirely after proposal creation, and their voting weight on that proposal remains unchanged. Token transfers, delegation changes (if applicable), and other balance mutations do not retroactively affect votes already cast or voting power available for future votes on that proposal.
+
+**Why.** Without a snapshot, a voter could acquire additional tokens mid-vote specifically to swing the outcome, or a bad actor could execute a flash-loan attack, borrow tokens for a single block/ledger, vote with them, and return them — a form of governance manipulation that appears legitimate on-chain but violates the spirit of one-token-one-vote. Snapshotting eliminates this vector.
+
+**Enforced by.** The `create_proposal` entry point snapshots voting power (by reading and storing the governance token's balance distribution, or by reading a weighted-power view if issue 0360 specified non-linear voting) at the proposal's creation block/timestamp, and stores it in `DataKey::ProposalVotingPower(proposal_id)` or equivalent. The `vote` entry point reads this stored snapshot, not the current token balance, to determine the voter's available power.
+
+**Verified by.** Issue 0364's test creates a proposal, then transfers tokens (or changes delegation, or both) mid-voting period, and confirms a voter's already-cast vote weight does not change and future votes use the original snapshotted power. Issue 0373's property test verifies tallying and quorum evaluation are unaffected by post-proposal balance changes across randomized scenarios. The shared `invariants.rs` module (if shared across governance tests) asserts snapshot consistency.
+
+**Breaks if.** `vote` reads `token.balance(voter)` at vote time instead of consulting the stored snapshot; the snapshot is taken at vote time instead of proposal-creation time; the snapshot storage key is reused or conflated with live balance storage, allowing a transfer to overwrite it; a future voting-power migration or re-weighting applies retroactively to old proposals.
+
+#### G-3: Only enumerated proposal types can be created; no arbitrary-call escape hatch exists
+
+**Statement.** The `create_proposal(proposal_type, new_value)` entry point accepts only a closed, enumerated set of proposal types (as specified in issue 0363: e.g., `SetFeeBps(u32)`, `SetMinReward(u128)`, `TransferAdmin(Address)`, with no wildcard or `ExecuteArbitrary` variant). Any attempt to create a proposal with a type not in this enumerated set is rejected with a typed error (`UnknownProposalType` or `InvalidProposalType`). There is no fallback code path that accepts generic target addresses, function selectors, or arbitrary calldata and packages them as a proposal.
+
+**Why.** An open-ended "arbitrary contract call" proposal type is a materially larger attack surface: a vulnerability in one line of registry code (an unsafe function, an unchecked parameter, a reentrancy window) could be exploited via a governance proposal before it is discovered and patched. A closed list of known-safe parameter changes limits the blast radius. Each enumerated type can be individually reviewed and tested. An attacker cannot propose a call to some third-party contract, invoke internal registry functions, or call the same enumerated function with out-of-bounds values (those checks happen inside the target registry entry point and reject the call outright).
+
+**Enforced by.** The `create_proposal` entry point in `contracts/governance/src/lib.rs` uses a `match` statement (or equivalent sum type dispatch) against a Rust `enum` of proposal types defined in `contracts/governance/src/types.rs`. Only the variants explicitly listed in the enum can be constructed and passed to the function. A caller attempting to send arbitrary serialized bytes as a proposal type will either fail to deserialize (if the encoding is not a valid enum value) or hit the `_` arm of the match, which returns the typed error. There is no `ExecuteArbitrary` or `CallTarget(Address, Vec<u8>)` variant.
+
+**Verified by.** Issue 0363's test attempts to create a proposal for each of the enumerated types (e.g., `create_proposal(SetFeeBps(5000))`, `create_proposal(SetMinReward(1000000))`), confirming each succeeds if the proposal creator holds sufficient voting power. Then, it attempts to create a proposal with a non-enumerated type (either by crafting an invalid enum value or by trying a hypothetical `ExecuteArbitrary` call if such a variant existed in an earlier design), and confirms the attempt is rejected with `UnknownProposalType`. Issue 0373's property test exercises all enumerated types under randomized voting and quorum scenarios, ensuring none is accidentally unreachable.
+
+**Breaks if.** A new `ExecuteArbitrary(Address, Vec<u8>)` variant is added to the proposal type enum; the match statement includes a catch-all `_` arm that does not error and instead creates a proposal anyway; deserialization is made more permissive to accept unrecognized types and default them to a safe variant; a future extension adds an alias or fallback function that bypasses the enum check.
+
 ## Events
 
 Every state transition emits an event so off-chain keepers and indexers can
