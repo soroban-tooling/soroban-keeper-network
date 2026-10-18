@@ -87,7 +87,7 @@ paths:
     get:
       tags:
       - indexer
-      summary: Tasks a keeper has claimed or executed.
+      summary: Tasks a keeper has claimed or executed, paginated and capped.
       operationId: tasks_by_keeper
       parameters:
       - name: keeper
@@ -96,6 +96,22 @@ paths:
         required: true
         schema:
           type: string
+      - name: after
+        in: query
+        description: Cursor from a previous response's next_cursor
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: limit
+        in: query
+        description: Tasks per page (default 50, max 200)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Tasks for the keeper
@@ -121,7 +137,7 @@ paths:
           type: string
       - name: since
         in: query
-        description: Unix timestamp; omit for all time
+        description: Unix timestamp, normalized to 60s windows; omit for all time
         required: false
         schema:
           type: integer
@@ -151,7 +167,7 @@ paths:
     get:
       tags:
       - indexer
-      summary: Tasks registered by an owner.
+      summary: Tasks registered by an owner, paginated and capped.
       operationId: tasks_by_owner
       parameters:
       - name: owner
@@ -160,6 +176,22 @@ paths:
         required: true
         schema:
           type: string
+      - name: after
+        in: query
+        description: Cursor from a previous response's next_cursor
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: limit
+        in: query
+        description: Tasks per page (default 50, max 200)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Tasks for the owner
@@ -171,7 +203,7 @@ paths:
     get:
       tags:
       - indexer
-      summary: One task, with its full observed history.
+      summary: One task, with its observed history bounded by limit.
       operationId: get_task
       parameters:
       - name: task_id
@@ -181,6 +213,14 @@ paths:
         schema:
           type: integer
           format: int64
+          minimum: 0
+      - name: limit
+        in: query
+        description: Maximum history events to return (default 50, max 200)
+        required: false
+        schema:
+          type: integer
+          format: int32
           minimum: 0
       responses:
         '200':
@@ -789,6 +829,13 @@ components:
         address:
           type: string
           description: The address these tasks were selected by.
+        next_cursor:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: Pass as `after` to fetch the next page; absent at the end of the list.
+          minimum: 0
         tasks:
           type: array
           items:

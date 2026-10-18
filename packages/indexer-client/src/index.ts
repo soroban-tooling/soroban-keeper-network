@@ -25,6 +25,8 @@ export {
   type EventFeedParams,
   type IndexerClientOptions,
   type LeaderboardParams,
+  type TaskDetailParams,
+  type TaskListParams,
 } from "./client.js";
 
 export {

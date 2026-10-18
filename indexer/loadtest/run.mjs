@@ -78,6 +78,24 @@ const SCENARIOS = [
     path: () => `/v1/leaderboard?since=${Math.floor(Math.random() * 1_000_000)}`,
   },
   {
+    name: "tasks:owner:page",
+    kind: "rest",
+    repeated: true,
+    path: () => "/v1/owners/GOWNER/tasks?limit=200",
+  },
+  {
+    name: "tasks:keeper:page",
+    kind: "rest",
+    repeated: true,
+    path: () => "/v1/keepers/GKEEPER/tasks?limit=200",
+  },
+  {
+    name: "tasks:detail:bounded-history",
+    kind: "rest",
+    repeated: true,
+    path: () => "/v1/tasks/1?limit=200",
+  },
+  {
     name: "events:page",
     kind: "rest",
     repeated: false,

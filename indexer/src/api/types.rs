@@ -64,6 +64,8 @@ pub struct TaskListResponse {
     /// The address these tasks were selected by.
     pub address: String,
     pub tasks: Vec<TaskState>,
+    /// Pass as `after` to fetch the next page; absent at the end of the list.
+    pub next_cursor: Option<u64>,
 }
 
 /// A page of the event feed.

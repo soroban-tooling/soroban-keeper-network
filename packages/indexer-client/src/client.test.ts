@@ -53,25 +53,33 @@ describe("IndexerClient", () => {
     expect(url.searchParams.get("limit")).toBe("10");
   });
 
-  it("tasksByKeeper()/tasksByOwner() URL-encode the address into the path", async () => {
+  it("tasksByKeeper()/tasksByOwner() URL-encode the address into the path and pass pagination query params", async () => {
     const fetchFn = vi.fn().mockImplementation(() => jsonResponse(200, { address: "G/weird", tasks: [] }));
     const client = new IndexerClient({ baseUrl: "https://indexer.example.org/v1", fetchFn });
 
-    await client.tasksByKeeper("G/weird");
-    expect((fetchFn.mock.calls[0]![0] as URL).pathname).toBe("/v1/keepers/G%2Fweird/tasks");
+    await client.tasksByKeeper("G/weird", { after: 10, limit: 25 });
+    const keeperUrl = fetchFn.mock.calls[0]![0] as URL;
+    expect(keeperUrl.pathname).toBe("/v1/keepers/G%2Fweird/tasks");
+    expect(keeperUrl.searchParams.get("after")).toBe("10");
+    expect(keeperUrl.searchParams.get("limit")).toBe("25");
 
-    await client.tasksByOwner("G/weird");
-    expect((fetchFn.mock.calls[1]![0] as URL).pathname).toBe("/v1/owners/G%2Fweird/tasks");
+    await client.tasksByOwner("G/weird", { after: 20, limit: 50 });
+    const ownerUrl = fetchFn.mock.calls[1]![0] as URL;
+    expect(ownerUrl.pathname).toBe("/v1/owners/G%2Fweird/tasks");
+    expect(ownerUrl.searchParams.get("after")).toBe("20");
+    expect(ownerUrl.searchParams.get("limit")).toBe("50");
   });
 
-  it("getTask() builds /tasks/{task_id}", async () => {
+  it("getTask() builds /tasks/{task_id} and passes limit query param", async () => {
     const fetchFn = vi.fn().mockResolvedValue(
       jsonResponse(200, { task: { task_id: 7 }, history: [] }),
     );
     const client = new IndexerClient({ baseUrl: "https://indexer.example.org/v1", fetchFn });
 
-    await client.getTask(7);
-    expect((fetchFn.mock.calls[0]![0] as URL).pathname).toBe("/v1/tasks/7");
+    await client.getTask(7, { limit: 10 });
+    const url = fetchFn.mock.calls[0]![0] as URL;
+    expect(url.pathname).toBe("/v1/tasks/7");
+    expect(url.searchParams.get("limit")).toBe("10");
   });
 
   it("adminConfig() calls GET /admin/config", async () => {
