@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "contracts/keeper-registry",
     "contracts/treasury",
+    "contracts/governance",
+    "contracts/governance-token",
     "indexer",
     "rust-sdk",
 ]
