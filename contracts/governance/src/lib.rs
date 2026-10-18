@@ -1,8 +1,19 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, Symbol,
+    contract, contractclient, contracterror, contractimpl, contracttype, Address, BytesN, Env, Symbol,
 };
+
+#[contractclient(name = "RegistryClient")]
+pub trait RegistryInterface {
+    fn set_fee_bps(e: Env, admin: Address, new_bps: u32);
+    fn set_min_reward(e: Env, admin: Address, min_reward: i128);
+    fn set_reputation_floor(e: Env, admin: Address, floor_bps: u32);
+    fn pause(e: Env, admin: Address);
+    fn unpause(e: Env, admin: Address);
+    fn transfer_admin(e: Env, admin: Address, new_admin: Address);
+    fn upgrade(e: Env, admin: Address, new_wasm_hash: BytesN<32>);
+}
 
 pub const ONE_TOKEN: i128 = 10_000_000; // 10^7 stroops (7 decimals)
 pub const DEFAULT_PROPOSAL_THRESHOLD: i128 = 100_000 * ONE_TOKEN; // 100,000 KPRS
@@ -67,6 +78,7 @@ pub enum GovernableAction {
     SetReputationFloor(u32),
     PauseRegistry,
     UnpauseRegistry,
+    TransferRegistryAdmin(Address),
 
     // ── Treasury Parameters ──
     AddTreasuryRecipient(Address, u32),
@@ -537,8 +549,71 @@ impl GovernanceContract {
             return Err(GovernanceError::TimelockNotElapsed);
         }
 
-        // Apply parameter mutations if meta-governance action
+        // Apply action effects
         match &proposal.action {
+            GovernableAction::SetFeeBps(bps) => {
+                let registry_addr: Address = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::Registry)
+                    .ok_or(GovernanceError::NotInitialized)?;
+                let registry_client = RegistryClient::new(&env, &registry_addr);
+                registry_client.set_fee_bps(&env.current_contract_address(), bps);
+            }
+            GovernableAction::SetMinReward(min) => {
+                let registry_addr: Address = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::Registry)
+                    .ok_or(GovernanceError::NotInitialized)?;
+                let registry_client = RegistryClient::new(&env, &registry_addr);
+                registry_client.set_min_reward(&env.current_contract_address(), min);
+            }
+            GovernableAction::SetReputationFloor(floor) => {
+                let registry_addr: Address = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::Registry)
+                    .ok_or(GovernanceError::NotInitialized)?;
+                let registry_client = RegistryClient::new(&env, &registry_addr);
+                registry_client.set_reputation_floor(&env.current_contract_address(), floor);
+            }
+            GovernableAction::PauseRegistry => {
+                let registry_addr: Address = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::Registry)
+                    .ok_or(GovernanceError::NotInitialized)?;
+                let registry_client = RegistryClient::new(&env, &registry_addr);
+                registry_client.pause(&env.current_contract_address());
+            }
+            GovernableAction::UnpauseRegistry => {
+                let registry_addr: Address = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::Registry)
+                    .ok_or(GovernanceError::NotInitialized)?;
+                let registry_client = RegistryClient::new(&env, &registry_addr);
+                registry_client.unpause(&env.current_contract_address());
+            }
+            GovernableAction::TransferRegistryAdmin(new_admin) => {
+                let registry_addr: Address = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::Registry)
+                    .ok_or(GovernanceError::NotInitialized)?;
+                let registry_client = RegistryClient::new(&env, &registry_addr);
+                registry_client.transfer_admin(&env.current_contract_address(), new_admin);
+            }
+            GovernableAction::UpgradeRegistry(wasm_hash) => {
+                let registry_addr: Address = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::Registry)
+                    .ok_or(GovernanceError::NotInitialized)?;
+                let registry_client = RegistryClient::new(&env, &registry_addr);
+                registry_client.upgrade(&env.current_contract_address(), wasm_hash);
+            }
             GovernableAction::SetVotingPeriod(period) => {
                 env.storage().instance().set(&DataKey::VotingPeriod, period);
             }
@@ -888,6 +963,7 @@ impl GovernanceContract {
             }
             GovernableAction::PauseRegistry
             | GovernableAction::UnpauseRegistry
+            | GovernableAction::TransferRegistryAdmin(_)
             | GovernableAction::RemoveTreasuryRecipient(_)
             | GovernableAction::PauseTreasury
             | GovernableAction::UnpauseTreasury

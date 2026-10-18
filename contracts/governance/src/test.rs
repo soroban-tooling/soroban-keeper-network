@@ -18,8 +18,124 @@ struct TestContext {
     eligible_proposer: Address,
 }
 
+#[soroban_sdk::contract]
+pub struct MockRegistry;
+
+#[soroban_sdk::contracttype]
+#[derive(Clone)]
+enum MockDataKey {
+    Admin,
+    FeeBps,
+    MinReward,
+    ReputationFloor,
+    Paused,
+}
+
+#[soroban_sdk::contractimpl]
+impl MockRegistry {
+    fn bump(e: &Env) {
+        e.storage().instance().extend_ttl(100_000, 300_000);
+    }
+
+    pub fn initialize(e: Env, admin: Address, _reward_token: Address, fee_bps: u32) {
+        e.storage().instance().set(&MockDataKey::Admin, &admin);
+        e.storage().instance().set(&MockDataKey::FeeBps, &fee_bps);
+        e.storage().instance().set(&MockDataKey::MinReward, &0i128);
+        e.storage().instance().set(&MockDataKey::ReputationFloor, &0u32);
+        e.storage().instance().set(&MockDataKey::Paused, &false);
+        Self::bump(&e);
+    }
+
+    pub fn set_fee_bps(e: Env, admin: Address, new_bps: u32) {
+        let current_admin: Address = e.storage().instance().get(&MockDataKey::Admin).unwrap();
+        if admin != current_admin {
+            panic!("unauthorized");
+        }
+        e.storage().instance().set(&MockDataKey::FeeBps, &new_bps);
+        Self::bump(&e);
+    }
+
+    pub fn set_min_reward(e: Env, admin: Address, min_reward: i128) {
+        let current_admin: Address = e.storage().instance().get(&MockDataKey::Admin).unwrap();
+        if admin != current_admin {
+            panic!("unauthorized");
+        }
+        e.storage().instance().set(&MockDataKey::MinReward, &min_reward);
+        Self::bump(&e);
+    }
+
+    pub fn set_reputation_floor(e: Env, admin: Address, floor_bps: u32) {
+        let current_admin: Address = e.storage().instance().get(&MockDataKey::Admin).unwrap();
+        if admin != current_admin {
+            panic!("unauthorized");
+        }
+        e.storage().instance().set(&MockDataKey::ReputationFloor, &floor_bps);
+        Self::bump(&e);
+    }
+
+    pub fn pause(e: Env, admin: Address) {
+        let current_admin: Address = e.storage().instance().get(&MockDataKey::Admin).unwrap();
+        if admin != current_admin {
+            panic!("unauthorized");
+        }
+        e.storage().instance().set(&MockDataKey::Paused, &true);
+        Self::bump(&e);
+    }
+
+    pub fn unpause(e: Env, admin: Address) {
+        let current_admin: Address = e.storage().instance().get(&MockDataKey::Admin).unwrap();
+        if admin != current_admin {
+            panic!("unauthorized");
+        }
+        e.storage().instance().set(&MockDataKey::Paused, &false);
+        Self::bump(&e);
+    }
+
+    pub fn transfer_admin(e: Env, admin: Address, new_admin: Address) {
+        let current_admin: Address = e.storage().instance().get(&MockDataKey::Admin).unwrap();
+        if admin != current_admin {
+            panic!("unauthorized");
+        }
+        e.storage().instance().set(&MockDataKey::Admin, &new_admin);
+        Self::bump(&e);
+    }
+
+    pub fn upgrade(e: Env, admin: Address, _new_wasm_hash: BytesN<32>) {
+        let current_admin: Address = e.storage().instance().get(&MockDataKey::Admin).unwrap();
+        if admin != current_admin {
+            panic!("unauthorized");
+        }
+        Self::bump(&e);
+    }
+
+    pub fn get_fee_bps(e: Env) -> u32 {
+        e.storage().instance().get(&MockDataKey::FeeBps).unwrap()
+    }
+
+    pub fn min_reward(e: Env) -> i128 {
+        e.storage().instance().get(&MockDataKey::MinReward).unwrap()
+    }
+
+    pub fn reputation_floor(e: Env) -> u32 {
+        e.storage().instance().get(&MockDataKey::ReputationFloor).unwrap()
+    }
+
+    pub fn is_paused(e: Env) -> bool {
+        e.storage().instance().get(&MockDataKey::Paused).unwrap()
+    }
+
+    pub fn admin(e: Env) -> Option<Address> {
+        e.storage().instance().get(&MockDataKey::Admin)
+    }
+}
+
 fn setup() -> TestContext {
     let env = Env::default();
+    env.ledger().with_mut(|li| {
+        li.min_temp_entry_ttl = 50_000_000;
+        li.min_persistent_entry_ttl = 50_000_000;
+        li.max_entry_ttl = 50_000_000;
+    });
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
@@ -32,11 +148,17 @@ fn setup() -> TestContext {
     let token_client = governance_token::GovernanceTokenClient::new(&env, &token_id);
     token_client.initialize(&admin, &early_keepers, &treasury, &core_team, &public_dist);
 
-    let registry_id = Address::generate(&env);
+    let reward_token = Address::generate(&env);
+    let registry_id = env.register(MockRegistry, ());
+    let mock_reg_client = MockRegistryClient::new(&env, &registry_id);
+    mock_reg_client.initialize(&admin, &reward_token, &300u32);
 
     let governance_id = env.register(GovernanceContract, ());
     let client = GovernanceContractClient::new(&env, &governance_id);
     client.initialize(&admin, &token_id, &registry_id);
+
+    // Transfer registry admin to the governance contract
+    mock_reg_client.transfer_admin(&admin, &governance_id);
 
     // Fund eligible proposer with exactly the proposal threshold
     let eligible_proposer = Address::generate(&env);
@@ -1135,6 +1257,169 @@ proptest! {
         let evaluated_status = client.evaluate_proposal(&proposal_id);
         prop_assert_eq!(evaluated_status, expected_status);
     }
+}
+
+#[test]
+fn test_execute_proposal_against_registry_end_to_end() {
+    let TestContext {
+        env,
+        client,
+        token_client,
+        early_keepers,
+        eligible_proposer,
+        registry_id,
+        ..
+    } = setup();
+
+    let reg_client = MockRegistryClient::new(&env, &registry_id);
+    assert_eq!(reg_client.get_fee_bps(), 300);
+    assert_eq!(reg_client.min_reward(), 0);
+    assert_eq!(reg_client.reputation_floor(), 0);
+    assert_eq!(reg_client.is_paused(), false);
+
+    env.ledger().set_sequence_number(100);
+
+    let voter = Address::generate(&env);
+    token_client.transfer(&early_keepers, &voter, &(5_000_000 * ONE_TOKEN));
+
+    // 1. Propose SetFeeBps(500)
+    let action_fee = GovernableAction::SetFeeBps(500);
+    let prop_id_1 = client.create_proposal(&eligible_proposer, &action_fee);
+    client.vote(&voter, &prop_id_1, &VoteChoice::For);
+
+    let prop_1 = client.get_proposal(&prop_id_1);
+    env.ledger().set_sequence_number((prop_1.voting_end as u32) + 1);
+
+    // Queue proposal
+    let eta_1 = client.queue_proposal(&prop_id_1);
+
+    // Cannot execute before timelock
+    assert_eq!(
+        client.try_execute_proposal(&prop_id_1),
+        Err(Ok(GovernanceError::TimelockNotElapsed))
+    );
+
+    // Advance to eta_1 and execute
+    env.ledger().set_sequence_number(eta_1 as u32);
+    client.execute_proposal(&prop_id_1);
+
+    // Confirm registry fee_bps actually changed
+    assert_eq!(reg_client.get_fee_bps(), 500);
+
+    // Executed proposal cannot be executed again
+    assert_eq!(
+        client.try_execute_proposal(&prop_id_1),
+        Err(Ok(GovernanceError::ProposalAlreadyExecuted))
+    );
+
+    // 2. Propose SetMinReward(25_000)
+    let action_min = GovernableAction::SetMinReward(25_000);
+    let prop_id_2 = client.create_proposal(&eligible_proposer, &action_min);
+    client.vote(&voter, &prop_id_2, &VoteChoice::For);
+
+    let prop_2 = client.get_proposal(&prop_id_2);
+    env.ledger().set_sequence_number((prop_2.voting_end as u32) + 1);
+    let eta_2 = client.queue_proposal(&prop_id_2);
+    env.ledger().set_sequence_number(eta_2 as u32);
+    client.execute_proposal(&prop_id_2);
+
+    // Confirm registry min_reward actually changed
+    assert_eq!(reg_client.min_reward(), 25_000);
+
+    // 3. Propose PauseRegistry
+    let action_pause = GovernableAction::PauseRegistry;
+    let prop_id_3 = client.create_proposal(&eligible_proposer, &action_pause);
+    client.vote(&voter, &prop_id_3, &VoteChoice::For);
+
+    let prop_3 = client.get_proposal(&prop_id_3);
+    env.ledger().set_sequence_number((prop_3.voting_end as u32) + 1);
+    let eta_3 = client.queue_proposal(&prop_id_3);
+    env.ledger().set_sequence_number(eta_3 as u32);
+    client.execute_proposal(&prop_id_3);
+
+    // Confirm registry is paused
+    assert_eq!(reg_client.is_paused(), true);
+
+    // 4. Propose UnpauseRegistry
+    let action_unpause = GovernableAction::UnpauseRegistry;
+    let prop_id_4 = client.create_proposal(&eligible_proposer, &action_unpause);
+    client.vote(&voter, &prop_id_4, &VoteChoice::For);
+
+    let prop_4 = client.get_proposal(&prop_id_4);
+    env.ledger().set_sequence_number((prop_4.voting_end as u32) + 1);
+    let eta_4 = client.queue_proposal(&prop_id_4);
+    env.ledger().set_sequence_number(eta_4 as u32);
+    client.execute_proposal(&prop_id_4);
+
+    // Confirm registry is unpaused
+    assert_eq!(reg_client.is_paused(), false);
+
+    // 5. Propose SetReputationFloor(450)
+    let action_rep = GovernableAction::SetReputationFloor(450);
+    let prop_id_5 = client.create_proposal(&eligible_proposer, &action_rep);
+    client.vote(&voter, &prop_id_5, &VoteChoice::For);
+
+    let prop_5 = client.get_proposal(&prop_id_5);
+    env.ledger().set_sequence_number((prop_5.voting_end as u32) + 1);
+    let eta_5 = client.queue_proposal(&prop_id_5);
+    env.ledger().set_sequence_number(eta_5 as u32);
+    client.execute_proposal(&prop_id_5);
+
+    // Confirm registry reputation_floor changed
+    assert_eq!(reg_client.reputation_floor(), 450);
+
+    // 6. Propose TransferRegistryAdmin to a new address
+    let new_reg_admin = Address::generate(&env);
+    let action_admin = GovernableAction::TransferRegistryAdmin(new_reg_admin.clone());
+    let prop_id_6 = client.create_proposal(&eligible_proposer, &action_admin);
+    client.vote(&voter, &prop_id_6, &VoteChoice::For);
+
+    let prop_6 = client.get_proposal(&prop_id_6);
+    env.ledger().set_sequence_number((prop_6.voting_end as u32) + 1);
+    let eta_6 = client.queue_proposal(&prop_id_6);
+    env.ledger().set_sequence_number(eta_6 as u32);
+    client.execute_proposal(&prop_id_6);
+
+    // Confirm registry admin changed
+    assert_eq!(reg_client.admin(), Some(new_reg_admin));
+}
+
+#[test]
+fn test_execute_defeated_or_unqueued_proposal_rejected() {
+    let TestContext {
+        env,
+        client,
+        token_client,
+        early_keepers,
+        eligible_proposer,
+        ..
+    } = setup();
+
+    env.ledger().set_sequence_number(100);
+
+    let voter_against = Address::generate(&env);
+    token_client.transfer(&early_keepers, &voter_against, &(5_000_000 * ONE_TOKEN));
+
+    let action = GovernableAction::SetFeeBps(600);
+    let prop_id = client.create_proposal(&eligible_proposer, &action);
+    client.vote(&voter_against, &prop_id, &VoteChoice::Against);
+
+    // Unqueued active proposal execution rejected
+    assert_eq!(
+        client.try_execute_proposal(&prop_id),
+        Err(Ok(GovernanceError::ProposalNotQueued))
+    );
+
+    // Past voting end
+    let prop = client.get_proposal(&prop_id);
+    env.ledger().set_sequence_number((prop.voting_end as u32) + 1);
+    client.evaluate_proposal(&prop_id);
+
+    // Defeated proposal execution rejected
+    assert_eq!(
+        client.try_execute_proposal(&prop_id),
+        Err(Ok(GovernanceError::ProposalNotQueued))
+    );
 }
 
 
