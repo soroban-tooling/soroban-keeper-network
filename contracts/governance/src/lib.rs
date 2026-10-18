@@ -650,6 +650,14 @@ impl GovernanceContract {
         }
     }
 
+    /// Read-only alias for `get_proposal_status` to query the current lifecycle state.
+    pub fn get_proposal_state(
+        env: Env,
+        proposal_id: u64,
+    ) -> Result<ProposalStatus, GovernanceError> {
+        Self::get_proposal_status(env, proposal_id)
+    }
+
     /// Returns the total token supply of KPRS.
     pub fn total_token_supply(env: Env) -> i128 {
         env.storage()

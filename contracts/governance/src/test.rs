@@ -855,5 +855,124 @@ fn test_cannot_execute_proposal_twice() {
     assert_eq!(res, Err(Ok(GovernanceError::ProposalAlreadyExecuted)));
 }
 
+#[test]
+fn test_read_only_views_at_all_lifecycle_stages() {
+    let TestContext {
+        env,
+        client,
+        token_client,
+        early_keepers,
+        eligible_proposer,
+        ..
+    } = setup();
+
+    env.ledger().set_sequence_number(100);
+
+    let voter_for = Address::generate(&env);
+    let voter_against = Address::generate(&env);
+    let voter_abstain = Address::generate(&env);
+
+    // Quorum is 4% of 100M = 4M KPRS.
+    // Give voter_for 3M, voter_against 1M, voter_abstain 1M -> total 5M KPRS (quorum met, for > against).
+    token_client.transfer(&early_keepers, &voter_for, &(3_000_000 * ONE_TOKEN));
+    token_client.transfer(&early_keepers, &voter_against, &(1_000_000 * ONE_TOKEN));
+    token_client.transfer(&early_keepers, &voter_abstain, &(1_000_000 * ONE_TOKEN));
+
+    let action = GovernableAction::SetFeeBps(250);
+    let proposal_id = client.create_proposal(&eligible_proposer, &action);
+
+    // 1. Initial stage: Active, no votes cast
+    let prop = client.get_proposal(&proposal_id);
+    assert_eq!(prop.id, proposal_id);
+    assert_eq!(prop.proposer, eligible_proposer);
+    assert_eq!(prop.action, action);
+    assert_eq!(prop.status, ProposalStatus::Active);
+    assert_eq!(client.get_proposal_status(&proposal_id), ProposalStatus::Active);
+    assert_eq!(client.get_proposal_state(&proposal_id), ProposalStatus::Active);
+
+    assert_eq!(client.get_tallies(&proposal_id), (0, 0, 0));
+    assert_eq!(client.is_quorum_met(&proposal_id), false);
+    assert_eq!(client.is_passing_threshold_met(&proposal_id), false);
+    assert_eq!(client.is_executable(&proposal_id), false);
+    assert_eq!(client.try_get_remaining_delay(&proposal_id), Err(Ok(GovernanceError::ProposalNotQueued)));
+
+    // 2. Voting in progress: vote For, Against, Abstain
+    client.vote(&voter_for, &proposal_id, &VoteChoice::For);
+    assert_eq!(client.has_voted(&proposal_id, &voter_for), true);
+    assert_eq!(client.has_voted(&proposal_id, &voter_against), false);
+    assert_eq!(
+        client.get_vote(&proposal_id, &voter_for),
+        Some(VoteRecord { choice: VoteChoice::For, weight: 3_000_000 * ONE_TOKEN })
+    );
+    assert_eq!(client.is_passing_threshold_met(&proposal_id), true);
+    // Quorum (4M) not met with only 3M:
+    assert_eq!(client.is_quorum_met(&proposal_id), false);
+
+    client.vote(&voter_against, &proposal_id, &VoteChoice::Against);
+    client.vote(&voter_abstain, &proposal_id, &VoteChoice::Abstain);
+
+    let tallies = client.get_tallies(&proposal_id);
+    assert_eq!(tallies, (3_000_000 * ONE_TOKEN, 1_000_000 * ONE_TOKEN, 1_000_000 * ONE_TOKEN));
+    assert_eq!(client.is_quorum_met(&proposal_id), true);
+    assert_eq!(client.is_passing_threshold_met(&proposal_id), true);
+    assert_eq!(client.get_proposal_status(&proposal_id), ProposalStatus::Active);
+    assert_eq!(client.get_proposal_state(&proposal_id), ProposalStatus::Active);
+
+    // 3. Voting period ended (passed but not yet queued)
+    env.ledger().set_sequence_number((prop.voting_end as u32) + 1);
+    assert_eq!(client.get_proposal_status(&proposal_id), ProposalStatus::Passed);
+    assert_eq!(client.get_proposal_state(&proposal_id), ProposalStatus::Passed);
+    assert_eq!(client.is_executable(&proposal_id), false);
+
+    // 4. Queued stage
+    let eta = client.queue_proposal(&proposal_id);
+    let prop_queued = client.get_proposal(&proposal_id);
+    assert_eq!(prop_queued.status, ProposalStatus::Queued);
+    assert_eq!(prop_queued.eta, eta);
+    assert_eq!(client.get_proposal_status(&proposal_id), ProposalStatus::Queued);
+    assert_eq!(client.get_proposal_state(&proposal_id), ProposalStatus::Queued);
+    assert_eq!(client.is_executable(&proposal_id), false);
+
+    let remaining = client.get_remaining_delay(&proposal_id);
+    assert_eq!(remaining, eta - ((prop.voting_end as u64) + 1));
+
+    // 5. Timelock elapsed: executable
+    env.ledger().set_sequence_number(eta as u32);
+    assert_eq!(client.get_remaining_delay(&proposal_id), 0);
+    assert_eq!(client.is_executable(&proposal_id), true);
+    assert_eq!(client.get_proposal_status(&proposal_id), ProposalStatus::Queued);
+    assert_eq!(client.get_proposal_state(&proposal_id), ProposalStatus::Queued);
+
+    // 6. Executed stage
+    client.execute_proposal(&proposal_id);
+    let prop_executed = client.get_proposal(&proposal_id);
+    assert_eq!(prop_executed.status, ProposalStatus::Executed);
+    assert_eq!(client.get_proposal_status(&proposal_id), ProposalStatus::Executed);
+    assert_eq!(client.get_proposal_state(&proposal_id), ProposalStatus::Executed);
+    assert_eq!(client.is_executable(&proposal_id), false);
+    assert_eq!(client.try_get_remaining_delay(&proposal_id), Err(Ok(GovernanceError::ProposalNotQueued)));
+
+    // 7. Failed/Defeated proposal lifecycle
+    let action_fail = GovernableAction::SetFeeBps(300);
+    let prop_fail_id = client.create_proposal(&eligible_proposer, &action_fail);
+    let prop_fail = client.get_proposal(&prop_fail_id);
+
+    // Vote against with 5M KPRS
+    client.vote(&voter_for, &prop_fail_id, &VoteChoice::Against);
+    client.vote(&voter_against, &prop_fail_id, &VoteChoice::Against);
+    client.vote(&voter_abstain, &prop_fail_id, &VoteChoice::Against);
+
+    env.ledger().set_sequence_number((prop_fail.voting_end as u32) + 1);
+    assert_eq!(client.is_quorum_met(&prop_fail_id), true);
+    assert_eq!(client.is_passing_threshold_met(&prop_fail_id), false);
+    assert_eq!(client.get_proposal_status(&prop_fail_id), ProposalStatus::Defeated);
+    assert_eq!(client.get_proposal_state(&prop_fail_id), ProposalStatus::Defeated);
+
+    client.evaluate_proposal(&prop_fail_id);
+    assert_eq!(client.get_proposal(&prop_fail_id).status, ProposalStatus::Defeated);
+    assert_eq!(client.get_proposal_status(&prop_fail_id), ProposalStatus::Defeated);
+    assert_eq!(client.get_proposal_state(&prop_fail_id), ProposalStatus::Defeated);
+}
+
 
 
