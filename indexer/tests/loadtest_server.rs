@@ -96,14 +96,14 @@ async fn serve_seeded_api_for_loadtest() {
     }
 
     let app = router(
-        ApiState {
+        ApiState::new(
             ingestor,
             // The TTL under test. Set LOADTEST_CACHE_TTL_SECS=0 to measure the
             // uncached path for comparison.
-            caches: AggregateCaches::from_secs(env_or("LOADTEST_CACHE_TTL_SECS", 10)),
-            progress: keeper_indexer::IngestionProgress::new(),
-            max_healthy_lag_ledgers: 60,
-        },
+            AggregateCaches::from_secs(env_or("LOADTEST_CACHE_TTL_SECS", 10)),
+            keeper_indexer::IngestionProgress::new(),
+            60,
+        ),
         // A load test measures the server itself, not its rate limiter.
         u32::MAX,
         u32::MAX,

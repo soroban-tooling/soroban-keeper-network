@@ -401,12 +401,12 @@ mod tests {
         max_healthy_lag_ledgers: u32,
     ) -> axum::Router {
         router(
-            ApiState {
-                ingestor: Ingestor::new(store),
-                caches: AggregateCaches::from_secs(crate::cache::DEFAULT_TTL_SECS),
+            ApiState::new(
+                Ingestor::new(store),
+                AggregateCaches::from_secs(crate::cache::DEFAULT_TTL_SECS),
                 progress,
                 max_healthy_lag_ledgers,
-            },
+            ),
             1_000,
             1_000,
         )

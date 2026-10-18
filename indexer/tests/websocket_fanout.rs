@@ -24,12 +24,12 @@ async fn start_server() -> (String, Ingestor) {
     let store = Store::connect("sqlite::memory:").await.expect("store");
     let ingestor = Ingestor::new(store);
     let app = router(
-        ApiState {
-            ingestor: ingestor.clone(),
-            caches: AggregateCaches::from_secs(0),
-            progress: keeper_indexer::IngestionProgress::new(),
-            max_healthy_lag_ledgers: 60,
-        },
+        ApiState::new(
+            ingestor.clone(),
+            AggregateCaches::from_secs(0),
+            keeper_indexer::IngestionProgress::new(),
+            60,
+        ),
         10_000,
         10_000,
     );

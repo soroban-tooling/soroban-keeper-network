@@ -38,6 +38,42 @@ pub struct ApiState {
     pub progress: IngestionProgress,
     /// Lag, in ledgers, past which /health reports unhealthy (issue #359).
     pub max_healthy_lag_ledgers: u32,
+    /// Store and verifier for API keys.
+    pub api_keys: Arc<auth::ApiKeys>,
+}
+
+impl ApiState {
+    pub fn new(
+        ingestor: Ingestor,
+        caches: AggregateCaches,
+        progress: IngestionProgress,
+        max_healthy_lag_ledgers: u32,
+    ) -> Self {
+        let api_keys = Arc::new(auth::ApiKeys::new(ingestor.store().pool().clone()));
+        Self {
+            ingestor,
+            caches,
+            progress,
+            max_healthy_lag_ledgers,
+            api_keys,
+        }
+    }
+
+    pub fn with_api_keys(
+        ingestor: Ingestor,
+        caches: AggregateCaches,
+        progress: IngestionProgress,
+        max_healthy_lag_ledgers: u32,
+        api_keys: Arc<auth::ApiKeys>,
+    ) -> Self {
+        Self {
+            ingestor,
+            caches,
+            progress,
+            max_healthy_lag_ledgers,
+            api_keys,
+        }
+    }
 }
 
 /// The OpenAPI document, derived from the same handler and response types the
@@ -83,11 +119,8 @@ pub struct ApiState {
 )]
 pub struct ApiDoc;
 
-/// Build the API router, rate limited per client (by `X-API-Key`, else IP)
-/// on both REST routes and the WebSocket upgrade.
-pub fn router(state: ApiState, rate_limit_per_second: u32, rate_limit_burst: u32) -> Router {
-    let limiter = Arc::new(RateLimiter::new(rate_limit_per_second, rate_limit_burst));
-
+/// Build the API router with a pre-configured rate limiter.
+pub fn router_with_limiter(state: ApiState, limiter: Arc<RateLimiter>) -> Router {
     Router::new()
         .nest("/v1", rest::routes())
         .route("/v1/stream", axum::routing::get(websocket::subscribe))
@@ -96,6 +129,18 @@ pub fn router(state: ApiState, rate_limit_per_second: u32, rate_limit_burst: u32
             limiter,
             rate_limit::enforce,
         ))
+}
+
+/// Build the API router, rate limited per client (by `X-API-Key`, else IP)
+/// on both REST routes and the WebSocket upgrade.
+pub fn router(state: ApiState, rate_limit_per_second: u32, rate_limit_burst: u32) -> Router {
+    let limiter = Arc::new(RateLimiter::new(
+        rate_limit_per_second,
+        rate_limit_burst,
+        state.api_keys.clone(),
+    ));
+
+    router_with_limiter(state, limiter)
 }
 
 /// Render the OpenAPI document as YAML.
