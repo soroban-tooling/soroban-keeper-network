@@ -1543,6 +1543,7 @@ name = "keeper-governance"
 version = "0.1.0"
 dependencies = [
  "governance-token",
+ "proptest",
  "soroban-sdk",
 ]
 

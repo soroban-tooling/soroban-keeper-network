@@ -1049,5 +1049,93 @@ fn test_proposal_cancellation_by_proposer_and_admin() {
     assert_eq!(err_cancel_exec, Err(Ok(GovernanceError::CannotCancelExecuted)));
 }
 
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(50))]
+
+    #[test]
+    fn test_property_governance_tallying_and_quorum_evaluation(
+        // Generate up to 8 voters with varying voting powers (100 to 2,000,000 tokens)
+        // and vote choice (0 = Against, 1 = For, 2 = Abstain, 3 = DidNotVote)
+        voter_specs in prop::collection::vec((100i64..2_000_000i64, 0u8..4u8), 1..8)
+    ) {
+        let TestContext {
+            env,
+            client,
+            token_client,
+            early_keepers,
+            eligible_proposer,
+            ..
+        } = setup();
+
+        env.ledger().set_sequence_number(100);
+
+        let action = GovernableAction::SetFeeBps(100);
+        let proposal_id = client.create_proposal(&eligible_proposer, &action);
+
+        let mut ref_for: i128 = 0;
+        let mut ref_against: i128 = 0;
+        let mut ref_abstain: i128 = 0;
+
+        for (amount, choice_code) in voter_specs {
+            let voter = Address::generate(&env);
+            let power = (amount as i128) * ONE_TOKEN;
+            token_client.transfer(&early_keepers, &voter, &power);
+
+            let choice = match choice_code {
+                0 => {
+                    ref_against += power;
+                    Some(VoteChoice::Against)
+                }
+                1 => {
+                    ref_for += power;
+                    Some(VoteChoice::For)
+                }
+                2 => {
+                    ref_abstain += power;
+                    Some(VoteChoice::Abstain)
+                }
+                _ => None, // Did not vote
+            };
+
+            if let Some(c) = choice {
+                client.vote(&voter, &proposal_id, &c);
+            }
+        }
+
+        // Verify tallies match reference computation
+        let (actual_for, actual_against, actual_abstain) = client.get_tallies(&proposal_id);
+        prop_assert_eq!(actual_for, ref_for);
+        prop_assert_eq!(actual_against, ref_against);
+        prop_assert_eq!(actual_abstain, ref_abstain);
+
+        // Reference quorum and passing calculation
+        let total_participating = ref_for + ref_against + ref_abstain;
+        let quorum_threshold = client.quorum_threshold(); // 4% of 100M = 4M KPRS
+        let ref_quorum_met = total_participating >= quorum_threshold;
+        let ref_passing_met = ref_for > ref_against;
+
+        prop_assert_eq!(client.is_quorum_met(&proposal_id), ref_quorum_met);
+        prop_assert_eq!(client.is_passing_threshold_met(&proposal_id), ref_passing_met);
+
+        // Advance past voting period to evaluate
+        let prop = client.get_proposal(&proposal_id);
+        env.ledger().set_sequence_number((prop.voting_end as u32) + 1);
+
+        let expected_status = if ref_quorum_met && ref_passing_met {
+            ProposalStatus::Passed
+        } else {
+            ProposalStatus::Defeated
+        };
+
+        prop_assert_eq!(client.get_proposal_status(&proposal_id), expected_status.clone());
+        prop_assert_eq!(client.get_proposal_state(&proposal_id), expected_status.clone());
+
+        let evaluated_status = client.evaluate_proposal(&proposal_id);
+        prop_assert_eq!(evaluated_status, expected_status);
+    }
+}
+
 
 
