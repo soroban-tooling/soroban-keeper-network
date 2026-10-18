@@ -25,7 +25,13 @@ async function stubIndexer({ delayMs = 0 } = {}) {
     const respond = () => {
       res.writeHead(200, { "content-type": "application/json" });
       if (req.url?.startsWith("/v1/health")) {
-        res.end(JSON.stringify({ status: "ok", cache: { hits: 9, misses: 1 } }));
+        res.end(
+          JSON.stringify({
+            status: "ok",
+            cache: { hits: 9, misses: 1 },
+            ws: { active_connections: 0, peak_connections: 5, rejected_connections: 2 },
+          }),
+        );
       } else if (req.url?.startsWith("/v1/leaderboard")) {
         res.end(JSON.stringify({ rank_by: "executions", since: null, entries: [] }));
       } else {
@@ -98,6 +104,33 @@ test("surfaces the cache counters the API reports", async () => {
   try {
     const report = await runHarness(stub.url);
     assert.deepEqual(report.cache, { hits: 9, misses: 1 });
+  } finally {
+    await stub.close();
+  }
+});
+
+test("surfaces the websocket counters the API reports", async () => {
+  const stub = await stubIndexer();
+  try {
+    const report = await runHarness(stub.url);
+    assert.deepEqual(report.ws, {
+      active_connections: 0,
+      peak_connections: 5,
+      rejected_connections: 2,
+    });
+  } finally {
+    await stub.close();
+  }
+});
+
+test("records rejected websocket connections when handshake fails", async () => {
+  const stub = await stubIndexer();
+  try {
+    const report = await runHarness(stub.url, ["--subscribers", "3"]);
+    assert.equal(report.websocket.attempted, 3);
+    assert.equal(report.websocket.connected, 0);
+    assert.equal(report.websocket.rejected, 3);
+    assert.equal(report.websocket.held_to_end, 0);
   } finally {
     await stub.close();
   }

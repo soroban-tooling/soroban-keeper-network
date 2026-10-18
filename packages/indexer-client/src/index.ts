@@ -53,4 +53,5 @@ export type {
   TaskListResponse,
   TaskState,
   TaskStatus,
+  WsMetricsSnapshot,
 } from "./types.js";

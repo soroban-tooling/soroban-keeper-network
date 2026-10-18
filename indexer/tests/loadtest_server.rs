@@ -103,6 +103,7 @@ async fn serve_seeded_api_for_loadtest() {
             caches: AggregateCaches::from_secs(env_or("LOADTEST_CACHE_TTL_SECS", 10)),
             progress: keeper_indexer::IngestionProgress::new(),
             max_healthy_lag_ledgers: 60,
+            ws_manager: keeper_indexer::api::websocket::WsSessionManager::default(),
         },
         // A load test measures the server itself, not its rate limiter.
         u32::MAX,

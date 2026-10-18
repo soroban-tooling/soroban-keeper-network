@@ -38,6 +38,8 @@ pub struct ApiState {
     pub progress: IngestionProgress,
     /// Lag, in ledgers, past which /health reports unhealthy (issue #359).
     pub max_healthy_lag_ledgers: u32,
+    /// Concurrency and replay manager for live WebSocket subscriptions.
+    pub ws_manager: websocket::WsSessionManager,
 }
 
 /// The OpenAPI document, derived from the same handler and response types the
@@ -78,6 +80,7 @@ pub struct ApiState {
         types::HealthResponse,
         types::TaskDetail,
         types::TaskListResponse,
+        types::WsMetricsSnapshot,
     )),
     tags((name = "indexer", description = "Indexed registry data"))
 )]

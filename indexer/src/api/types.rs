@@ -28,6 +28,8 @@ impl ApiError {
     }
 }
 
+pub use crate::api::websocket::WsMetricsSnapshot;
+
 /// Service liveness and how far ingestion has reached.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HealthResponse {
@@ -47,6 +49,9 @@ pub struct HealthResponse {
     /// False once the lag exceeds the threshold: the difference between a
     /// stalled indexer and a healthy but quiet one.
     pub healthy: bool,
+    /// Live WebSocket session and replay metrics for operators.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ws: Option<WsMetricsSnapshot>,
 }
 
 /// A task's current state together with the events that produced it.

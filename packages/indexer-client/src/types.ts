@@ -23,6 +23,7 @@ export type TaskDetail = components["schemas"]["TaskDetail"];
 export type TaskListResponse = components["schemas"]["TaskListResponse"];
 export type TaskState = components["schemas"]["TaskState"];
 export type TaskStatus = components["schemas"]["TaskStatus"];
+export type WsMetricsSnapshot = components["schemas"]["WsMetricsSnapshot"];
 
 /**
  * What the server sends over `/v1/stream` (`indexer/src/api/websocket.rs`'s

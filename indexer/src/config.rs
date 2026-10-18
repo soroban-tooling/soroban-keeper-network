@@ -45,6 +45,18 @@ pub struct Config {
     /// Ingestion lag, in ledgers, past which /health reports unhealthy
     /// (issue #359). Roughly 5 minutes at one ledger every ~5 seconds.
     pub max_healthy_lag_ledgers: u32,
+    /// Maximum concurrent WebSocket connections globally across all clients.
+    pub ws_max_global_connections: usize,
+    /// Maximum concurrent WebSocket connections a single client may hold open.
+    pub ws_max_client_connections: usize,
+    /// Maximum events a single WebSocket reconnection can replay before being capped.
+    pub ws_replay_max_events: usize,
+    /// Maximum seconds a single WebSocket reconnection replay can run before being capped.
+    pub ws_replay_timeout_secs: u64,
+    /// Seconds of inactivity after which an idle/unresponsive WebSocket is disconnected.
+    pub ws_idle_timeout_secs: u64,
+    /// Seconds between server-sent heartbeat pings to detect dead WebSocket peers.
+    pub ws_heartbeat_interval_secs: u64,
 }
 
 /// A configuration value that is missing or unusable.
@@ -87,6 +99,12 @@ const DEFAULT_RATE_LIMIT_BURST: u32 = 40;
 /// Default maximum seconds a shutdown waits for an in-flight pass to drain.
 const DEFAULT_SHUTDOWN_DRAIN_SECS: u64 = 30;
 const DEFAULT_MAX_HEALTHY_LAG_LEDGERS: u32 = 60;
+const DEFAULT_WS_MAX_GLOBAL_CONNECTIONS: usize = 1_000;
+const DEFAULT_WS_MAX_CLIENT_CONNECTIONS: usize = 100;
+const DEFAULT_WS_REPLAY_MAX_EVENTS: usize = 1_000;
+const DEFAULT_WS_REPLAY_TIMEOUT_SECS: u64 = 15;
+const DEFAULT_WS_IDLE_TIMEOUT_SECS: u64 = 60;
+const DEFAULT_WS_HEARTBEAT_INTERVAL_SECS: u64 = 20;
 
 impl Config {
     /// Read and validate configuration from the process environment.
@@ -207,11 +225,70 @@ impl Config {
             &mut problems,
         );
 
+        let ws_max_global_connections = optional_parsed(
+            &get,
+            "INDEXER_WS_MAX_GLOBAL_CONNECTIONS",
+            DEFAULT_WS_MAX_GLOBAL_CONNECTIONS,
+            &mut problems,
+        );
+        let ws_max_client_connections = optional_parsed(
+            &get,
+            "INDEXER_WS_MAX_CLIENT_CONNECTIONS",
+            DEFAULT_WS_MAX_CLIENT_CONNECTIONS,
+            &mut problems,
+        );
+        let ws_replay_max_events = optional_parsed(
+            &get,
+            "INDEXER_WS_REPLAY_MAX_EVENTS",
+            DEFAULT_WS_REPLAY_MAX_EVENTS,
+            &mut problems,
+        );
+        let ws_replay_timeout_secs = optional_parsed(
+            &get,
+            "INDEXER_WS_REPLAY_TIMEOUT_SECS",
+            DEFAULT_WS_REPLAY_TIMEOUT_SECS,
+            &mut problems,
+        );
+        let ws_idle_timeout_secs = optional_parsed(
+            &get,
+            "INDEXER_WS_IDLE_TIMEOUT_SECS",
+            DEFAULT_WS_IDLE_TIMEOUT_SECS,
+            &mut problems,
+        );
+        let ws_heartbeat_interval_secs = optional_parsed(
+            &get,
+            "INDEXER_WS_HEARTBEAT_INTERVAL_SECS",
+            DEFAULT_WS_HEARTBEAT_INTERVAL_SECS,
+            &mut problems,
+        );
+
         if max_healthy_lag_ledgers == 0 {
             // Zero would flag a fully caught-up indexer as unhealthy the
             // moment one new ledger closes - a threshold that can never be
             // satisfied is a misconfiguration, not strictness.
             problems.push("INDEXER_MAX_HEALTHY_LAG_LEDGERS must be greater than zero".to_string());
+        }
+
+        if ws_max_global_connections == 0 {
+            problems
+                .push("INDEXER_WS_MAX_GLOBAL_CONNECTIONS must be greater than zero".to_string());
+        }
+        if ws_max_client_connections == 0 {
+            problems
+                .push("INDEXER_WS_MAX_CLIENT_CONNECTIONS must be greater than zero".to_string());
+        }
+        if ws_replay_max_events == 0 {
+            problems.push("INDEXER_WS_REPLAY_MAX_EVENTS must be greater than zero".to_string());
+        }
+        if ws_replay_timeout_secs == 0 {
+            problems.push("INDEXER_WS_REPLAY_TIMEOUT_SECS must be greater than zero".to_string());
+        }
+        if ws_idle_timeout_secs == 0 {
+            problems.push("INDEXER_WS_IDLE_TIMEOUT_SECS must be greater than zero".to_string());
+        }
+        if ws_heartbeat_interval_secs == 0 {
+            problems
+                .push("INDEXER_WS_HEARTBEAT_INTERVAL_SECS must be greater than zero".to_string());
         }
 
         if problems.is_empty() {
@@ -228,9 +305,26 @@ impl Config {
                 rate_limit_burst,
                 shutdown_drain_secs,
                 max_healthy_lag_ledgers,
+                ws_max_global_connections,
+                ws_max_client_connections,
+                ws_replay_max_events,
+                ws_replay_timeout_secs,
+                ws_idle_timeout_secs,
+                ws_heartbeat_interval_secs,
             })
         } else {
             Err(ConfigError { problems })
+        }
+    }
+
+    pub fn ws_config(&self) -> crate::api::websocket::WsConfig {
+        crate::api::websocket::WsConfig {
+            max_global_connections: self.ws_max_global_connections,
+            max_client_connections: self.ws_max_client_connections,
+            max_replay_events: self.ws_replay_max_events,
+            max_replay_duration: std::time::Duration::from_secs(self.ws_replay_timeout_secs),
+            idle_timeout: std::time::Duration::from_secs(self.ws_idle_timeout_secs),
+            heartbeat_interval: std::time::Duration::from_secs(self.ws_heartbeat_interval_secs),
         }
     }
 }
@@ -293,6 +387,24 @@ mod tests {
         assert_eq!(config.rate_limit_per_second, DEFAULT_RATE_LIMIT_PER_SECOND);
         assert_eq!(config.rate_limit_burst, DEFAULT_RATE_LIMIT_BURST);
         assert_eq!(config.shutdown_drain_secs, DEFAULT_SHUTDOWN_DRAIN_SECS);
+        assert_eq!(
+            config.ws_max_global_connections,
+            DEFAULT_WS_MAX_GLOBAL_CONNECTIONS
+        );
+        assert_eq!(
+            config.ws_max_client_connections,
+            DEFAULT_WS_MAX_CLIENT_CONNECTIONS
+        );
+        assert_eq!(config.ws_replay_max_events, DEFAULT_WS_REPLAY_MAX_EVENTS);
+        assert_eq!(
+            config.ws_replay_timeout_secs,
+            DEFAULT_WS_REPLAY_TIMEOUT_SECS
+        );
+        assert_eq!(config.ws_idle_timeout_secs, DEFAULT_WS_IDLE_TIMEOUT_SECS);
+        assert_eq!(
+            config.ws_heartbeat_interval_secs,
+            DEFAULT_WS_HEARTBEAT_INTERVAL_SECS
+        );
     }
 
     #[test]

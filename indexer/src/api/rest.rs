@@ -95,6 +95,7 @@ pub async fn health(State(state): State<ApiState>) -> Result<Json<HealthResponse
         ingestion_lag_ledgers: lag,
         max_healthy_lag_ledgers: state.max_healthy_lag_ledgers,
         healthy,
+        ws: Some(state.ws_manager.metrics_snapshot()),
     }))
 }
 
@@ -406,6 +407,7 @@ mod tests {
                 caches: AggregateCaches::from_secs(crate::cache::DEFAULT_TTL_SECS),
                 progress,
                 max_healthy_lag_ledgers,
+                ws_manager: crate::api::websocket::WsSessionManager::default(),
             },
             1_000,
             1_000,

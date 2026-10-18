@@ -624,6 +624,9 @@ components:
           minimum: 0
         status:
           type: string
+        ws:
+          $ref: '#/components/schemas/WsMetricsSnapshot'
+          description: Live WebSocket session and replay metrics for operators.
     IndexedEvent:
       type: object
       description: |-
@@ -856,6 +859,50 @@ components:
       - executed
       - cancelled
       - expired
+    WsMetricsSnapshot:
+      type: object
+      description: Live WebSocket session and replay metrics for operators.
+      required:
+      - active_connections
+      - total_connections
+      - rejected_global
+      - rejected_client
+      - replays_completed
+      - replays_budget_exhausted
+      - idle_disconnects
+      - slow_consumer_disconnects
+      properties:
+        active_connections:
+          type: integer
+          minimum: 0
+        total_connections:
+          type: integer
+          format: int64
+          minimum: 0
+        rejected_global:
+          type: integer
+          format: int64
+          minimum: 0
+        rejected_client:
+          type: integer
+          format: int64
+          minimum: 0
+        replays_completed:
+          type: integer
+          format: int64
+          minimum: 0
+        replays_budget_exhausted:
+          type: integer
+          format: int64
+          minimum: 0
+        idle_disconnects:
+          type: integer
+          format: int64
+          minimum: 0
+        slow_consumer_disconnects:
+          type: integer
+          format: int64
+          minimum: 0
 tags:
 - name: indexer
   description: Indexed registry data

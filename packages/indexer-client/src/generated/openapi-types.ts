@@ -322,6 +322,8 @@ export interface components {
              */
             max_healthy_lag_ledgers: number;
             status: string;
+            /** @description Live WebSocket session and replay metrics for operators. */
+            ws?: components["schemas"]["WsMetricsSnapshot"];
         };
         /**
          * @description One ingested event, with the ledger context needed to order and page it.
@@ -464,6 +466,24 @@ export interface components {
          * @enum {string}
          */
         TaskStatus: "pending" | "claimed" | "executed" | "cancelled" | "expired";
+        /** @description Live WebSocket session and replay metrics for operators. */
+        WsMetricsSnapshot: {
+            active_connections: number;
+            /** Format: int64 */
+            total_connections: number;
+            /** Format: int64 */
+            rejected_global: number;
+            /** Format: int64 */
+            rejected_client: number;
+            /** Format: int64 */
+            replays_completed: number;
+            /** Format: int64 */
+            replays_budget_exhausted: number;
+            /** Format: int64 */
+            idle_disconnects: number;
+            /** Format: int64 */
+            slow_consumer_disconnects: number;
+        };
     };
     responses: never;
     parameters: never;

@@ -19,29 +19,44 @@ use tokio_tungstenite::tungstenite::Message;
 /// Number of concurrent subscribers the fan-out test attaches.
 const SUBSCRIBERS: usize = 50;
 
-/// Start the API on an ephemeral port, returning its address and the ingestor.
-async fn start_server() -> (String, Ingestor) {
+/// Start the API on an ephemeral port with a custom WebSocket configuration.
+async fn start_server_with_ws_config(
+    ws_config: keeper_indexer::api::websocket::WsConfig,
+) -> (String, std::net::SocketAddr, Ingestor, ApiState) {
     let store = Store::connect("sqlite::memory:").await.expect("store");
     let ingestor = Ingestor::new(store);
-    let app = router(
-        ApiState {
-            ingestor: ingestor.clone(),
-            caches: AggregateCaches::from_secs(0),
-            progress: keeper_indexer::IngestionProgress::new(),
-            max_healthy_lag_ledgers: 60,
-        },
-        10_000,
-        10_000,
-    );
+    let state = ApiState {
+        ingestor: ingestor.clone(),
+        caches: AggregateCaches::from_secs(0),
+        progress: keeper_indexer::IngestionProgress::new(),
+        max_healthy_lag_ledgers: 60,
+        ws_manager: keeper_indexer::api::websocket::WsSessionManager::new(ws_config),
+    };
+    let app = router(state.clone(), 10_000, 10_000);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local addr");
 
     tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await;
     });
 
-    (format!("ws://{addr}/v1/stream"), ingestor)
+    (format!("ws://{addr}/v1/stream"), addr, ingestor, state)
+}
+
+/// Start the API on an ephemeral port, returning its address and the ingestor.
+async fn start_server() -> (String, Ingestor) {
+    let (url, _addr, ingestor, _state) =
+        start_server_with_ws_config(keeper_indexer::api::websocket::WsConfig {
+            max_client_connections: 100,
+            ..Default::default()
+        })
+        .await;
+    (url, ingestor)
 }
 
 fn raw_registered(tx: &str, task_id: u64, owner: &str) -> RawEvent {
@@ -324,4 +339,236 @@ async fn fan_out_serves_many_concurrent_subscribers_without_per_subscriber_queri
     }
 
     assert_eq!(received.load(Ordering::SeqCst), SUBSCRIBERS);
+}
+
+#[tokio::test]
+async fn connections_above_per_client_cap_are_rejected_before_upgrade() {
+    let (url, _addr, _ingestor, state) =
+        start_server_with_ws_config(keeper_indexer::api::websocket::WsConfig {
+            max_client_connections: 2,
+            max_global_connections: 10,
+            ..Default::default()
+        })
+        .await;
+
+    let (mut client1, _) = tokio_tungstenite::connect_async(&url)
+        .await
+        .expect("client1 connect");
+    await_subscribed(&mut client1).await;
+
+    let (mut client2, _) = tokio_tungstenite::connect_async(&url)
+        .await
+        .expect("client2 connect");
+    await_subscribed(&mut client2).await;
+
+    assert_eq!(state.ws_manager.active_connections(), 2);
+
+    // Third connection from same client (same IP 127.0.0.1) should be rejected before upgrade with 429
+    let err = tokio_tungstenite::connect_async(&url)
+        .await
+        .expect_err("client3 should be rejected");
+    match err {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status().as_u16(), 429);
+        }
+        other => panic!("expected HTTP 429 error, got: {other:?}"),
+    }
+
+    assert_eq!(state.ws_manager.rejected_connections(), 1);
+
+    // Drop client1, freeing capacity
+    drop(client1);
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let (mut client3, _) = tokio_tungstenite::connect_async(&url)
+        .await
+        .expect("client3 connect after slot freed");
+    await_subscribed(&mut client3).await;
+    assert_eq!(state.ws_manager.active_connections(), 2);
+}
+
+#[tokio::test]
+async fn connections_above_global_cap_are_rejected_before_upgrade() {
+    let (url, _addr, _ingestor, state) =
+        start_server_with_ws_config(keeper_indexer::api::websocket::WsConfig {
+            max_client_connections: 10,
+            max_global_connections: 1,
+            ..Default::default()
+        })
+        .await;
+
+    let (mut client1, _) = tokio_tungstenite::connect_async(&url)
+        .await
+        .expect("client1 connect");
+    await_subscribed(&mut client1).await;
+
+    assert_eq!(state.ws_manager.active_connections(), 1);
+
+    // Second connection exceeds global capacity (1) and should be rejected with 429
+    let err = tokio_tungstenite::connect_async(&url)
+        .await
+        .expect_err("client2 should be rejected");
+    match err {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status().as_u16(), 429);
+        }
+        other => panic!("expected HTTP 429 error, got: {other:?}"),
+    }
+
+    assert_eq!(state.ws_manager.rejected_connections(), 1);
+}
+
+#[tokio::test]
+async fn replay_budget_exhaustion_bounds_history_and_remains_cursor_resumable() {
+    let (url, _addr, ingestor, state) =
+        start_server_with_ws_config(keeper_indexer::api::websocket::WsConfig {
+            max_replay_events: 2,
+            ..Default::default()
+        })
+        .await;
+
+    // Ingest 5 events
+    for i in 1..=5u64 {
+        ingestor
+            .ingest_batch(&[raw_registered(&format!("tx{i}"), i, "GOWNER")])
+            .await
+            .expect("ingest");
+    }
+
+    // Connect asking for events after 0
+    let (mut socket, _) = tokio_tungstenite::connect_async(format!("{url}?after=0"))
+        .await
+        .expect("connect");
+
+    // Client receives first 2 events
+    let ev1 = next_event(&mut socket).await;
+    assert_eq!(ev1["cursor"], 1);
+    let ev2 = next_event(&mut socket).await;
+    assert_eq!(ev2["cursor"], 2);
+
+    // Replay budget reached: server sends Closed frame informing client how to resume
+    let frame = socket.next().await.expect("frame").expect("no error");
+    let Message::Text(text) = frame else {
+        panic!("expected text frame");
+    };
+    let value: serde_json::Value = serde_json::from_str(&text).expect("json");
+    assert_eq!(value["kind"], "closed");
+    let reason = value["reason"].as_str().expect("reason");
+    assert!(
+        reason.contains("replay budget exhausted at cursor 2"),
+        "expected replay budget exhausted message, got: {reason}"
+    );
+
+    // Client resumes catching up using ?after=2
+    let (mut socket2, _) = tokio_tungstenite::connect_async(format!("{url}?after=2"))
+        .await
+        .expect("connect");
+
+    let ev3 = next_event(&mut socket2).await;
+    assert_eq!(ev3["cursor"], 3);
+    let ev4 = next_event(&mut socket2).await;
+    assert_eq!(ev4["cursor"], 4);
+
+    let frame2 = socket2.next().await.expect("frame").expect("no error");
+    let Message::Text(text2) = frame2 else {
+        panic!("expected text frame");
+    };
+    let value2: serde_json::Value = serde_json::from_str(&text2).expect("json");
+    assert_eq!(value2["kind"], "closed");
+    let reason2 = value2["reason"].as_str().expect("reason");
+    assert!(
+        reason2.contains("replay budget exhausted at cursor 4"),
+        "expected replay budget exhausted message, got: {reason2}"
+    );
+
+    // Client resumes catching up using ?after=4
+    let (mut socket3, _) = tokio_tungstenite::connect_async(format!("{url}?after=4"))
+        .await
+        .expect("connect");
+
+    let ev5 = next_event(&mut socket3).await;
+    assert_eq!(ev5["cursor"], 5);
+
+    let ack = await_subscribed(&mut socket3).await;
+    assert_eq!(ack["replayed_through"], 5);
+
+    assert_eq!(state.ws_manager.replays_completed(), 1);
+}
+
+#[tokio::test]
+async fn idle_peer_is_disconnected_and_releases_permit() {
+    let (url, _addr, _ingestor, state) =
+        start_server_with_ws_config(keeper_indexer::api::websocket::WsConfig {
+            idle_timeout_secs: 1,
+            heartbeat_interval_secs: 1,
+            ..Default::default()
+        })
+        .await;
+
+    let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+        .await
+        .expect("connect");
+    await_subscribed(&mut socket).await;
+    assert_eq!(state.ws_manager.active_connections(), 1);
+
+    // Wait past the idle timeout without responding
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+    let mut closed = false;
+    while let Some(msg) = socket.next().await {
+        match msg {
+            Ok(Message::Text(text)) => {
+                let value: serde_json::Value = serde_json::from_str(&text).expect("json");
+                if value["kind"] == "closed" {
+                    assert!(value["reason"].as_str().unwrap().contains("idle timeout"));
+                    closed = true;
+                    break;
+                }
+            }
+            Ok(Message::Close(_)) => {
+                closed = true;
+                break;
+            }
+            Ok(Message::Ping(_)) => {
+                // Ignore ping frames
+            }
+            _ => break,
+        }
+    }
+    assert!(closed, "expected socket to be closed due to idle timeout");
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert_eq!(state.ws_manager.active_connections(), 0);
+    assert_eq!(state.ws_manager.idle_disconnects(), 1);
+}
+
+#[tokio::test]
+async fn operator_metrics_are_exposed_in_health_response() {
+    let (url, addr, _ingestor, _state) =
+        start_server_with_ws_config(keeper_indexer::api::websocket::WsConfig {
+            max_client_connections: 5,
+            ..Default::default()
+        })
+        .await;
+
+    let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+        .await
+        .expect("connect");
+    await_subscribed(&mut socket).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get(format!("http://{addr}/v1/health"))
+        .send()
+        .await
+        .expect("health response");
+    assert_eq!(res.status(), 200);
+
+    let body: serde_json::Value = res.json().await.expect("health json");
+    assert!(body["ws"].is_object(), "health must expose ws metrics");
+    assert_eq!(body["ws"]["active_connections"], 1);
+    assert_eq!(body["ws"]["current_clients"], 1);
+    assert_eq!(body["ws"]["rejected_connections"], 0);
+
+    drop(socket);
 }

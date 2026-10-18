@@ -156,6 +156,7 @@ async function runWebsocket() {
   const sockets = [];
   let frames = 0;
   let failures = 0;
+  let rejected = 0;
   const started = Date.now();
 
   await Promise.all(
@@ -177,12 +178,13 @@ async function runWebsocket() {
         sockets.push(ws);
       } catch {
         failures += 1;
+        rejected += 1;
       }
     }),
   );
 
   await new Promise((r) => setTimeout(r, DURATION_MS));
-  const held = sockets.length - failures;
+  const held = Math.max(0, sockets.length - (failures - rejected));
   for (const ws of sockets) ws.close();
 
   const sorted = [...connectLatencies].sort((a, b) => a - b);
@@ -190,6 +192,7 @@ async function runWebsocket() {
     scenario: "websocket:subscribers",
     attempted: SUBSCRIBERS,
     connected: sockets.length,
+    rejected,
     held_to_end: held,
     frames_received: frames,
     connect_ms: {
@@ -207,6 +210,18 @@ async function cacheStats() {
     if (!res.ok) return null;
     const body = await res.json();
     return body.cache ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read the WebSocket counters the API exposes, when it exposes them. */
+async function wsStats() {
+  try {
+    const res = await fetch(`${BASE}/v1/health`);
+    if (!res.ok) return null;
+    const body = await res.json();
+    return body.ws ?? null;
   } catch {
     return null;
   }
@@ -262,6 +277,7 @@ const report = {
   rest,
   websocket,
   cache: await cacheStats(),
+  ws: await wsStats(),
 };
 
 if (values.compare) {
