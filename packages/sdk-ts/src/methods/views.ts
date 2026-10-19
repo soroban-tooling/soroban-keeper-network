@@ -12,7 +12,7 @@
 import { SUPPORTED_CONTRACT_VERSIONS } from "../constants.js";
 import type { ContractCaller } from "../core/caller.js";
 import type { IntegerInput } from "../core/scval.js";
-import { addressArg, u64Arg } from "../core/scval.js";
+import { addressArg, u32Arg, u64Arg } from "../core/scval.js";
 import { KeeperContractError, KeeperErrorCode } from "../errors.js";
 import { type Task, TaskStatus, TaskType } from "../types.js";
 
@@ -258,6 +258,25 @@ export async function getTask(caller: ContractCaller, taskId: IntegerInput): Pro
     );
   }
   return toTask(raw);
+}
+
+/**
+ * Reads `count` consecutive task IDs starting at `from` in one simulation, via
+ * the contract's `get_tasks_range`. The result is positionally aligned with the
+ * range: an ID that was never allocated, or has been archived, is `undefined`.
+ * `count` is capped by the contract's batch-read limit, so a larger request
+ * fails with `BatchTooLarge`.
+ */
+export async function getTasksRange(
+  caller: ContractCaller,
+  from: IntegerInput,
+  count: number,
+): Promise<(Task | undefined)[]> {
+  const raw = await caller.read<(RawTask | null | undefined)[]>("get_tasks_range", [
+    u64Arg(from, "from"),
+    u32Arg(count, "count"),
+  ]);
+  return raw.map((entry) => (entry === null || entry === undefined ? undefined : toTask(entry)));
 }
 
 /**

@@ -16,6 +16,7 @@ without blocking your PR.
 | `indexer` | Required | The indexer service (`indexer/`) must format, build, and pass its test suite, including the database-backed tests. See [The indexer job](#the-indexer-job). |
 | `rust-sdk` | Required | The Rust SDK crate (`rust-sdk/`) must compile and pass all unit and integration tests. |
 | `indexer-client` | Required | The indexer's TypeScript client (`packages/indexer-client`) must typecheck, build, test and lint, and its generated types must match `indexer/openapi.yaml`. |
+| `cli` | Required | The `skn` command-line tool (`packages/cli`) must typecheck, build and pass its test suite. It builds the SDK from source first, because the CLI imports the SDK's `dist/` output. See [`docs/CLI_DESIGN.md`](CLI_DESIGN.md). |
 | `clippy` | Advisory (`continue-on-error: true`) | Lints are useful but subjective enough that a maintainer should decide case-by-case, not have every PR blocked by a new upstream lint. |
 | `audit` | Advisory (`continue-on-error: true`) | A new upstream dependency CVE should notify maintainers, not fail every open PR the moment it's published. |
 | `wasm-size` | Advisory (`continue-on-error: true`) | Reports binary size for visibility; see below. |
@@ -26,8 +27,8 @@ without blocking your PR.
 | `resource-cost` | Advisory (`continue-on-error: true`) | Reports CPU instructions and memory per state-changing entry point against a checked-in baseline. |
 
 `ci-required` is the single check branch protection should require — it
-passes only when `format`, `test`, `build-wasm`, `sdk-ts`, `bot`, `bot-v2`, `indexer`, `rust-sdk`, and
-`indexer-client` all succeed, and ignores the advisory jobs' outcomes entirely.
+passes only when `format`, `test`, `build-wasm`, `sdk-ts`, `bot`, `bot-v2`, `indexer`, `rust-sdk`,
+`indexer-client`, and `cli` all succeed, and ignores the advisory jobs' outcomes entirely.
 
 Run every required check locally before opening a PR:
 

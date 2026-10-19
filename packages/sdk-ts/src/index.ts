@@ -50,6 +50,7 @@ export {
   feesAccrued,
   getFeeBps,
   getTask,
+  getTasksRange,
   isClaimable,
   isPaused,
   keeperBalance,

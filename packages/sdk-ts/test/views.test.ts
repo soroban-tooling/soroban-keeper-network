@@ -6,6 +6,7 @@ import {
   KeeperErrorCode,
   isKeeperError,
 } from "../src/errors.js";
+import { getTasksRange } from "../src/methods/views.js";
 import { TaskStatus, TaskType } from "../src/types.js";
 import { CONTRACT_ID, KEEPER, OWNER, testClient } from "./support/client.js";
 
@@ -362,5 +363,23 @@ describe("client.isClaimable", () => {
     const { client } = testClient({ results: { is_claimable: false } });
 
     await expect(client.isClaimable(999)).resolves.toBe(false);
+  });
+});
+
+describe("getTasksRange", () => {
+  it("returns tasks positionally aligned with the range, undefined for empty slots", async () => {
+    const { client, rpc } = testClient({
+      results: { get_tasks_range: [PENDING_TASK, null, PENDING_TASK] },
+    });
+
+    const tasks = await getTasksRange(client, 1, 3);
+
+    expect(tasks).toHaveLength(3);
+    expect(tasks[0]?.owner).toBe(OWNER);
+    expect(tasks[1]).toBeUndefined();
+    expect(tasks[2]?.status).toBe(TaskStatus.Pending);
+    expect(rpc.onlyCall.method).toBe("get_tasks_range");
+    expect(rpc.onlyCall.args).toEqual([1n, 3]);
+    expect(rpc.submitted).toHaveLength(0);
   });
 });
