@@ -645,6 +645,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "governance-token"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -817,6 +824,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "keeper-governance"
+version = "0.1.0"
+dependencies = [
+ "governance-token",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "keeper-registry"
 version = "0.1.0"
 dependencies = [
@@ -828,6 +843,7 @@ name = "keeper-registry-fuzz"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "keeper-governance",
  "keeper-registry",
  "libfuzzer-sys",
  "soroban-sdk",
