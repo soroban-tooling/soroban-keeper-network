@@ -6,6 +6,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — skn --json output
+
+- `--json` on every `skn` command prints one JSON object on stdout instead of
+  text lines. Bigint fields are decimal strings, so values past 2^53 keep
+  their precision. Failures are JSON too, with `kind` and `exitCode`.
+- Documented the exit codes in the CLI README (2 usage, 3 contract, 4 RPC).
+
+### Added — `skn` command-line tool (E16: 0451, 0452, 0453, 0459)
+
+- New `packages/cli` (`@soroban-keeper-network/cli`, binary `skn`) on top of
+  the TypeScript SDK. `skn --help` lists the task, keeper, admin, batch,
+  deploy, events and config groups; `skn --version` prints the CLI, SDK and
+  supported contract versions.
+- `skn config init` / `skn config show`: a JSON config file with named
+  profiles seeded from `NETWORK_PRESETS`. Flags override the profile, which
+  overrides preset defaults. Transaction-sending commands refuse mainnet
+  (detected by passphrase) without `--confirm-mainnet`.
+- Signing keys from `--key-file` (refused if group/other can access it),
+  `--identity` (Stellar CLI identity store) or `SKN_SECRET_KEY`, in that
+  precedence. Secrets are never accepted as arguments, never appear in
+  messages, and all output is redacted against loaded keys; a test sweeps
+  every command and key source for leaks.
+- `skn task claim` reports the lock-expiry ledger; `skn task execute` takes a
+  hex proof (or `--proof-file`) under the SDK's proof rules and reports the
+  reward credited net of the protocol fee, and whether it is held for the
+  dispute window.
+- Tests run every command in-process against the SDK's fake RPC.
+
 ### Added — rust-sdk call context on every error (0345)
 
 - Every error `KeeperClient` and `KeeperRegistryClient` return now carries
