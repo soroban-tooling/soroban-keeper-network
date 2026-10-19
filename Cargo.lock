@@ -2902,6 +2902,8 @@ name = "soroban-keeper-sdk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "governance-token",
+ "keeper-governance",
  "keeper-registry",
  "keeper-treasury",
  "rand 0.8.7",
