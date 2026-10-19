@@ -5,7 +5,7 @@ name: CI
 #
 # Job policy (see docs/CI.md for the rationale):
 #   REQUIRED  — format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk,
-#               indexer-client. These block the merge.
+#               indexer-client, cli. These block the merge.
 #   ADVISORY  — clippy, audit, wasm-size, sdk-ts-lint, sdk-bundle-size, fuzz-pr,
 #               resource-cost. These report findings as annotations or a job
 #               summary but never fail your PR.
@@ -907,6 +907,44 @@ jobs:
         run: cargo test --package soroban-keeper-sdk --locked
 
   # ───────────────────────────────────────────────────────────────────────────
+  # REQUIRED — the skn command-line tool (packages/cli, docs/CLI_DESIGN.md)
+  # Builds the SDK from source first: the CLI imports the SDK's dist/ output
+  # and its tests reuse the SDK's test RPC from packages/sdk-ts/test/support.
+  # ───────────────────────────────────────────────────────────────────────────
+  cli:
+    name: CLI (TypeScript) (required)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Install and build the SDK
+        working-directory: packages/sdk-ts
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Install CLI dependencies
+        # npm ci for the same lockfile-drift reason as the SDK job above.
+        working-directory: packages/cli
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        working-directory: packages/cli
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Build
+        working-directory: packages/cli
+        run: npm run build
+
+      - name: Test
+        working-directory: packages/cli
+        run: npm test
+
+  # ───────────────────────────────────────────────────────────────────────────
   # Aggregate gate. Branch protection should require only this single check;
   # it passes when all REQUIRED jobs pass and ignores advisory outcomes.
   # ───────────────────────────────────────────────────────────────────────────
@@ -914,12 +952,12 @@ jobs:
     name: CI required checks
     runs-on: ubuntu-latest
     if: always()
-    needs: [format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client]
+    needs: [format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client, cli]
     steps:
       - name: Verify required jobs succeeded
         run: |
           results='${{ join(needs.*.result, ' ') }}'
-          echo "Required job results (format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client): $results"
+          echo "Required job results (format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client, cli): $results"
           for r in $results; do
             if [ "$r" != "success" ]; then
               echo "::error::A required CI job did not succeed."

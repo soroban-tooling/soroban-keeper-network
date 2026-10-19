@@ -1,0 +1,31 @@
+{
+  "name": "@soroban-keeper-network/cli",
+  "version": "0.1.0",
+  "description": "skn: command-line tool for deploying the keeper contracts and registering and inspecting tasks",
+  "type": "module",
+  "bin": {
+    "skn": "./dist/index.js"
+  },
+  "main": "./dist/cli.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@soroban-keeper-network/sdk": "file:../sdk-ts"
+  },
+  "devDependencies": {
+    "@stellar/stellar-sdk": "^16.2.0",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "Apache-2.0"
+}
