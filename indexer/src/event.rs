@@ -171,6 +171,45 @@ pub enum EventPayload {
         action: String,
         score: i128,
     },
+
+    // ── governance (issue #504 / backlog 0376) ───────────────────────────────
+    /// `(governance_initialized, admin)` — `(kprs_token, registry)`
+    GovernanceInitialized {
+        admin: String,
+        kprs_token: String,
+        registry: String,
+    },
+    /// `(proposal_created, id)` — `(proposer, voting_end)`
+    ProposalCreated {
+        proposal_id: u64,
+        proposer: String,
+        voting_end: u64,
+    },
+    /// `(vote_cast, id)` — `(voter, choice, weight)`
+    VoteCast {
+        proposal_id: u64,
+        voter: String,
+        choice: u32,
+        weight: i128,
+    },
+    /// `(proposal_passed, id)` — `(votes_for, votes_against)`
+    ProposalPassed {
+        proposal_id: u64,
+        votes_for: i128,
+        votes_against: i128,
+    },
+    /// `(proposal_defeated, id)` — `(votes_for_or_total, votes_against_or_quorum)`
+    ProposalDefeated {
+        proposal_id: u64,
+        votes_for_or_total: i128,
+        votes_against_or_quorum: i128,
+    },
+    /// `(proposal_queued, id)` — `(eta,)`
+    ProposalQueued { proposal_id: u64, eta: u64 },
+    /// `(proposal_executed, id)` — `()`
+    ProposalExecuted { proposal_id: u64 },
+    /// `(proposal_cancelled, id)` — `(caller,)`
+    ProposalCancelled { proposal_id: u64, caller: String },
 }
 
 impl EventPayload {
@@ -202,6 +241,14 @@ impl EventPayload {
             Self::StakeWithdrawn { .. } => ("wdraw", "stake"),
             Self::Slashed { .. } => ("slash", "stake"),
             Self::ReputationUpdated { .. } => ("update", "reputation"),
+            Self::GovernanceInitialized { .. } => ("governance", "init"),
+            Self::ProposalCreated { .. } => ("proposal", "created"),
+            Self::VoteCast { .. } => ("vote", "cast"),
+            Self::ProposalPassed { .. } => ("proposal", "passed"),
+            Self::ProposalDefeated { .. } => ("proposal", "defeated"),
+            Self::ProposalQueued { .. } => ("proposal", "queued"),
+            Self::ProposalExecuted { .. } => ("proposal", "executed"),
+            Self::ProposalCancelled { .. } => ("proposal", "cancelled"),
         };
         EventTopic { verb, noun }
     }

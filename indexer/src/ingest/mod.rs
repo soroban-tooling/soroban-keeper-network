@@ -11,6 +11,7 @@
 //! parser of its own, so the two cannot drift as the event set evolves.
 
 pub mod admin;
+pub mod governance;
 pub mod keepers;
 pub mod parse;
 pub mod reputation;

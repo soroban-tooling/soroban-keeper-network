@@ -75,6 +75,7 @@ pub const SCHEMA_FILES: &[(&str, &str)] = &[
     ("treasury", include_str!("schema/treasury.sql")),
     ("staking", include_str!("schema/staking.sql")),
     ("reputation", include_str!("schema/reputation.sql")),
+    ("governance", include_str!("schema/governance.sql")),
 ];
 
 /// Create every table, index and view this crate reads.
@@ -100,6 +101,7 @@ pub async fn ingest_all(client: &Client, events: &[event::Event]) -> Result<(), 
         ingest::treasury::ingest_event(client, event).await?;
         ingest::staking::ingest_event(client, event).await?;
         ingest::reputation::ingest_event(client, event).await?;
+        ingest::governance::ingest_event(client, event).await?;
     }
     Ok(())
 }
