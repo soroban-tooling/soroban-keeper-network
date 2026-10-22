@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `skn` command-line tool (#705, #707, #708, #709)
+
+- New `packages/cli` package: `skn task register`, `skn admin show|pause|unpause|set-fee-bps|set-min-reward`
+  and `skn events watch`, built on the TypeScript SDK. Human output by default,
+  `--json` for scripts, and documented exit codes (`docs/CLI.md`).
+- `skn events watch` streams the indexer's `/v1/stream` WebSocket when an indexer
+  URL is set and polls `getEvents` otherwise; `--type` filters by event name and
+  `--task` by task ID.
+- Command-level tests run every command against the SDK's fake RPC, covering
+  success, contract-error and `--json` output, with no network access.
+- Required `cli` CI job (path-guarded like the bot jobs) and a `make cli` target
+  included in `make ci`; `docs/CI.md` lists the job.
+- `cli-publish.yml` publishes `skn` to npm from a `cli-vX.Y.Z` tag, refusing a
+  tag that does not match the package version.
+
 ### Added — rust-sdk call context on every error (0345)
 
 - Every error `KeeperClient` and `KeeperRegistryClient` return now carries

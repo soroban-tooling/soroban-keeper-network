@@ -3,7 +3,7 @@
 #
 # IMPORTANT: The `ci` target must stay in sync with the required jobs in
 # .github/workflows/ci.yml (format, test, build-wasm, sdk-ts, bot, bot-v2,
-# indexer, rust-sdk, indexer-client). Change one, change the other.
+# indexer, rust-sdk, indexer-client, cli). Change one, change the other.
 
 WASM := target/wasm32-unknown-unknown/release/keeper_registry.wasm
 
@@ -13,7 +13,7 @@ WASM := target/wasm32-unknown-unknown/release/keeper_registry.wasm
 #   make indexer INDEXER_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/indexer_test
 INDEXER_TEST_DATABASE_URL ?=
 
-.PHONY: help build test fmt fmt-check lint wasm optimize clean bot bot-test bot-v2-test sdk-ts sdk-ts-lint indexer rust-sdk indexer-client ci check
+.PHONY: help build test fmt fmt-check lint wasm optimize clean bot bot-test bot-v2-test sdk-ts sdk-ts-lint indexer rust-sdk indexer-client cli ci check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -68,9 +68,12 @@ rust-sdk: ## Test the Rust SDK crate (matches CI)
 indexer-client: ## Typecheck, build, test and lint the indexer client (matches CI)
 	cd packages/indexer-client && npm ci --no-audit --no-fund && npx tsc --noEmit -p tsconfig.json && npm run build && npm test && npm run lint
 
+cli: sdk-ts ## Typecheck, build, test and lint the skn CLI (matches CI) — builds against sdk-ts's dist/ output
+	cd packages/cli && npm ci --no-audit --no-fund && npx tsc --noEmit -p tsconfig.json && npm run build && npm test && npm run lint
+
 clean: ## Remove build artifacts
 	cargo clean
 
-ci: fmt-check test wasm sdk-ts bot-test bot-v2-test indexer rust-sdk indexer-client ## Run all required CI checks locally (blocking checks only)
+ci: fmt-check test wasm sdk-ts bot-test bot-v2-test indexer rust-sdk indexer-client cli ## Run all required CI checks locally (blocking checks only)
 
 check: ci lint sdk-ts-lint ## Run all checks contributors should run before opening a PR
