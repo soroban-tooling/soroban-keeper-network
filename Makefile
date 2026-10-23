@@ -13,11 +13,32 @@ WASM := target/wasm32-unknown-unknown/release/keeper_registry.wasm
 #   make indexer INDEXER_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/indexer_test
 INDEXER_TEST_DATABASE_URL ?=
 
-.PHONY: help build test fmt fmt-check lint wasm optimize clean bot bot-test bot-v2-test sdk-ts sdk-ts-lint indexer rust-sdk indexer-client ci check
+# Packages `make setup` installs dependencies for. Each needs a package-lock.json
+# so `npm ci` can run; add new packages here when they gain one.
+SETUP_PACKAGES := packages/sdk-ts packages/indexer-client examples/keeper-bot examples/keeper-bot-v2 examples/batch-register
+
+.PHONY: help build test fmt fmt-check lint wasm optimize clean setup bot bot-test bot-v2-test sdk-ts sdk-ts-lint indexer rust-sdk indexer-client ci check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+
+setup: ## Install the wasm target and npm dependencies, and report missing system tools
+	@command -v rustup >/dev/null 2>&1 || { echo "setup: rustup is required, see https://rustup.rs"; exit 1; }
+	@command -v npm >/dev/null 2>&1 || { echo "setup: npm is required, see https://nodejs.org"; exit 1; }
+	rustup target add wasm32-unknown-unknown
+	@for pkg in $(SETUP_PACKAGES); do \
+		echo "==> npm ci in $$pkg"; \
+		(cd "$$pkg" && npm ci --no-audit --no-fund) || { echo "setup: npm ci failed in $$pkg"; exit 1; }; \
+	done
+	@echo ""
+	@echo "System tools:"
+	@missing=0; \
+	if command -v stellar >/dev/null 2>&1; then echo "  ok       stellar"; \
+	else echo "  MISSING  stellar  (cargo install --locked stellar-cli --features opt; needed for make optimize and deploys)"; missing=1; fi; \
+	if command -v docker >/dev/null 2>&1; then echo "  ok       docker"; \
+	else echo "  MISSING  docker   (needed only for the indexer's Postgres tests, see docs/CI.md)"; missing=1; fi; \
+	if [ $$missing -eq 1 ]; then echo "Setup finished, but some system tools above are missing."; fi
 
 build: ## Build the workspace
 	cargo build

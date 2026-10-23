@@ -74,12 +74,13 @@ Add to `.vscode/extensions.json` (not committed to avoid forcing preferences):
 git clone https://github.com/soroban-tooling/soroban-keeper-network
 cd soroban-keeper-network
 
+# Add the WASM target, install npm dependencies for the packages CI builds,
+# and list any missing system tools (Stellar CLI, Docker)
+make setup
+
 # Verify Rust and WASM target
 rustup show
 rustup target list --installed | grep wasm32
-
-# Install JS dependencies for the keeper bot example
-cd examples/keeper-bot && npm install && cd ../..
 
 # Run tests (should all pass on a clean checkout)
 cargo test --workspace --locked

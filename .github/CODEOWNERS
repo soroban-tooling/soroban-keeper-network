@@ -9,3 +9,14 @@
 
 # CI and repo automation
 /.github/                           @Andreschuks101
+
+# Client packages, examples and tooling. Every top-level component directory
+# needs an entry so review is requested explicitly rather than only through
+# the default owner above.
+/packages/                          @Andreschuks101
+/examples/                          @Andreschuks101
+/rust-sdk/                          @Andreschuks101
+/indexer/                           @Andreschuks101
+/fuzz/                              @Andreschuks101
+/scripts/                           @Andreschuks101
+/docs/                              @Andreschuks101
