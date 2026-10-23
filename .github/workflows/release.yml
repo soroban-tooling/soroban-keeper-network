@@ -33,6 +33,14 @@ jobs:
           ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
 
+      # The release body is the CHANGELOG section for this version. Extract it
+      # before building so a tag without a section fails in seconds, not after
+      # the WASM build, and nothing is published.
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: scripts/extract-changelog-section.sh "$TAG" CHANGELOG.md > RELEASE_NOTES.md
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -75,41 +83,6 @@ jobs:
             echo "sha256=$(sha256sum keeper_registry.optimized.wasm | cut -d' ' -f1)"
             echo "size=$(stat -c%s keeper_registry.optimized.wasm)"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Assemble release notes
-        env:
-          TAG: ${{ github.event.inputs.tag || github.ref_name }}
-          SHA256: ${{ steps.artifacts.outputs.sha256 }}
-          SIZE: ${{ steps.artifacts.outputs.size }}
-        run: |
-          previous=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
-          {
-            echo "## Soroban Keeper Network ${TAG}"
-            echo
-            echo "### Contract artifact"
-            echo
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| File | \`keeper_registry.optimized.wasm\` |"
-            echo "| Size | ${SIZE} bytes |"
-            echo "| sha256 | \`${SHA256}\` |"
-            echo
-            echo "Verify a deployment matches this release by comparing the WASM hash"
-            echo "reported by \`stellar contract install\` against the sha256 above."
-            echo
-            echo "### Changes"
-            echo
-            if [ -n "$previous" ]; then
-              git log --no-merges --pretty='- %s' "${previous}..${TAG}"
-              echo
-              echo "**Full diff:** https://github.com/${GITHUB_REPOSITORY}/compare/${previous}...${TAG}"
-            else
-              echo "Initial tagged release."
-            fi
-            echo
-            echo "See [CHANGELOG.md](CHANGELOG.md) for the curated summary."
-          } > RELEASE_NOTES.md
-          cat RELEASE_NOTES.md
 
       - name: Publish GitHub Release
         env:

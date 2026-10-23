@@ -513,11 +513,11 @@ Maintainers aim to respond within **48 hours** on weekdays. Complex PRs may take
 1. **Agree on a release version** — maintainers decide on the next `vX.Y.Z` number.
 2. **Create a release branch** — `git checkout -b release/vX.Y.Z main`.
 3. **Final testing** — run the full test suite and deploy to testnet from the release branch.
-4. **Update `CHANGELOG.md`** — use the commit history to add notable changes.
+4. **Update `CHANGELOG.md`** — use the commit history to add notable changes under a `## [X.Y.Z] - YYYY-MM-DD` heading for the release. The release workflow takes its GitHub Release body from that section and fails if it is missing or empty.
 5. **Bump versions** — update the `version` in all relevant `Cargo.toml` files.
 6. **Open a PR** — merge the release branch into `main`. This PR requires at least two maintainer approvals.
 7. **Tag the release** — after merging, pull the latest `main`, then run `git tag -s vX.Y.Z -m "Release vX.Y.Z"` and `git push origin vX.Y.Z`.
-8. **Create a GitHub Release** — go to the tags page, create a new release from the tag, and paste the changelog notes. Attach the optimized WASM file.
+8. **Check the GitHub Release** — pushing the tag runs `.github/workflows/release.yml`, which publishes the release. Its body is the `CHANGELOG.md` section for the version, and it attaches the WASM files and `SHA256SUMS.txt`. Check the release page after the run.
 
 ### Versioning
 
