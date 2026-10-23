@@ -10,9 +10,13 @@ body:
     attributes:
       label: Area
       options:
-        - contract (keeper-registry)
+        - contracts
+        - sdk-ts
+        - rust-sdk
+        - indexer
+        - indexer-client
         - keeper-bot
-        - scripts / tooling
+        - keeper-bot-v2
         - docs
     validations:
       required: true
