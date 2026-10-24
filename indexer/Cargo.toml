@@ -39,5 +39,5 @@ utoipa-swagger-ui = { version = "9", features = ["axum"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["process"] }
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.29"
 tower = { version = "0.5", features = ["util"] }
