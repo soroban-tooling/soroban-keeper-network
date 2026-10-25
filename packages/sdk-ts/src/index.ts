@@ -226,3 +226,4 @@ export {
  * client's types at all.
  */
 export * as treasury from "./treasury/index.js";
+export * as governance from "./governance/index.js";
