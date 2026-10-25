@@ -39,6 +39,8 @@ pub enum GovernanceError {
     Unauthorized = 15,
     ArithmeticOverflow = 16,
     InsufficientVotingPower = 17,
+    ProposalAlreadyCancelled = 18,
+    CannotCancelExecuted = 19,
 }
 
 #[contracttype]
@@ -800,6 +802,66 @@ impl Governance {
 
         env.events().publish(
             (Symbol::new(&env, "proposal_executed"), proposal_id),
+            (),
+        );
+
+        Ok(())
+    }
+
+    /// Cancels a proposal before execution.
+    ///
+    /// Authorized callers:
+    /// - The original `proposer`: Can cancel their proposal at any time prior to execution.
+    /// - The governance `admin`: Serves as an emergency veto safeguard during the timelock window or voting period
+    ///   if a proposal is discovered to be malicious or flawed.
+    ///
+    /// Once a proposal is executed, it can never be cancelled.
+    pub fn cancel_proposal(
+        env: Env,
+        caller: Address,
+        proposal_id: u64,
+    ) -> Result<(), GovernanceError> {
+        caller.require_auth();
+
+        if !env.storage().instance().has(&DataKey::Initialized) {
+            return Err(GovernanceError::NotInitialized);
+        }
+
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let mut proposal: Proposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proposal(proposal_id))
+            .ok_or(GovernanceError::ProposalNotFound)?;
+
+        if proposal.status == ProposalStatus::Executed {
+            return Err(GovernanceError::CannotCancelExecuted);
+        }
+
+        if proposal.status == ProposalStatus::Cancelled {
+            return Err(GovernanceError::ProposalAlreadyCancelled);
+        }
+
+        if caller != proposal.proposer && caller != admin {
+            return Err(GovernanceError::Unauthorized);
+        }
+
+        proposal.status = ProposalStatus::Cancelled;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_LEDGERS);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Proposal(proposal_id),
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_BUMP_LEDGERS,
+        );
+
+        env.events().publish(
+            (Symbol::new(&env, "proposal_cancelled"), proposal_id, caller),
             (),
         );
 
