@@ -4,6 +4,9 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, Symbol,
 };
 
+pub mod events;
+pub use events::*;
+
 pub const ONE_TOKEN: i128 = 10_000_000; // 10^7 stroops (7 decimals)
 pub const DEFAULT_PROPOSAL_THRESHOLD: i128 = 100_000 * ONE_TOKEN; // 100,000 KPRS
 pub const DEFAULT_VOTING_PERIOD: u32 = 50_400; // ~7 days in ledgers (at ~5s per ledger)
