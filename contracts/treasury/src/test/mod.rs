@@ -11,4 +11,5 @@ mod events;
 mod recipients;
 mod reconfiguration;
 mod reentrancy;
+mod scaffold;
 mod views;
