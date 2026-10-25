@@ -9,7 +9,7 @@ without blocking your PR.
 |-----|------|-----|
 | `format` | Required | `cargo fmt --all -- --check` — a formatting diff is trivially fixable and shouldn't need discussion. |
 | `test` | Required | `cargo test --workspace --locked` — the test suite is the correctness bar. |
-| `build-wasm` | Required | The `keeper-registry`, `keeper-treasury`, and (on relevant PRs) `governance-token` and `keeper-governance` contracts must actually compile to the `wasm32-unknown-unknown` target they deploy to. |
+| `build-wasm` | Required | The `keeper-registry` and `keeper-treasury` contracts must actually compile to the `wasm32-unknown-unknown` target they deploy to. |
 | `sdk-ts` | Required | The TypeScript SDK (`packages/sdk-ts`) must typecheck (`tsc --noEmit`), build, and pass its own test suite. Uploads its built `dist/` as an artifact for `bot` to consume. Lint is the advisory `sdk-ts-lint` job. See [SDK typecheck and lint](#sdk-typecheck-and-lint). |
 | `bot` | Required | The example keeper bot (`examples/keeper-bot`) must lint, syntax-check, and pass its own test suite. Depends on `sdk-ts`'s built output (the bot's `@soroban-keeper-network/sdk` dependency is a local `file:` reference, which `npm install` copies as-is rather than building). |
 | `bot-v2` | Required | The production keeper bot v2 (`examples/keeper-bot-v2`) must build, lint, and pass its test suite against an ephemeral Postgres service container. See [The keeper-bot-v2 job](#the-keeper-bot-v2-job). |
@@ -17,11 +17,6 @@ without blocking your PR.
 | `rust-sdk` | Required | The Rust SDK crate (`rust-sdk/`) must compile and pass all unit and integration tests. |
 | `rust-sdk-quickstart` | Advisory (`continue-on-error: true`) | On pushes to `main`, deploys the registry to a local Stellar Quickstart network and runs the opt-in Rust SDK lifecycle test. |
 | `indexer-client` | Required | The indexer's TypeScript client (`packages/indexer-client`) must typecheck, build, test and lint, and its generated types must match `indexer/openapi.yaml`. |
-<<<<<<< HEAD
-| `cli` | Required | The `skn` command-line tool (`packages/cli`) must typecheck, build and pass its test suite. It builds the SDK from source first, because the CLI imports the SDK's `dist/` output. See [`docs/CLI_DESIGN.md`](CLI_DESIGN.md). |
-=======
-| `cli` | Required | The `skn` command-line tool (`packages/cli`) must typecheck, build, test and lint. Its tests run against the SDK's fake RPC and never touch a network. Runs on PRs touching `packages/cli/` or `packages/sdk-ts/`. See [The CLI job](#the-cli-job). |
->>>>>>> pr/909
 | `clippy` | Advisory (`continue-on-error: true`) | Lints are useful but subjective enough that a maintainer should decide case-by-case, not have every PR blocked by a new upstream lint. |
 | `audit` | Advisory (`continue-on-error: true`) | A new upstream dependency CVE should notify maintainers, not fail every open PR the moment it's published. |
 | `deny` | Advisory (`continue-on-error: true`) | License allow-list enforcement, duplicate crate version detection, yanked crate warnings, and source validation via `cargo-deny`. See [Cargo-deny](#cargo-deny) below. |
@@ -33,20 +28,8 @@ without blocking your PR.
 | `resource-cost` | Advisory (`continue-on-error: true`) | Reports CPU instructions and memory per state-changing entry point against a checked-in baseline. |
 
 `ci-required` is the single check branch protection should require — it
-passes only when `format`, `test`, `build-wasm`, `sdk-ts`, `bot`, `bot-v2`, `indexer`, `rust-sdk`,
-`indexer-client`, and `cli` all succeed, and ignores the advisory jobs' outcomes entirely.
-<<<<<<< HEAD
-
-### Governance and Token Contracts in CI
-
-The governance contract (`contracts/governance/`) and the KPRS governance token contract (`contracts/governance-token/`) follow the same required/advisory split as the registry and treasury:
-
-- **Build WASM (`build-wasm`)**: Required. Compiles each contract to `wasm32-unknown-unknown` in release mode and uploads the WASM artifacts (`governance-token-wasm` and `governance-wasm`). On branches where these contracts are present, compiling to WASM is a blocking check.
-- **Tests (`test`)**: Required. Contract unit tests execute as part of `cargo test --workspace --locked` (or targeted manifest execution on PR branches), gating PR merges on correctness.
-- **Formatting (`format`)**: Required. Formatted with `cargo fmt --all -- --check`.
-- **Clippy (`clippy`)**: Advisory (`continue-on-error: true`). Surfaces lints as PR annotations without blocking the PR.
-=======
->>>>>>> pr/909
+passes only when `format`, `test`, `build-wasm`, `sdk-ts`, `bot`, `bot-v2`, `indexer`, `rust-sdk`, and
+`indexer-client` all succeed, and ignores the advisory jobs' outcomes entirely.
 
 Run every required check locally before opening a PR:
 
@@ -106,7 +89,6 @@ make sdk-ts        # typecheck + build + test (required)
 make sdk-ts-lint   # ESLint (advisory)
 ```
 
-<<<<<<< HEAD
 ## Cargo-deny
 
 The `deny` job runs `cargo deny check` to enforce:
@@ -155,34 +137,6 @@ See [`https://embarkstudios.github.io/cargo-deny/`](https://embarkstudios.github
 ## WASM size tracking
 
 The `wasm-size` job builds the release WASM, runs it through `wasm-opt -Oz`
-=======
-## The CLI job
-
-The `cli` job covers `packages/cli`, the `skn` command-line tool: `tsc --noEmit`,
-`npm run build`, `npm test` (vitest) and `npm run lint`.
-
-It is path-guarded the same way as `bot-v2`. It does the work only when a PR
-touches `packages/cli/`, `packages/sdk-ts/` (which the CLI builds against), or
-`.github/workflows/ci.yml`; any other PR skips the steps while reporting
-success, so `cli` can be a required gate without blocking contract-only work.
-It needs `sdk-ts`, downloads that job's built `dist/`, and installs the SDK's
-dependencies so the CLI's `file:` link to the SDK resolves its types.
-
-The tests run every command end to end against the SDK's fake RPC
-(`packages/sdk-ts/test/support/fakeRpc.ts`), with scripted stand-ins for the
-indexer WebSocket. Nothing in the suite can reach a network.
-
-To reproduce locally:
-
-```bash
-make cli    # builds sdk-ts first, then typechecks, builds, tests and lints the CLI
-```
-
-Publishing is a separate workflow, `cli-publish.yml`, triggered by a
-`cli-vX.Y.Z` tag; see [CLI.md](CLI.md#releasing).
-
-## The keeper-bot-v2 job
->>>>>>> pr/909
 
 The `bot-v2` job covers `examples/keeper-bot-v2`: TypeScript compilation (`npm run build`), linting (`npm run lint`), and its test suites (`npm test`: vitest for the TypeScript service in `src/`, then `node --test` for the CommonJS components in `bot/`).
 

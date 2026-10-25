@@ -5,7 +5,7 @@ name: CI
 #
 # Job policy (see docs/CI.md for the rationale):
 #   REQUIRED  — format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk,
-#               indexer-client, cli. These block the merge.
+#               indexer-client. These block the merge.
 #   ADVISORY  — clippy, audit, wasm-size, sdk-ts-lint, sdk-bundle-size, fuzz-pr,
 #               resource-cost. These report findings as annotations or a job
 #               summary but never fail your PR.
@@ -63,16 +63,6 @@ jobs:
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
-      - name: cargo fmt --check (governance contracts)
-        if: hashFiles('contracts/governance-token/Cargo.toml', 'contracts/governance/Cargo.toml') != ''
-        run: |
-          if [ -f contracts/governance-token/Cargo.toml ] && ! grep -q 'contracts/governance-token' Cargo.toml; then
-            cargo fmt --manifest-path contracts/governance-token/Cargo.toml -- --check
-          fi
-          if [ -f contracts/governance/Cargo.toml ] && ! grep -q 'contracts/governance' Cargo.toml; then
-            cargo fmt --manifest-path contracts/governance/Cargo.toml -- --check
-          fi
-
       - name: How to fix
         if: failure()
         run: |
@@ -108,16 +98,6 @@ jobs:
 
       - name: cargo test
         run: cargo test --workspace --locked
-
-      - name: cargo test (governance contracts)
-        if: hashFiles('contracts/governance-token/Cargo.toml', 'contracts/governance/Cargo.toml') != ''
-        run: |
-          if [ -f contracts/governance-token/Cargo.toml ] && ! grep -q 'contracts/governance-token' Cargo.toml; then
-            cargo test --manifest-path contracts/governance-token/Cargo.toml --locked
-          fi
-          if [ -f contracts/governance/Cargo.toml ] && ! grep -q 'contracts/governance' Cargo.toml; then
-            cargo test --manifest-path contracts/governance/Cargo.toml --locked
-          fi
 
   # ───────────────────────────────────────────────────────────────────────────
   # REQUIRED — the contract must compile to WASM
@@ -185,39 +165,6 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-      - name: Build release WASM (governance-token)
-        if: hashFiles('contracts/governance-token/Cargo.toml') != ''
-        run: |
-          cargo build --locked --release \
-            --target wasm32-unknown-unknown \
-            --package governance-token
-
-      - name: Upload governance-token WASM artifact
-        if: hashFiles('contracts/governance-token/Cargo.toml') != ''
-        uses: actions/upload-artifact@v7
-        with:
-          name: governance-token-wasm
-          path: target/wasm32-unknown-unknown/release/governance_token.wasm
-          retention-days: 14
-          if-no-files-found: error
-
-      - name: Build release WASM (governance)
-        if: hashFiles('contracts/governance/Cargo.toml') != ''
-        run: |
-          PACKAGE_NAME=$(grep -m1 '^name = ' contracts/governance/Cargo.toml | cut -d'"' -f2)
-          cargo build --locked --release \
-            --target wasm32-unknown-unknown \
-            --package "$PACKAGE_NAME"
-
-      - name: Upload governance WASM artifact
-        if: hashFiles('contracts/governance/Cargo.toml') != ''
-        uses: actions/upload-artifact@v7
-        with:
-          name: governance-wasm
-          path: target/wasm32-unknown-unknown/release/*governance*.wasm
-          retention-days: 14
-          if-no-files-found: error
-
   # ───────────────────────────────────────────────────────────────────────────
   # ADVISORY — clippy. Findings appear as inline PR annotations.
   # ───────────────────────────────────────────────────────────────────────────
@@ -248,16 +195,6 @@ jobs:
       # whether a given lint is worth acting on.
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked
-
-      - name: cargo clippy (governance contracts)
-        if: hashFiles('contracts/governance-token/Cargo.toml', 'contracts/governance/Cargo.toml') != ''
-        run: |
-          if [ -f contracts/governance-token/Cargo.toml ] && ! grep -q 'contracts/governance-token' Cargo.toml; then
-            cargo clippy --manifest-path contracts/governance-token/Cargo.toml --all-targets --locked
-          fi
-          if [ -f contracts/governance/Cargo.toml ] && ! grep -q 'contracts/governance' Cargo.toml; then
-            cargo clippy --manifest-path contracts/governance/Cargo.toml --all-targets --locked
-          fi
 
   # ───────────────────────────────────────────────────────────────────────────
   # ADVISORY — dependency advisories. A new upstream CVE should notify us,
@@ -973,100 +910,8 @@ jobs:
           echo "PR does not touch examples/keeper-bot-v2 or SDK dependencies; keeper-bot-v2 checks skipped."
 
   # ───────────────────────────────────────────────────────────────────────────
-<<<<<<< HEAD
   # REQUIRED — the indexer service. Format, build and test. Storage is
   # SQLite, so the tests need no database service.
-=======
-  # REQUIRED — the `skn` command-line tool (packages/cli). Typecheck, build,
-  # test and lint. The CLI's tests run against the SDK's fake RPC and never
-  # touch a network.
-  #
-  # Path-guarded the same way as bot-v2: it does the work only when a PR
-  # touches packages/cli/, packages/sdk-ts/ (which it builds against) or this
-  # workflow, and reports success without doing it otherwise, so it can be a
-  # required gate without blocking contract-only work.
-  # ───────────────────────────────────────────────────────────────────────────
-  cli:
-    name: CLI (required)
-    runs-on: ubuntu-latest
-    needs: sdk-ts
-    defaults:
-      run:
-        working-directory: packages/cli
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Check for relevant changes
-        id: changes
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.sha }}
-        run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qE '^(packages/cli/|packages/sdk-ts/|\.github/workflows/ci\.yml)'; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Setup Node.js
-        if: steps.changes.outputs.relevant == 'true'
-        uses: actions/setup-node@v7
-        with:
-          node-version: "20"
-
-      - name: Download SDK artifact
-        if: steps.changes.outputs.relevant == 'true'
-        uses: actions/download-artifact@v8
-        with:
-          name: sdk-ts-dist
-          path: packages/sdk-ts/dist
-
-      # The CLI depends on the SDK through a `file:` link, so the SDK's own
-      # dependencies must be installed for its types to resolve.
-      - name: Install SDK dependencies
-        if: steps.changes.outputs.relevant == 'true'
-        working-directory: packages/sdk-ts
-        run: npm ci --no-audit --no-fund
-
-      - name: Install CLI dependencies
-        if: steps.changes.outputs.relevant == 'true'
-        run: npm ci --no-audit --no-fund
-
-      - name: Typecheck
-        if: steps.changes.outputs.relevant == 'true'
-        run: npx tsc --noEmit -p tsconfig.json
-
-      - name: Build
-        if: steps.changes.outputs.relevant == 'true'
-        run: npm run build
-
-      - name: Test
-        if: steps.changes.outputs.relevant == 'true'
-        run: npm test
-
-      - name: Lint
-        if: steps.changes.outputs.relevant == 'true'
-        run: npm run lint
-
-      - name: Skipped (no CLI changes)
-        if: steps.changes.outputs.relevant == 'false'
-        run: |
-          echo "PR does not touch packages/cli or packages/sdk-ts; CLI checks skipped."
-
-  # ───────────────────────────────────────────────────────────────────────────
-  # REQUIRED — the indexer service. Format, build and test, with a real
-  # Postgres for the database-backed tests.
-  #
-  # The database is an ephemeral service container, created for this job and
-  # destroyed with it, rather than a shared instance. Tests here drop and
-  # recreate their tables, so a shared database would let concurrent runs
-  # corrupt each other's state and would make a green run depend on what else
-  # happened to be running at the time.
->>>>>>> pr/909
   #
   # Only runs when the PR touches indexer/ (or the workspace manifest, which
   # can change how the indexer builds). A contract-only PR skips it, in the
@@ -1196,44 +1041,6 @@ jobs:
         run: cargo test --locked --package soroban-keeper-sdk --test integration_quickstart -- --nocapture
 
   # ───────────────────────────────────────────────────────────────────────────
-  # REQUIRED — the skn command-line tool (packages/cli, docs/CLI_DESIGN.md)
-  # Builds the SDK from source first: the CLI imports the SDK's dist/ output
-  # and its tests reuse the SDK's test RPC from packages/sdk-ts/test/support.
-  # ───────────────────────────────────────────────────────────────────────────
-  cli:
-    name: CLI (TypeScript) (required)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "20"
-
-      - name: Install and build the SDK
-        working-directory: packages/sdk-ts
-        run: |
-          npm ci --no-audit --no-fund
-          npm run build
-
-      - name: Install CLI dependencies
-        # npm ci for the same lockfile-drift reason as the SDK job above.
-        working-directory: packages/cli
-        run: npm ci --no-audit --no-fund
-
-      - name: Typecheck
-        working-directory: packages/cli
-        run: npx tsc --noEmit -p tsconfig.json
-
-      - name: Build
-        working-directory: packages/cli
-        run: npm run build
-
-      - name: Test
-        working-directory: packages/cli
-        run: npm test
-
-  # ───────────────────────────────────────────────────────────────────────────
   # Aggregate gate. Branch protection should require only this single check;
   # it passes when all REQUIRED jobs pass and ignores advisory outcomes.
   # ───────────────────────────────────────────────────────────────────────────
@@ -1241,12 +1048,12 @@ jobs:
     name: CI required checks
     runs-on: ubuntu-latest
     if: always()
-    needs: [format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client, cli]
+    needs: [format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client]
     steps:
       - name: Verify required jobs succeeded
         run: |
           results='${{ join(needs.*.result, ' ') }}'
-          echo "Required job results (format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client, cli): $results"
+          echo "Required job results (format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client): $results"
           for r in $results; do
             if [ "$r" != "success" ]; then
               echo "::error::A required CI job did not succeed."
