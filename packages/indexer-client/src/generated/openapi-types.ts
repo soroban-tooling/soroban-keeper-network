@@ -62,7 +62,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Tasks a keeper has claimed or executed. */
+        /** Tasks a keeper has claimed or executed, paginated and capped. */
         get: operations["tasks_by_keeper"];
         put?: never;
         post?: never;
@@ -100,7 +100,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Tasks registered by an owner. */
+        /** Tasks registered by an owner, paginated and capped. */
         get: operations["tasks_by_owner"];
         put?: never;
         post?: never;
@@ -117,7 +117,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One task, with its full observed history. */
+        /** One task, with its observed history bounded by limit. */
         get: operations["get_task"];
         put?: never;
         post?: never;
@@ -429,6 +429,11 @@ export interface components {
         TaskListResponse: {
             /** @description The address these tasks were selected by. */
             address: string;
+            /**
+             * Format: int64
+             * @description Pass as `after` to fetch the next page; absent at the end of the list.
+             */
+            next_cursor?: number | null;
             tasks: components["schemas"]["TaskState"][];
         };
         /**
@@ -567,7 +572,12 @@ export interface operations {
     };
     tasks_by_keeper: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Cursor from a previous response's next_cursor */
+                after?: number;
+                /** @description Tasks per page (default 50, max 200) */
+                limit?: number;
+            };
             header?: never;
             path: {
                 /** @description Keeper address */
@@ -593,7 +603,7 @@ export interface operations {
             query?: {
                 /** @description executions (default) or reward */
                 rank_by?: string;
-                /** @description Unix timestamp; omit for all time */
+                /** @description Unix timestamp, normalized to 60s windows; omit for all time */
                 since?: number;
                 /** @description Entries to return (default 25, max 200) */
                 limit?: number;
@@ -626,7 +636,12 @@ export interface operations {
     };
     tasks_by_owner: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Cursor from a previous response's next_cursor */
+                after?: number;
+                /** @description Tasks per page (default 50, max 200) */
+                limit?: number;
+            };
             header?: never;
             path: {
                 /** @description Owner address */
@@ -649,7 +664,10 @@ export interface operations {
     };
     get_task: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum history events to return (default 50, max 200) */
+                limit?: number;
+            };
             header?: never;
             path: {
                 /** @description Task id */

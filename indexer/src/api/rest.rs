@@ -25,6 +25,35 @@ const DEFAULT_PAGE_SIZE: u32 = 50;
 /// Largest page a caller may request, so one request cannot pull the feed.
 const MAX_PAGE_SIZE: u32 = 500;
 
+/// Default tasks per page.
+pub const DEFAULT_TASK_PAGE_SIZE: u32 = 50;
+/// Maximum tasks allowed per page request.
+pub const MAX_TASK_PAGE_SIZE: u32 = 200;
+
+/// Default history events returned for a single task.
+pub const DEFAULT_TASK_HISTORY_LIMIT: u32 = 50;
+/// Maximum history events returned for a single task.
+pub const MAX_TASK_HISTORY_LIMIT: u32 = 200;
+
+/// Alignment for public leaderboard time windows (60 seconds).
+pub const LEADERBOARD_WINDOW_ALIGNMENT_SECS: i64 = 60;
+
+/// Query parameters for task lists by owner or keeper.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TaskListQuery {
+    /// Cursor from a previous response's `next_cursor`.
+    pub after: Option<u64>,
+    /// Tasks per page (default 50, max 200).
+    pub limit: Option<u32>,
+}
+
+/// Query parameters for task detail history.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TaskQuery {
+    /// Maximum history events to return (default 50, max 200).
+    pub limit: Option<u32>,
+}
+
 /// Every v1 route.
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -99,12 +128,15 @@ pub async fn health(State(state): State<ApiState>) -> Result<Json<HealthResponse
     }))
 }
 
-/// One task, with its full observed history.
+/// One task, with its observed history bounded by limit.
 #[utoipa::path(
     get,
     path = "/tasks/{task_id}",
     tag = "indexer",
-    params(("task_id" = u64, Path, description = "Task id")),
+    params(
+        ("task_id" = u64, Path, description = "Task id"),
+        ("limit" = Option<u32>, Query, description = "Maximum history events to return (default 50, max 200)")
+    ),
     responses(
         (status = 200, description = "Task state and history", body = TaskDetail),
         (status = 404, description = "No such task has been indexed", body = ApiError)
@@ -113,79 +145,98 @@ pub async fn health(State(state): State<ApiState>) -> Result<Json<HealthResponse
 pub async fn get_task(
     State(state): State<ApiState>,
     Path(task_id): Path<u64>,
+    Query(query): Query<TaskQuery>,
 ) -> Result<Json<TaskDetail>, Failure> {
     let store = state.ingestor.store();
-    let history = store.task_history(task_id).await.map_err(internal)?;
     let task = store
         .task_state(task_id)
         .await
         .map_err(internal)?
         .ok_or_else(|| not_found("no task with that id has been indexed"))?;
 
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_TASK_HISTORY_LIMIT)
+        .clamp(1, MAX_TASK_HISTORY_LIMIT);
+    let history = store
+        .task_history_bounded(task_id, limit)
+        .await
+        .map_err(internal)?;
+
     Ok(Json(TaskDetail { task, history }))
 }
 
-/// Tasks registered by an owner.
+/// Tasks registered by an owner, paginated and capped.
 #[utoipa::path(
     get,
     path = "/owners/{owner}/tasks",
     tag = "indexer",
-    params(("owner" = String, Path, description = "Owner address")),
+    params(
+        ("owner" = String, Path, description = "Owner address"),
+        ("after" = Option<u64>, Query, description = "Cursor from a previous response's next_cursor"),
+        ("limit" = Option<u32>, Query, description = "Tasks per page (default 50, max 200)")
+    ),
     responses((status = 200, description = "Tasks for the owner", body = TaskListResponse))
 )]
 pub async fn tasks_by_owner(
     State(state): State<ApiState>,
     Path(owner): Path<String>,
+    Query(query): Query<TaskListQuery>,
 ) -> Result<Json<TaskListResponse>, Failure> {
-    // Normalized here (not just inside `task_ids_by_owner`) so the response's
-    // own `address` field echoes the canonical form too, e.g. a muxed
-    // address the caller passed resolves to the underlying account it
-    // actually queried (issue 0364).
     let owner = normalize_address(&owner).unwrap_or(owner);
-    let store = state.ingestor.store();
-    let ids = store.task_ids_by_owner(&owner).await.map_err(internal)?;
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_TASK_PAGE_SIZE)
+        .clamp(1, MAX_TASK_PAGE_SIZE);
 
-    let mut tasks = Vec::with_capacity(ids.len());
-    for id in ids {
-        if let Some(task) = store.task_state(id).await.map_err(internal)? {
-            tasks.push(task);
-        }
-    }
+    let store = state.ingestor.store();
+    let (ids, next_cursor) = store
+        .task_ids_by_owner_paged(&owner, query.after, limit)
+        .await
+        .map_err(internal)?;
+    let tasks = store.task_states(&ids).await.map_err(internal)?;
 
     Ok(Json(TaskListResponse {
         address: owner,
         tasks,
+        next_cursor,
     }))
 }
 
-/// Tasks a keeper has claimed or executed.
+/// Tasks a keeper has claimed or executed, paginated and capped.
 #[utoipa::path(
     get,
     path = "/keepers/{keeper}/tasks",
     tag = "indexer",
-    params(("keeper" = String, Path, description = "Keeper address")),
+    params(
+        ("keeper" = String, Path, description = "Keeper address"),
+        ("after" = Option<u64>, Query, description = "Cursor from a previous response's next_cursor"),
+        ("limit" = Option<u32>, Query, description = "Tasks per page (default 50, max 200)")
+    ),
     responses((status = 200, description = "Tasks for the keeper", body = TaskListResponse))
 )]
 pub async fn tasks_by_keeper(
     State(state): State<ApiState>,
     Path(keeper): Path<String>,
+    Query(query): Query<TaskListQuery>,
 ) -> Result<Json<TaskListResponse>, Failure> {
-    // See tasks_by_owner's comment: normalized here too so the response's
-    // `address` field echoes the canonical form (issue 0364).
     let keeper = normalize_address(&keeper).unwrap_or(keeper);
-    let store = state.ingestor.store();
-    let ids = store.task_ids_by_keeper(&keeper).await.map_err(internal)?;
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_TASK_PAGE_SIZE)
+        .clamp(1, MAX_TASK_PAGE_SIZE);
 
-    let mut tasks = Vec::with_capacity(ids.len());
-    for id in ids {
-        if let Some(task) = store.task_state(id).await.map_err(internal)? {
-            tasks.push(task);
-        }
-    }
+    let store = state.ingestor.store();
+    let (ids, next_cursor) = store
+        .task_ids_by_keeper_paged(&keeper, query.after, limit)
+        .await
+        .map_err(internal)?;
+    let tasks = store.task_states(&ids).await.map_err(internal)?;
 
     Ok(Json(TaskListResponse {
         address: keeper,
         tasks,
+        next_cursor,
     }))
 }
 
@@ -250,9 +301,10 @@ const MAX_LEADERBOARD_SIZE: u32 = 200;
 /// Query parameters for the leaderboard.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct LeaderboardQuery {
-    /// `executions` (default) or `reward`.
+    /// `executions` (default), `reward`, or `reputation`.
     pub rank_by: Option<String>,
     /// Only count executions at or after this Unix timestamp; omit for all time.
+    /// Values are normalized to 60s windows to prevent arbitrary cache misses.
     pub since: Option<i64>,
     /// Entries to return, capped at 200.
     pub limit: Option<u32>,
@@ -268,7 +320,7 @@ pub struct LeaderboardQuery {
     tag = "indexer",
     params(
         ("rank_by" = Option<String>, Query, description = "executions (default) or reward"),
-        ("since" = Option<i64>, Query, description = "Unix timestamp; omit for all time"),
+        ("since" = Option<i64>, Query, description = "Unix timestamp, normalized to 60s windows; omit for all time"),
         ("limit" = Option<u32>, Query, description = "Entries to return (default 25, max 200)")
     ),
     responses(
@@ -298,20 +350,27 @@ pub async fn keeper_leaderboard(
         .unwrap_or(DEFAULT_LEADERBOARD_SIZE)
         .clamp(1, MAX_LEADERBOARD_SIZE);
 
-    // Served from cache within its TTL. The key is the full parameter set, so
-    // two requests share an entry only when they would produce the same
-    // answer -- see `cache` for why this is a TTL rather than explicit
-    // invalidation.
+    // Normalize `since` to a stable window boundary (e.g. 60 seconds) so arbitrary
+    // high-cardinality timestamps map to a shared cache entry rather than triggering
+    // full table scans on every distinct second.
+    let since = query.since.map(|s| {
+        if s <= 0 {
+            0
+        } else {
+            (s / LEADERBOARD_WINDOW_ALIGNMENT_SECS) * LEADERBOARD_WINDOW_ALIGNMENT_SECS
+        }
+    });
+
     let key = LeaderboardKey {
         rank_by,
-        since: query.since,
+        since,
         limit,
     };
     let store = state.ingestor.store();
     let board = state
         .caches
         .leaderboard
-        .get_or_insert_with(key, || leaderboard(store, rank_by, query.since, limit))
+        .get_or_insert_with(key, || leaderboard(store, rank_by, since, limit))
         .await
         .map_err(internal)?;
 
@@ -675,9 +734,10 @@ mod tests {
         assert_eq!(body["rank_by"], "reward");
 
         // The fixture's execution closes at 500, so a later window excludes it.
+        // `since` is normalized to a 60-second window boundary (100000 -> 99960).
         let (_, body) = get_json(&app, "/v1/leaderboard?since=100000").await;
         assert!(body["entries"].as_array().expect("entries").is_empty());
-        assert_eq!(body["since"], 100000);
+        assert_eq!(body["since"], 99960);
     }
 
     #[tokio::test]
@@ -694,5 +754,103 @@ mod tests {
         let app = app_with_events().await;
         let (status, _) = get_json(&app, "/v1/events?limit=100000").await;
         assert_eq!(status, StatusCode::OK);
+    }
+
+    async fn app_with_multiple_tasks() -> axum::Router {
+        let store = Store::connect("sqlite::memory:").await.expect("store");
+        for task_id in 1..=4 {
+            let payload = EventPayload::TaskRegistered {
+                task_id,
+                owner: "GOWNER".into(),
+                reward: I128(1_000),
+                deadline: 9_000,
+            };
+            store
+                .insert_event(
+                    100 + task_id as u32,
+                    500,
+                    &format!("tx_reg_{task_id}"),
+                    0,
+                    &payload,
+                )
+                .await
+                .expect("insert");
+            let claim = EventPayload::TaskClaimed {
+                task_id,
+                keeper: "GKEEPER".into(),
+                claim_ledger: 150,
+            };
+            store
+                .insert_event(
+                    200 + task_id as u32,
+                    501,
+                    &format!("tx_claim_{task_id}"),
+                    0,
+                    &claim,
+                )
+                .await
+                .expect("insert");
+        }
+        app_watching(store, crate::progress::IngestionProgress::new(), 60)
+    }
+
+    #[tokio::test]
+    async fn task_lists_support_pagination_and_cursor_continuation() {
+        let app = app_with_multiple_tasks().await;
+
+        let (status, page1) = get_json(&app, "/v1/owners/GOWNER/tasks?limit=2").await;
+        assert_eq!(status, StatusCode::OK);
+        let tasks1 = page1["tasks"].as_array().expect("tasks");
+        assert_eq!(tasks1.len(), 2);
+        assert_eq!(tasks1[0]["task_id"], 4);
+        assert_eq!(tasks1[1]["task_id"], 3);
+        let cursor = page1["next_cursor"].as_u64().expect("next_cursor");
+        assert_eq!(cursor, 3);
+
+        let (status, page2) = get_json(
+            &app,
+            &format!("/v1/owners/GOWNER/tasks?limit=2&after={cursor}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let tasks2 = page2["tasks"].as_array().expect("tasks");
+        assert_eq!(tasks2.len(), 2);
+        assert_eq!(tasks2[0]["task_id"], 2);
+        assert_eq!(tasks2[1]["task_id"], 1);
+        assert!(page2["next_cursor"].is_null(), "end of list");
+    }
+
+    #[tokio::test]
+    async fn task_list_requests_above_the_limit_are_capped() {
+        let app = app_with_multiple_tasks().await;
+        let (status, body) = get_json(&app, "/v1/owners/GOWNER/tasks?limit=99999").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tasks"].as_array().expect("tasks").len(), 4);
+    }
+
+    #[tokio::test]
+    async fn task_detail_bounds_history_without_corrupting_folded_state() {
+        let app = app_with_events().await;
+
+        // Task 1 has 3 events (Registered, Claimed, Executed).
+        // Asking for limit=1 bounds history to 1 event, but state remains Executed.
+        let (status, body) = get_json(&app, "/v1/tasks/1?limit=1").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["task"]["status"], "executed");
+        assert_eq!(body["task"]["net_reward"], "990");
+        assert_eq!(body["history"].as_array().expect("history").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn leaderboard_normalizes_since_to_shared_sixty_second_window() {
+        let app = app_with_events().await;
+
+        let (s1, b1) = get_json(&app, "/v1/leaderboard?since=100010").await;
+        assert_eq!(s1, StatusCode::OK);
+        assert_eq!(b1["since"], 99960);
+
+        let (s2, b2) = get_json(&app, "/v1/leaderboard?since=100059").await;
+        assert_eq!(s2, StatusCode::OK);
+        assert_eq!(b2["since"], 99960);
     }
 }

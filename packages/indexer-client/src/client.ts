@@ -75,6 +75,18 @@ export interface LeaderboardParams {
   limit?: number;
 }
 
+export interface TaskListParams {
+  /** Cursor from a previous response's `next_cursor`. */
+  after?: number;
+  /** Tasks per page (server default 50, max 200). */
+  limit?: number;
+}
+
+export interface TaskDetailParams {
+  /** Limit history events returned (server default 50, max 200). */
+  limit?: number;
+}
+
 export class IndexerClient {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
@@ -113,19 +125,27 @@ export class IndexerClient {
     });
   }
 
-  /** `GET /keepers/{keeper}/tasks` — tasks a keeper has claimed or executed. */
-  tasksByKeeper(keeper: string): Promise<TaskListResponse> {
-    return this.get(`/keepers/${encodeURIComponent(keeper)}/tasks`);
+  /** `GET /keepers/{keeper}/tasks` — tasks a keeper has claimed or executed, paginated and capped. */
+  tasksByKeeper(keeper: string, params: TaskListParams = {}): Promise<TaskListResponse> {
+    return this.get(`/keepers/${encodeURIComponent(keeper)}/tasks`, {
+      after: params.after,
+      limit: params.limit,
+    });
   }
 
-  /** `GET /owners/{owner}/tasks` — tasks registered by an owner. */
-  tasksByOwner(owner: string): Promise<TaskListResponse> {
-    return this.get(`/owners/${encodeURIComponent(owner)}/tasks`);
+  /** `GET /owners/{owner}/tasks` — tasks registered by an owner, paginated and capped. */
+  tasksByOwner(owner: string, params: TaskListParams = {}): Promise<TaskListResponse> {
+    return this.get(`/owners/${encodeURIComponent(owner)}/tasks`, {
+      after: params.after,
+      limit: params.limit,
+    });
   }
 
-  /** `GET /tasks/{task_id}` — one task, with its full observed history. */
-  getTask(taskId: number): Promise<TaskDetail> {
-    return this.get(`/tasks/${encodeURIComponent(String(taskId))}`);
+  /** `GET /tasks/{task_id}` — one task, with its observed history bounded by limit. */
+  getTask(taskId: number, params: TaskDetailParams = {}): Promise<TaskDetail> {
+    return this.get(`/tasks/${encodeURIComponent(String(taskId))}`, {
+      limit: params.limit,
+    });
   }
 
   private async get<T>(

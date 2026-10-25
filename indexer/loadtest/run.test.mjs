@@ -28,6 +28,10 @@ async function stubIndexer({ delayMs = 0 } = {}) {
         res.end(JSON.stringify({ status: "ok", cache: { hits: 9, misses: 1 } }));
       } else if (req.url?.startsWith("/v1/leaderboard")) {
         res.end(JSON.stringify({ rank_by: "executions", since: null, entries: [] }));
+      } else if (req.url?.startsWith("/v1/tasks/")) {
+        res.end(JSON.stringify({ task: { task_id: 1, status: "registered" }, history: [] }));
+      } else if (req.url?.includes("/tasks")) {
+        res.end(JSON.stringify({ address: "G...", tasks: [], next_cursor: null }));
       } else {
         res.end(JSON.stringify({ events: [], next_cursor: null }));
       }
@@ -64,6 +68,9 @@ test("produces a well-formed report against a running server", async () => {
       "leaderboard:repeated",
       "leaderboard:repeated-reward",
       "leaderboard:varied-window",
+      "tasks:owner:page",
+      "tasks:keeper:page",
+      "tasks:detail:bounded-history",
       "events:page",
       "health",
     ]);

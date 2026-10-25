@@ -181,6 +181,25 @@ impl Store {
         rows.iter().map(row_to_event).collect()
     }
 
+    /// Bounded task history, oldest first, up to `limit` events.
+    pub async fn task_history_bounded(
+        &self,
+        task_id: u64,
+        limit: u32,
+    ) -> Result<Vec<IndexedEvent>> {
+        let rows = sqlx::query(
+            "SELECT cursor, ledger, ledger_close_time, tx_hash, event_index, payload
+             FROM events WHERE task_id = ? ORDER BY cursor ASC LIMIT ?",
+        )
+        .bind(task_id as i64)
+        .bind(i64::from(limit))
+        .fetch_all(&self.pool)
+        .await
+        .context("reading bounded task history")?;
+
+        rows.iter().map(row_to_event).collect()
+    }
+
     /// Current state of one task, folded from its full history.
     ///
     /// Returns `None` for a task the indexer has never seen a registration
@@ -190,6 +209,84 @@ impl Store {
     pub async fn task_state(&self, task_id: u64) -> Result<Option<TaskState>> {
         let history = self.task_history(task_id).await?;
         Ok(TaskState::fold(task_id, &history))
+    }
+
+    /// Batch load task states for a slice of task ids in a single query.
+    pub async fn task_states(&self, task_ids: &[u64]) -> Result<Vec<TaskState>> {
+        if task_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut qb = sqlx::QueryBuilder::new(
+            "SELECT task_id, cursor, ledger, ledger_close_time, tx_hash, event_index, payload
+             FROM events
+             WHERE task_id IN (",
+        );
+        let mut separated = qb.separated(", ");
+        for id in task_ids {
+            separated.push_bind(*id as i64);
+        }
+        separated.push_unseparated(") ORDER BY cursor ASC");
+
+        let rows = qb
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .context("batch reading task events")?;
+
+        let mut events_by_task: std::collections::HashMap<u64, Vec<IndexedEvent>> =
+            std::collections::HashMap::new();
+        for row in rows {
+            let task_id: i64 = row.get("task_id");
+            let event = row_to_event(&row)?;
+            events_by_task
+                .entry(task_id as u64)
+                .or_default()
+                .push(event);
+        }
+
+        let mut tasks = Vec::with_capacity(task_ids.len());
+        for id in task_ids {
+            if let Some(events) = events_by_task.get(id) {
+                if let Some(task) = TaskState::fold(*id, events) {
+                    tasks.push(task);
+                }
+            }
+        }
+
+        Ok(tasks)
+    }
+
+    /// Paged task ids registered by an owner, newest first.
+    pub async fn task_ids_by_owner_paged(
+        &self,
+        owner: &str,
+        after: Option<u64>,
+        limit: u32,
+    ) -> Result<(Vec<u64>, Option<u64>)> {
+        let fetch = i64::from(limit) + 1;
+        let rows = sqlx::query(
+            "SELECT DISTINCT task_id FROM events
+             WHERE owner_address = ?1 AND task_id IS NOT NULL
+               AND (?2 IS NULL OR task_id < ?2)
+             ORDER BY task_id DESC
+             LIMIT ?3",
+        )
+        .bind(normalized_or_as_given(owner))
+        .bind(after.map(|a| a as i64))
+        .bind(fetch)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading task ids by owner")?;
+
+        let has_more = rows.len() as i64 > i64::from(limit);
+        let ids: Vec<u64> = rows
+            .into_iter()
+            .take(limit as usize)
+            .map(|r| r.get::<i64, _>("task_id") as u64)
+            .collect();
+        let next_cursor = if has_more { ids.last().copied() } else { None };
+        Ok((ids, next_cursor))
     }
 
     /// Task ids registered by an owner, newest first.
@@ -208,6 +305,38 @@ impl Store {
             .iter()
             .map(|r| r.get::<i64, _>("task_id") as u64)
             .collect())
+    }
+
+    /// Paged task ids claimed or executed by a keeper, newest first.
+    pub async fn task_ids_by_keeper_paged(
+        &self,
+        keeper: &str,
+        after: Option<u64>,
+        limit: u32,
+    ) -> Result<(Vec<u64>, Option<u64>)> {
+        let fetch = i64::from(limit) + 1;
+        let rows = sqlx::query(
+            "SELECT DISTINCT task_id FROM events
+             WHERE keeper_address = ?1 AND task_id IS NOT NULL
+               AND (?2 IS NULL OR task_id < ?2)
+             ORDER BY task_id DESC
+             LIMIT ?3",
+        )
+        .bind(normalized_or_as_given(keeper))
+        .bind(after.map(|a| a as i64))
+        .bind(fetch)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading task ids by keeper")?;
+
+        let has_more = rows.len() as i64 > i64::from(limit);
+        let ids: Vec<u64> = rows
+            .into_iter()
+            .take(limit as usize)
+            .map(|r| r.get::<i64, _>("task_id") as u64)
+            .collect();
+        let next_cursor = if has_more { ids.last().copied() } else { None };
+        Ok((ids, next_cursor))
     }
 
     /// Task ids a keeper has claimed or executed, newest first.
