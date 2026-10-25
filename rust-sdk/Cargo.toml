@@ -29,3 +29,4 @@ governance = { version = "0.1.0", path = "../contracts/governance", package = "k
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
+governance-token = { path = "../contracts/governance-token" }
