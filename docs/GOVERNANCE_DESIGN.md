@@ -82,6 +82,94 @@ Vesting is enforced directly in `contracts/governance-token/src/lib.rs` (Issue #
 - Any transfer exceeding the vested balance is rejected with `TokenError::TokensLocked`.
 - Vesting is an enforced smart contract rule, never an off-chain promise.
 
+### 2.4 Retroactive Keeper Allocation: Snapshot & Claim Specification (Issue #506)
+
+Issue 0360 dedicated **40% of the initial supply (40,000,000 $KPRS)** to early keepers and community contributors based on verified execution and reliability history. This section specifies the exact snapshot criteria, the deterministic activity conversion formula, and the gas-efficient Merkle-proof claim mechanism.
+
+#### 2.4.1 Eligibility Snapshot & Cutoff Point
+
+1. **Source of Truth**:
+   - The canonical Stellar ledger history ingested by the Keeper Network Indexer (`indexer/postgres`).
+   - The primary data source is the indexed `task_executed` events emitted by `KeeperRegistry`:
+     - Contract: `REGISTRY_CONTRACT_ID`
+     - Topic: `(Symbol::new(&env, "task_executed"), task_id: u64, keeper_address: Address)`
+     - Data: `{ reward_stroops: i128, execution_duration: u64, proof_hash: BytesN<32> }`
+   - Cross-referenced with the reputation scores derived in Epic E07 (Issues #318–#321), verifying sustained availability and task completion integrity.
+
+2. **Snapshot Boundary**:
+   - **Genesis Sequence (`ledger_genesis`)**: The ledger sequence of the initial `KeeperRegistry` contract deployment on Stellar Mainnet.
+   - **Cutoff Sequence (`ledger_cutoff`)**: The exact ledger sequence where the $KPRS Token contract (`contracts/governance-token`) is deployed and initialized (`DataKey::Initialized`).
+   - Any task execution occurring after `ledger_cutoff` earns standard runtime execution rewards only and is ineligible for the retroactive genesis token distribution.
+
+3. **Deterministic Activity Conversion Formula**:
+   To prevent sybil manipulation (such as self-dealing zero-value dust tasks) while rewarding genuine operational service:
+   - **Minimum Eligibility Threshold**: A keeper must have executed at least **10 successful tasks** across distinct task creators or maintained a continuous uptime/reputation score $\ge 50$ (per Epic E07).
+   - **Keeper Activity Score ($S_k$)**:
+     $$S_k = \left( N_k \times w_{\text{count}} \right) + \left( \log_{10}(V_k + 1) \times w_{\text{vol}} \right) + \left( R_k \times w_{\text{rep}} \right)$$
+     where:
+     - $N_k$ = verified execution count in the snapshot window.
+     - $V_k$ = total task reward volume processed by keeper $k$ (in stroops).
+     - $R_k$ = historical reputation score $\in [0, 100]$ at cutoff.
+     - Weights: $w_{\text{count}} = 1.0$, $w_{\text{vol}} = 0.5$, $w_{\text{rep}} = 2.0$.
+   - **Individual Keeper Allocation ($A_k$)**:
+     $$A_k = 40{,}000{,}000\text{ KPRS} \times \frac{S_k}{\sum_{j} S_j}$$
+   - Computed allocations are normalized, floored to 7 decimals (`base units`), with any rounding remainder allocated to the DAO Treasury.
+
+4. **Auditability & Determinism**:
+   - The snapshot computation is implemented as a deterministic query over the indexed database history:
+     ```sql
+     SELECT keeper_address, count(*) AS executions, sum(reward_stroops) AS volume
+     FROM task_executions
+     WHERE ledger_sequence <= :ledger_cutoff
+     GROUP BY keeper_address
+     HAVING count(*) >= 10;
+     ```
+   - Given the database dump or RPC replay up to `ledger_cutoff`, any validator, operator, or token holder can reproduce the exact list of `(address, allocation)` pairs bit-for-bit.
+
+#### 2.4.2 Claim Architecture: Merkle-Proof Distribution
+
+Rather than storing thousands of individual allocation balances in on-chain instance storage (which would cause exorbitant ledger rent and transaction gas costs), the retroactive allocation uses a **Merkle Distributor Contract** (`contracts/merkle-distributor`):
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                 Merkle Tree Root (32-byte hash)                 │
+│              Stored on-chain in contract storage                │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │
+                 ┌───────────────┴───────────────┐
+                 ▼                               ▼
+       Intermediate Hash               Intermediate Hash
+         ┌───────┴───────┐               ┌───────┴───────┐
+         ▼               ▼               ▼               ▼
+     Leaf(A, amt)    Leaf(B, amt)    Leaf(C, amt)    Leaf(D, amt)
+```
+
+1. **Leaf Format**:
+   - Standard double-hash format to prevent second-preimage vulnerabilities:
+     $$\text{Leaf}_k = \text{SHA-256}\left( \text{claimant\_address} \parallel \text{amount\_stroops} \right)$$
+   - Both `claimant_address` (Stellar `Address` / 32-byte StrKey pubkey) and `amount_stroops` (`i128`) are serialized using standard canonical big-endian XDR bytes.
+
+2. **On-Chain Verification & Claim Entry Point**:
+   ```rust
+   pub fn claim(
+       env: Env,
+       claimant: Address,
+       amount: i128,
+       proof: Vec<BytesN<32>>,
+   ) -> Result<(), DistError>;
+   ```
+   - **Authentication**: `claimant.require_auth()` guarantees only the eligible keeper key can initiate the claim.
+   - **Double-Claim Protection**: The contract tracks claimed status via persistent storage:
+     `env.storage().persistent().has(&DataKey::Claimed(claimant))`
+     If already claimed, reverts with `DistError::AlreadyClaimed`.
+   - **Proof Validation**: The contract recomputes the Merkle root from the leaf and `proof` hashes. If `computed_root != stored_root`, reverts with `DistError::InvalidProof`.
+   - **Direct Transfer**: Invokes `token.transfer(&distributor_address, &claimant, &amount)`. Tokens are delivered directly into the keeper's address, instantly granting voting power.
+
+3. **Claim Window & DAO Treasury Reversion**:
+   - **180-Day Claim Period**: Keepers have **180 calendar days** (~2,592,000 ledgers) from distributor deployment to submit their claim.
+   - **Permissionless Sweep**: Once the claim period expires (`now >= deploy_timestamp + 180 days`), any caller may invoke `sweep_unclaimed()`.
+   - **Reversion Destination**: All remaining unclaimed KPRS tokens are transferred directly to the `Treasury` contract balance, dedicated to future ecosystem incentives and DAO-directed bounties. No retroactive tokens are burned or permanently locked.
+
 ---
 
 ## 3. Proposal Mechanism & Governable Parameters
@@ -265,6 +353,7 @@ A dedicated test suite in `contracts/governance/src/test.rs` verifies that:
 | **Token Standard** | Standard Soroban Fungible Token (SEP-41) | Interoperable across Stellar ecosystem, wallets, and DEXs |
 | **Total Supply** | 100,000,000 $KPRS (fixed) | Predictable, inflation-free governance base |
 | **Vesting** | 2-year linear, 6-month cliff for team (20%) | Enforced directly in contract code |
+| **Retroactive Keeper Allocation** | 40% (40M KPRS) via Merkle distributor | Deterministic snapshot from indexer; 180-day claim window; unclaimed reverts to DAO Treasury |
 | **Proposal Threshold**| 100,000 KPRS (0.1% supply) | High enough to prevent spam; low enough to be accessible |
 | **Governable Scope** | Closed, enumerated parameter enum (v1) | Eliminates arbitrary execution attack surface |
 | **Voting Mechanism** | 1 token = 1 vote at snapshot ledger | Prevents flash-loan manipulation; simple & verifiable |
