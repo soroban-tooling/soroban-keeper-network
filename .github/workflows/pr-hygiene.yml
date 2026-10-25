@@ -1,5 +1,12 @@
 name: PR Hygiene
 
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
 # Fast, advisory checks on the shape of a pull request — title, size, and
 # obvious footguns in the diff. Runs automatically on every PR.
 #
@@ -20,6 +27,19 @@ concurrency:
   group: pr-hygiene-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+jobs:
+  # Release notes are built from CHANGELOG.md, so user-facing contract changes
+  # must come with a CHANGELOG entry. Add the `no-changelog` label to opt out.
+  changelog:
+    name: CHANGELOG entry for contract changes
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require CHANGELOG.md when contract source changes
 # Read-only. This workflow deliberately takes no write permissions so it
 # behaves identically for fork PRs, which is where most contributions arrive.
 permissions:
@@ -84,6 +104,28 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          set -euo pipefail
+
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+
+          # Contract source under contracts/*/src, excluding unit-test code
+          # (src/test/ and src/test.rs), which is not user-facing.
+          contract_src="$(grep -E '^contracts/[^/]+/src/' <<< "$changed" \
+            | grep -v -E '^contracts/[^/]+/src/test(/|\.rs$)' || true)"
+
+          if [ -z "$contract_src" ]; then
+            echo "No contract source changes; CHANGELOG entry not required."
+            exit 0
+          fi
+
+          echo "Contract source changes:"
+          echo "$contract_src"
+
+          if grep -qx 'CHANGELOG.md' <<< "$changed"; then
+            echo "CHANGELOG.md is updated."
+          else
+            echo "::error::Contract source changed without a CHANGELOG.md update. Add an entry, or apply the 'no-changelog' label if the change is not user-facing."
+            exit 1
           # Compare against the merge base so unrelated commits landing on the
           # base branch are not counted against this PR.
           base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")

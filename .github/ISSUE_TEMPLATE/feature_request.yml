@@ -21,6 +21,21 @@ body:
     attributes:
       label: Alternatives considered
   - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - contracts
+        - sdk-ts
+        - rust-sdk
+        - indexer
+        - indexer-client
+        - keeper-bot
+        - keeper-bot-v2
+        - docs
+    validations:
+      required: true
+  - type: dropdown
     id: scope
     attributes:
       label: Rough scope
