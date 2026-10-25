@@ -392,6 +392,9 @@ returns `(1, 10000000)` — one incident, 1.0 XLM total slashed.
   - **0077** — signature-based reference verifier (used in this walkthrough)
   - **0078** — oracle-based reference verifier
   - **0079** — transaction-inclusion reference verifier
+  - **0289** — stake storage and `stake_deposit`
+  - **0290** — unbonding: `initiate_unbond` / `withdraw_stake`
+  - **0291** — `slash` and its authorization model
 
 ---
 
@@ -431,6 +434,229 @@ stellar contract invoke --id $TREASURY_ID --source any_user \
   --network testnet \
   -- get_recipient_balance --recipient $RECIPIENT_ADDRESS
 ```
-  - **0289** — stake storage and `stake_deposit`
-  - **0290** — unbonding: `initiate_unbond` / `withdraw_stake`
-  - **0291** — `slash` and its authorization model
+
+---
+
+## Governance proposal lifecycle walkthrough
+
+Epic E09 decentralizes protocol ownership by replacing the single admin key with the **$KPRS governance token** and timelocked **Governance Contract** (`contracts/governance`). This walkthrough demonstrates the complete proposal lifecycle end-to-end on testnet: delegating administrative control, submitting a proposal, casting votes from multiple token holders, recording the outcome, queuing through the mandatory 48-hour timelock, executing permissionlessly, and confirming on-chain that the registry's parameter was updated.
+
+For architectural design, tokenomics, quorum mechanics, and safety invariants, see [`docs/GOVERNANCE_DESIGN.md`](GOVERNANCE_DESIGN.md). For event topic schemas and full history reconstruction, see [`docs/GOVERNANCE_EVENTS.md`](GOVERNANCE_EVENTS.md).
+
+### Environment and accounts
+
+The walkthrough assumes three funded testnet accounts holding $KPRS governance tokens:
+
+- **Proposer / Voter 1 (Alice):** `GB24ZVDX4IAKY53EJCM2PZW4OKQWKFOO4WXABRN2VPBP5BOSQK5U53DM` (5,000,000 $KPRS)
+- **Voter 2 (Bob):** `GD7DLCT74C2BM2J3CPWVIBK6TCRSIV5OEY56KBJ5P4TM7HEMCCOSW46K` (3,000,000 $KPRS)
+- **Voter 3 (Charlie):** `GC5QZVDX4IAKY53EJCM2PZW4OKQWKFOO4WXABRN2VPBP5BOSQK5U99ZZ` (1,000,000 $KPRS)
+- **Permissionless Executor (Anyone):** Any funded testnet keypair
+
+Contract identifiers:
+- `$REGISTRY_ID`: `CDJOYHBS7C2PVJS47BTRDLGBNG2YOE43VX6Y3EWIZPPPKOPRNYQQ54U4`
+- `$GOVERNANCE_ID`: `CCGOVERNANCEEXAMPLEXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX`
+- `$KPRS_TOKEN_ID`: `CCKPRSTOKENEXAMPLEXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX`
+
+---
+
+### Step 1: Decentralize administration (One-time migration handshake)
+
+Before governance can manage registry parameters, administrative ownership must transition from the original deployer key to the governance contract.
+
+As specified in [`docs/GOVERNANCE_DESIGN.md`](GOVERNANCE_DESIGN.md) §6, this requires a two-sided authorization handshake initiated via `accept_admin`:
+
+```bash
+stellar contract invoke \
+  --id $GOVERNANCE_ID \
+  --source admin --network testnet \
+  -- accept_admin \
+  --current_admin GB24ZVDX4IAKY53EJCM2PZW4OKQWKFOO4WXABRN2VPBP5BOSQK5U53DM \
+  --registry CDJOYHBS7C2PVJS47BTRDLGBNG2YOE43VX6Y3EWIZPPPKOPRNYQQ54U4
+```
+
+Verify that the registry's admin view now returns the governance contract ID:
+
+```bash
+stellar contract invoke \
+  --id $REGISTRY_ID \
+  --network testnet \
+  -- admin
+# Returns: "CCGOVERNANCEEXAMPLEXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+```
+
+The original admin key is now permanently locked out of all registry administrative entry points. All parameter modifications must now flow through the governance process.
+
+---
+
+### Step 2: Create a governance proposal
+
+Alice holds 5,000,000 $KPRS (exceeding the 100,000 $KPRS proposal creation threshold per [`docs/GOVERNANCE_DESIGN.md`](GOVERNANCE_DESIGN.md) §3.1). She creates Proposal #1 to reduce the platform fee from 300 bps (3.0%) to 250 bps (2.5%):
+
+```bash
+stellar contract invoke \
+  --id $GOVERNANCE_ID \
+  --source alice --network testnet \
+  -- propose \
+  --proposer GB24ZVDX4IAKY53EJCM2PZW4OKQWKFOO4WXABRN2VPBP5BOSQK5U53DM \
+  --action '{"SetFeeBps": 250}' \
+  --description "Reduce platform execution fee from 300 bps to 250 bps"
+```
+
+**Result:**
+- Returns proposal ID `1`.
+- Snapshots the voting power at the current ledger sequence.
+- Emits the `ProposalCreated` event (`topics: ("proposed", "gov")`, data: `(1, alice, eta)`).
+- Sets proposal state to `Active`.
+
+---
+
+### Step 3: Cast votes from multiple accounts
+
+During the active voting window (7 days / ~100,800 ledgers), token holders cast votes. Per [`docs/GOVERNANCE_DESIGN.md`](GOVERNANCE_DESIGN.md) §4.4, ballots are public and emit `VoteCast` events (`topics: ("vcast", "gov")` with `support`: `0 = Against`, `1 = For`, `2 = Abstain`).
+
+#### Vote 1: Alice votes "For"
+
+```bash
+stellar contract invoke \
+  --id $GOVERNANCE_ID \
+  --source alice --network testnet \
+  -- cast_vote \
+  --voter GB24ZVDX4IAKY53EJCM2PZW4OKQWKFOO4WXABRN2VPBP5BOSQK5U53DM \
+  --proposal_id 1 \
+  --support 1
+```
+*Emits `VoteCast(1, alice, 1, 50000000000000)` (5,000,000 KPRS weighted "For").*
+
+#### Vote 2: Bob votes "For"
+
+```bash
+stellar contract invoke \
+  --id $GOVERNANCE_ID \
+  --source bob --network testnet \
+  -- cast_vote \
+  --voter GD7DLCT74C2BM2J3CPWVIBK6TCRSIV5OEY56KBJ5P4TM7HEMCCOSW46K \
+  --proposal_id 1 \
+  --support 1
+```
+*Emits `VoteCast(1, bob, 1, 30000000000000)` (3,000,000 KPRS weighted "For").*
+
+#### Vote 3: Charlie votes "Against"
+
+```bash
+stellar contract invoke \
+  --id $GOVERNANCE_ID \
+  --source charlie --network testnet \
+  -- cast_vote \
+  --voter GC5QZVDX4IAKY53EJCM2PZW4OKQWKFOO4WXABRN2VPBP5BOSQK5U99ZZ \
+  --proposal_id 1 \
+  --support 0
+```
+*Emits `VoteCast(1, charlie, 0, 10000000000000)` (1,000,000 KPRS weighted "Against").*
+
+#### Inspect Proposal Tally:
+
+```bash
+stellar contract invoke \
+  --id $GOVERNANCE_ID \
+  --network testnet \
+  -- get_proposal \
+  --proposal_id 1
+```
+**Tally Summary:**
+- **Votes For:** 8,000,000 KPRS
+- **Votes Against:** 1,000,000 KPRS
+- **Total Participation:** 9,000,000 KPRS (satisfies 4,000,000 KPRS quorum, > 50% majority For).
+
+---
+
+### Step 4: Finalize the outcome
+
+Once the voting period concludes, anyone can trigger `record_outcome` to evaluate quorum and majority conditions:
+
+```bash
+stellar contract invoke \
+  --id $GOVERNANCE_ID \
+  --source anyone --network testnet \
+  -- record_outcome \
+  --proposal_id 1
+```
+
+**Result:**
+- Quorum is satisfied (`9,000,000 >= 4,000,000 KPRS`) and `For > Against`.
+- Emits `ProposalPassed` (`topics: ("passed", "gov")`, data: `(1, 80000000000000, 10000000000000, 0)`).
+- Proposal status updates from `Active` to `Succeeded`.
+
+---
+
+### Step 5: Queue the proposal in the timelock
+
+Per [`docs/GOVERNANCE_DESIGN.md`](GOVERNANCE_DESIGN.md) §5.1, passed proposals cannot execute immediately; they must enter a mandatory 48-hour timelock delay (~28,800 ledgers) to give keepers and protocol users a grace period to review changes:
+
+```bash
+stellar contract invoke \
+  --id $GOVERNANCE_ID \
+  --source anyone --network testnet \
+  -- queue_proposal \
+  --proposal_id 1
+```
+
+**Result:**
+- Sets `eta = current_ledger + 28800`.
+- Emits `ProposalQueued` (`topics: ("queued", "gov")`, data: `(1, eta)`).
+- Proposal status updates from `Succeeded` to `Queued`.
+
+---
+
+### Step 6: Verify timelock delay enforcement
+
+Attempting to execute the proposal before the timelock expiration is rejected:
+
+```bash
+stellar contract invoke \
+  --id $GOVERNANCE_ID \
+  --source anyone --network testnet \
+  -- execute_proposal \
+  --proposal_id 1
+```
+
+**Result:**
+Transaction reverts with `GovernanceError::TimelockNotElapsed` (Error code 7). Proposal remains safely locked in queue.
+
+---
+
+### Step 7: Permissionless execution
+
+Once 48 hours (~28,800 ledgers) have elapsed and `current_ledger >= eta`, **any account** can call `execute_proposal`:
+
+```bash
+stellar contract invoke \
+  --id $GOVERNANCE_ID \
+  --source anyone --network testnet \
+  -- execute_proposal \
+  --proposal_id 1
+```
+
+**Internal Execution Flow:**
+1. **Checks:** Verifies `status == Queued` and `current_ledger >= eta`.
+2. **Effects:** Sets proposal status to `Executed` (Checks-Effects-Interactions pattern preventing reentrancy and replay).
+3. **Interactions:** The governance contract calls `KeeperRegistryClient::set_fee_bps(250)`.
+4. Emits `ProposalExecuted` (`topics: ("executed", "gov")`, data: `(1,)`).
+
+---
+
+### Step 8: Confirm registry parameter updated
+
+Confirm on-chain that the registry's fee parameter changed without a human admin:
+
+```bash
+stellar contract invoke \
+  --id $REGISTRY_ID \
+  --network testnet \
+  -- fee_bps
+```
+
+**Result:**
+Returns `250` (2.50%).
+
+The fee parameter has been updated from `300` to `250` through a transparent, community-voted, timelocked governance proposal.
+
