@@ -239,3 +239,10 @@ fn test_historical_balance_at_checkpoints() {
     assert_eq!(client.balance_at(&user_a, &200), 600 * ONE_TOKEN);
     assert_eq!(client.balance_at(&user_b, &200), 400 * ONE_TOKEN);
 }
+
+#[test]
+fn test_governance_token_version() {
+    let Setup { client, .. } = setup();
+    assert_eq!(client.version(), 1);
+    assert_eq!(VERSION, 1);
+}

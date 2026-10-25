@@ -59,6 +59,7 @@ pub enum DataKey {
     Checkpoint(Address, u32),
 }
 
+pub const VERSION: u32 = 1;
 pub const DECIMALS: u32 = 7;
 pub const ONE_TOKEN: i128 = 10_000_000; // 10^7 stroops / base units
 
@@ -567,6 +568,10 @@ impl GovernanceToken {
         } else {
             0
         }
+    }
+
+    pub fn version(_env: Env) -> u32 {
+        VERSION
     }
 
     // ── Internal Helpers ───────────────────────────────────────────────────
