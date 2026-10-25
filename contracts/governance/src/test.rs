@@ -438,3 +438,219 @@ fn test_cannot_vote_with_zero_power() {
     assert_eq!(res, Err(Ok(GovernanceError::InsufficientVotingPower)));
 }
 
+#[test]
+fn test_proposal_fails_when_below_quorum_regardless_of_lopsided_votes() {
+    let TestContext {
+        env,
+        client,
+        token_client,
+        early_keepers,
+        eligible_proposer,
+        ..
+    } = setup();
+
+    env.ledger().set_sequence_number(100);
+
+    let voter_for = Address::generate(&env);
+    // 500,000 KPRS is 100% of the cast votes, but far below the 4% quorum (4,000,000 KPRS)
+    let votes_cast = 500_000 * ONE_TOKEN;
+    token_client.transfer(&early_keepers, &voter_for, &votes_cast);
+
+    let action = GovernableAction::SetFeeBps(200);
+    let proposal_id = client.create_proposal(&eligible_proposer, &action);
+    let proposal = client.get_proposal(&proposal_id);
+
+    // Voter casts 100% of votes FOR
+    client.vote(&voter_for, &proposal_id, &VoteChoice::For);
+
+    // Verify while voting is active, cannot evaluate
+    let err_active = client.try_evaluate_proposal(&proposal_id);
+    assert_eq!(err_active, Err(Ok(GovernanceError::VotingStillActive)));
+
+    // Advance past voting_end
+    env.ledger().set_sequence_number((proposal.voting_end as u32) + 1);
+
+    // Public state checks
+    assert_eq!(client.is_quorum_met(&proposal_id), false);
+    assert_eq!(client.is_passing_threshold_met(&proposal_id), true);
+    assert_eq!(
+        client.get_proposal_status(&proposal_id),
+        ProposalStatus::Defeated
+    );
+
+    // Final evaluation transitions to Defeated due to quorum failure
+    let final_status = client.evaluate_proposal(&proposal_id);
+    assert_eq!(final_status, ProposalStatus::Defeated);
+
+    let defeated_prop = client.get_proposal(&proposal_id);
+    assert_eq!(defeated_prop.status, ProposalStatus::Defeated);
+}
+
+#[test]
+fn test_proposal_meeting_quorum_but_below_passing_threshold_fails() {
+    let TestContext {
+        env,
+        client,
+        token_client,
+        early_keepers,
+        eligible_proposer,
+        ..
+    } = setup();
+
+    env.ledger().set_sequence_number(100);
+
+    let voter_for = Address::generate(&env);
+    let voter_against = Address::generate(&env);
+
+    // Total participating votes: 2.0M + 3.0M = 5.0M KPRS (meets 4.0M quorum)
+    token_client.transfer(&early_keepers, &voter_for, &(2_000_000 * ONE_TOKEN));
+    token_client.transfer(&early_keepers, &voter_against, &(3_000_000 * ONE_TOKEN));
+
+    let action = GovernableAction::SetMinReward(10_000);
+    let proposal_id = client.create_proposal(&eligible_proposer, &action);
+    let proposal = client.get_proposal(&proposal_id);
+
+    client.vote(&voter_for, &proposal_id, &VoteChoice::For);
+    client.vote(&voter_against, &proposal_id, &VoteChoice::Against);
+
+    // Advance past voting_end
+    env.ledger().set_sequence_number((proposal.voting_end as u32) + 1);
+
+    assert_eq!(client.is_quorum_met(&proposal_id), true);
+    assert_eq!(client.is_passing_threshold_met(&proposal_id), false);
+    assert_eq!(
+        client.get_proposal_status(&proposal_id),
+        ProposalStatus::Defeated
+    );
+
+    let final_status = client.evaluate_proposal(&proposal_id);
+    assert_eq!(final_status, ProposalStatus::Defeated);
+}
+
+#[test]
+fn test_proposal_tied_votes_meeting_quorum_fails() {
+    let TestContext {
+        env,
+        client,
+        token_client,
+        early_keepers,
+        eligible_proposer,
+        ..
+    } = setup();
+
+    env.ledger().set_sequence_number(100);
+
+    let voter_for = Address::generate(&env);
+    let voter_against = Address::generate(&env);
+
+    // Exact tie: 2.5M vs 2.5M (total 5.0M meets quorum)
+    token_client.transfer(&early_keepers, &voter_for, &(2_500_000 * ONE_TOKEN));
+    token_client.transfer(&early_keepers, &voter_against, &(2_500_000 * ONE_TOKEN));
+
+    let action = GovernableAction::SetReputationFloor(600);
+    let proposal_id = client.create_proposal(&eligible_proposer, &action);
+    let proposal = client.get_proposal(&proposal_id);
+
+    client.vote(&voter_for, &proposal_id, &VoteChoice::For);
+    client.vote(&voter_against, &proposal_id, &VoteChoice::Against);
+
+    env.ledger().set_sequence_number((proposal.voting_end as u32) + 1);
+
+    assert_eq!(client.is_quorum_met(&proposal_id), true);
+    assert_eq!(client.is_passing_threshold_met(&proposal_id), false);
+
+    let final_status = client.evaluate_proposal(&proposal_id);
+    assert_eq!(final_status, ProposalStatus::Defeated);
+}
+
+#[test]
+fn test_proposal_meeting_both_quorum_and_passing_threshold_passes() {
+    let TestContext {
+        env,
+        client,
+        token_client,
+        early_keepers,
+        eligible_proposer,
+        ..
+    } = setup();
+
+    env.ledger().set_sequence_number(100);
+
+    let voter_for = Address::generate(&env);
+    let voter_against = Address::generate(&env);
+    let voter_abstain = Address::generate(&env);
+
+    // 4.5M For, 1.0M Against, 0.5M Abstain = 6.0M total (meets 4.0M quorum)
+    token_client.transfer(&early_keepers, &voter_for, &(4_500_000 * ONE_TOKEN));
+    token_client.transfer(&early_keepers, &voter_against, &(1_000_000 * ONE_TOKEN));
+    token_client.transfer(&early_keepers, &voter_abstain, &(500_000 * ONE_TOKEN));
+
+    let action = GovernableAction::SetFeeBps(300);
+    let proposal_id = client.create_proposal(&eligible_proposer, &action);
+    let proposal = client.get_proposal(&proposal_id);
+
+    client.vote(&voter_for, &proposal_id, &VoteChoice::For);
+    client.vote(&voter_against, &proposal_id, &VoteChoice::Against);
+    client.vote(&voter_abstain, &proposal_id, &VoteChoice::Abstain);
+
+    env.ledger().set_sequence_number((proposal.voting_end as u32) + 1);
+
+    // Meets both criteria
+    assert_eq!(client.is_quorum_met(&proposal_id), true);
+    assert_eq!(client.is_passing_threshold_met(&proposal_id), true);
+    assert_eq!(
+        client.get_proposal_status(&proposal_id),
+        ProposalStatus::Passed
+    );
+
+    let final_status = client.evaluate_proposal(&proposal_id);
+    assert_eq!(final_status, ProposalStatus::Passed);
+
+    let passed_prop = client.get_proposal(&proposal_id);
+    assert_eq!(passed_prop.status, ProposalStatus::Passed);
+}
+
+#[test]
+fn test_deterministic_evaluation_by_any_observer_from_public_state() {
+    let TestContext {
+        env,
+        client,
+        token_client,
+        early_keepers,
+        eligible_proposer,
+        ..
+    } = setup();
+
+    env.ledger().set_sequence_number(100);
+
+    let voter = Address::generate(&env);
+    token_client.transfer(&early_keepers, &voter, &(4_200_000 * ONE_TOKEN));
+
+    let action = GovernableAction::PauseTreasury;
+    let proposal_id = client.create_proposal(&eligible_proposer, &action);
+    client.vote(&voter, &proposal_id, &VoteChoice::For);
+
+    // Any observer can read public parameters and compute outcome
+    let total_supply = client.total_token_supply();
+    let quorum_bps = client.quorum_bps();
+    let quorum_thresh = client.quorum_threshold();
+    assert_eq!(total_supply, 100_000_000 * ONE_TOKEN);
+    assert_eq!(quorum_bps, 400); // 4%
+    assert_eq!(quorum_thresh, 4_000_000 * ONE_TOKEN);
+
+    let (f, a, ab) = client.get_tallies(&proposal_id);
+    let total_votes = f + a + ab;
+    assert_eq!(total_votes >= quorum_thresh, true);
+    assert_eq!(f > a, true);
+
+    // Observer query matches contract status check exactly
+    let proposal = client.get_proposal(&proposal_id);
+    env.ledger().set_sequence_number((proposal.voting_end as u32) + 1);
+
+    assert_eq!(
+        client.get_proposal_status(&proposal_id),
+        ProposalStatus::Passed
+    );
+}
+
+

@@ -118,6 +118,7 @@ impl GovernanceToken {
 
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Initialized, &true);
+        env.storage().instance().extend_ttl(100_000, 300_000);
 
         // Distribute 40% to Early Keepers / Community
         Self::set_balance(&env, &early_keepers, ALLOC_EARLY_KEEPERS);
@@ -520,6 +521,10 @@ impl GovernanceToken {
 
     pub fn symbol(env: Env) -> String {
         String::from_str(&env, "KPRS")
+    }
+
+    pub fn total_supply(_env: Env) -> i128 {
+        TOTAL_SUPPLY
     }
 
     /// Returns the historical balance of `id` at `ledger`, derived from checkpoints.

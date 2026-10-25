@@ -191,6 +191,7 @@ pub enum DataKey {
     TimelockDelay,
     QuorumBps,
     ProposalCount,
+    TotalSupply,
     Proposal(u64),
     Vote(u64, Address),
     VoterPower(u64, Address),
@@ -212,6 +213,9 @@ impl GovernanceContract {
             return Err(GovernanceError::AlreadyInitialized);
         }
 
+        let token_client = governance_token::GovernanceTokenClient::new(&env, &kprs_token);
+        let total_supply = token_client.total_supply();
+
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::KprsToken, &kprs_token);
         env.storage().instance().set(&DataKey::Registry, &registry);
@@ -220,6 +224,7 @@ impl GovernanceContract {
         env.storage().instance().set(&DataKey::TimelockDelay, &DEFAULT_TIMELOCK_DELAY);
         env.storage().instance().set(&DataKey::QuorumBps, &DEFAULT_QUORUM_BPS);
         env.storage().instance().set(&DataKey::ProposalCount, &0u64);
+        env.storage().instance().set(&DataKey::TotalSupply, &total_supply);
         env.storage().instance().set(&DataKey::Initialized, &true);
         env.storage()
             .instance()
@@ -601,6 +606,133 @@ impl Governance {
         ledger: u32,
     ) -> Result<i128, GovernanceError> {
         Self::internal_get_voting_power_at(&env, &account, ledger)
+    }
+
+    /// Evaluates an open proposal once its voting period has ended.
+    ///
+    /// Transitions proposal status deterministically:
+    /// - Fails with `ProposalStatus::Defeated` if quorum is not met (`total_votes < quorum_threshold`).
+    /// - Fails with `ProposalStatus::Defeated` if quorum is met but passing threshold is not (`votes_for <= votes_against`).
+    /// - Passes with `ProposalStatus::Passed` if quorum is met AND `votes_for > votes_against`.
+    pub fn evaluate_proposal(env: Env, proposal_id: u64) -> Result<ProposalStatus, GovernanceError> {
+        if !env.storage().instance().has(&DataKey::Initialized) {
+            return Err(GovernanceError::NotInitialized);
+        }
+
+        let mut proposal: Proposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proposal(proposal_id))
+            .ok_or(GovernanceError::ProposalNotFound)?;
+
+        if proposal.status != ProposalStatus::Active {
+            return Ok(proposal.status);
+        }
+
+        let current_ledger = env.ledger().sequence() as u64;
+        if current_ledger <= proposal.voting_end {
+            return Err(GovernanceError::VotingStillActive);
+        }
+
+        let total_votes = proposal
+            .votes_for
+            .checked_add(proposal.votes_against)
+            .and_then(|sum| sum.checked_add(proposal.votes_abstain))
+            .ok_or(GovernanceError::ArithmeticOverflow)?;
+        let quorum = Self::quorum_threshold(env.clone());
+
+        if total_votes < quorum {
+            proposal.status = ProposalStatus::Defeated;
+            env.events().publish(
+                (Symbol::new(&env, "proposal_defeated"), proposal_id),
+                (total_votes, quorum),
+            );
+        } else if proposal.votes_for <= proposal.votes_against {
+            proposal.status = ProposalStatus::Defeated;
+            env.events().publish(
+                (Symbol::new(&env, "proposal_defeated"), proposal_id),
+                (proposal.votes_for, proposal.votes_against),
+            );
+        } else {
+            proposal.status = ProposalStatus::Passed;
+            env.events().publish(
+                (Symbol::new(&env, "proposal_passed"), proposal_id),
+                (proposal.votes_for, proposal.votes_against),
+            );
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_LEDGERS);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Proposal(proposal_id),
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_BUMP_LEDGERS,
+        );
+
+        Ok(proposal.status)
+    }
+
+    /// Returns whether the participating votes on `proposal_id` have met the quorum threshold.
+    pub fn is_quorum_met(env: Env, proposal_id: u64) -> Result<bool, GovernanceError> {
+        let proposal = Self::get_proposal(env.clone(), proposal_id)?;
+        let total_votes = proposal
+            .votes_for
+            .checked_add(proposal.votes_against)
+            .and_then(|sum| sum.checked_add(proposal.votes_abstain))
+            .ok_or(GovernanceError::ArithmeticOverflow)?;
+        let quorum = Self::quorum_threshold(env);
+        Ok(total_votes >= quorum)
+    }
+
+    /// Returns whether the votes in favor exceed the votes against on `proposal_id`.
+    pub fn is_passing_threshold_met(env: Env, proposal_id: u64) -> Result<bool, GovernanceError> {
+        let proposal = Self::get_proposal(env, proposal_id)?;
+        Ok(proposal.votes_for > proposal.votes_against)
+    }
+
+    /// Returns the deterministic status of `proposal_id` evaluated at current ledger sequence.
+    pub fn get_proposal_status(
+        env: Env,
+        proposal_id: u64,
+    ) -> Result<ProposalStatus, GovernanceError> {
+        let proposal = Self::get_proposal(env.clone(), proposal_id)?;
+        if proposal.status != ProposalStatus::Active {
+            return Ok(proposal.status);
+        }
+        let current_ledger = env.ledger().sequence() as u64;
+        if current_ledger <= proposal.voting_end {
+            return Ok(ProposalStatus::Active);
+        }
+        let total_votes = proposal
+            .votes_for
+            .checked_add(proposal.votes_against)
+            .and_then(|sum| sum.checked_add(proposal.votes_abstain))
+            .ok_or(GovernanceError::ArithmeticOverflow)?;
+        let quorum = Self::quorum_threshold(env);
+        if total_votes < quorum || proposal.votes_for <= proposal.votes_against {
+            Ok(ProposalStatus::Defeated)
+        } else {
+            Ok(ProposalStatus::Passed)
+        }
+    }
+
+    /// Returns the total token supply of KPRS.
+    pub fn total_token_supply(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalSupply)
+            .unwrap_or(100_000_000 * ONE_TOKEN)
+    }
+
+    /// Returns the minimum number of voting tokens required for quorum.
+    pub fn quorum_threshold(env: Env) -> i128 {
+        let total_supply = Self::total_token_supply(env.clone());
+        let bps = Self::quorum_bps(env) as i128;
+        (total_supply * bps) / 10_000
     }
 
     /// Read an account's KPRS token balance for governance checks.
