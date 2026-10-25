@@ -7,6 +7,8 @@ members = [
     "contracts/conditions/time-window",
     "contracts/oracle-client",
     "contracts/treasury",
+    "contracts/governance",
+    "contracts/governance-token",
     "contracts/governance-token",
     "contracts/governance",
     "indexer",
