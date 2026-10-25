@@ -204,3 +204,38 @@ fn test_on_chain_vesting_enforces_cliff_and_linear_schedule() {
     assert_eq!(client.balance(&core_team), 0);
     assert_eq!(client.balance(&recipient), ALLOC_CORE_TEAM);
 }
+
+#[test]
+fn test_historical_balance_at_checkpoints() {
+    let Setup {
+        client,
+        env,
+        early_keepers,
+        ..
+    } = setup();
+
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+
+    // Initial state at ledger 100
+    env.ledger().set_sequence_number(100);
+    client.transfer(&early_keepers, &user_a, &(1_000 * ONE_TOKEN));
+    assert_eq!(client.balance(&user_a), 1_000 * ONE_TOKEN);
+    assert_eq!(client.balance_at(&user_a, &100), 1_000 * ONE_TOKEN);
+    assert_eq!(client.balance_at(&user_a, &99), 0);
+
+    // Advance to ledger 200: transfer half to user_b
+    env.ledger().set_sequence_number(200);
+    client.transfer(&user_a, &user_b, &(400 * ONE_TOKEN));
+    assert_eq!(client.balance(&user_a), 600 * ONE_TOKEN);
+    assert_eq!(client.balance(&user_b), 400 * ONE_TOKEN);
+
+    // Historic balances at ledger 100-199 must remain unchanged!
+    assert_eq!(client.balance_at(&user_a, &100), 1_000 * ONE_TOKEN);
+    assert_eq!(client.balance_at(&user_a, &150), 1_000 * ONE_TOKEN);
+    assert_eq!(client.balance_at(&user_b, &150), 0);
+
+    // Balances at ledger 200+ reflect the new state
+    assert_eq!(client.balance_at(&user_a, &200), 600 * ONE_TOKEN);
+    assert_eq!(client.balance_at(&user_b, &200), 400 * ONE_TOKEN);
+}

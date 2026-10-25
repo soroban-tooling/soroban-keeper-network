@@ -38,6 +38,7 @@ testutils = ["soroban-sdk/testutils"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
+governance-token = { path = "../governance-token" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

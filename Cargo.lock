@@ -1500,6 +1500,7 @@ dependencies = [
 name = "keeper-governance"
 version = "0.1.0"
 dependencies = [
+ "governance-token",
  "soroban-sdk",
 ]
 

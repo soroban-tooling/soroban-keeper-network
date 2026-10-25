@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol,
+    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, Symbol,
 };
 
 pub const ONE_TOKEN: i128 = 10_000_000; // 10^7 stroops (7 decimals)
@@ -9,6 +9,11 @@ pub const DEFAULT_PROPOSAL_THRESHOLD: i128 = 100_000 * ONE_TOKEN; // 100,000 KPR
 pub const DEFAULT_VOTING_PERIOD: u32 = 50_400; // ~7 days in ledgers (at ~5s per ledger)
 pub const DEFAULT_TIMELOCK_DELAY: u32 = 28_800; // 48 hours in ledgers (PRD §6.2, §11)
 pub const DEFAULT_QUORUM_BPS: u32 = 400; // 4% of total supply (400 bps)
+
+pub const INSTANCE_BUMP_THRESHOLD: u32 = 100_000;
+pub const INSTANCE_BUMP_LEDGERS: u32 = 300_000;
+pub const PERSISTENT_BUMP_THRESHOLD: u32 = 100_000;
+pub const PERSISTENT_BUMP_LEDGERS: u32 = 300_000;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -30,6 +35,23 @@ pub enum GovernanceError {
     RegistryCallFailed = 14,
     Unauthorized = 15,
     ArithmeticOverflow = 16,
+    InsufficientVotingPower = 17,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum VoteChoice {
+    Against = 0,
+    For = 1,
+    Abstain = 2,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VoteRecord {
+    pub choice: VoteChoice,
+    pub weight: i128,
 }
 
 /// Closed enumeration of governable actions supported by the network (PRD / Issue #488 & #491).
@@ -199,6 +221,9 @@ impl GovernanceContract {
         env.storage().instance().set(&DataKey::QuorumBps, &DEFAULT_QUORUM_BPS);
         env.storage().instance().set(&DataKey::ProposalCount, &0u64);
         env.storage().instance().set(&DataKey::Initialized, &true);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_LEDGERS);
 
         env.events().publish(
             (Symbol::new(&env, "governance_initialized"), admin),
@@ -434,12 +459,148 @@ impl Governance {
             .instance()
             .set(&DataKey::ProposalCount, &proposal_id);
 
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_LEDGERS);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Proposal(proposal_id),
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_BUMP_LEDGERS,
+        );
+
         env.events().publish(
             (Symbol::new(&env, "proposal_created"), proposal_id, proposer),
             voting_end,
         );
 
         Ok(proposal_id)
+    }
+
+    /// Cast a vote on an active proposal.
+    ///
+    /// The voter's voting power is determined by their checkpointed KPRS balance
+    /// at the proposal creation ledger (`proposal.created_at`). This snapshotting
+    /// mechanism guarantees that subsequent token transfers, flash loans, or acquisitions
+    /// during the voting period do not alter voting weight for this proposal.
+    pub fn vote(
+        env: Env,
+        voter: Address,
+        proposal_id: u64,
+        choice: VoteChoice,
+    ) -> Result<(), GovernanceError> {
+        voter.require_auth();
+
+        if !env.storage().instance().has(&DataKey::Initialized) {
+            return Err(GovernanceError::NotInitialized);
+        }
+
+        let mut proposal: Proposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proposal(proposal_id))
+            .ok_or(GovernanceError::ProposalNotFound)?;
+
+        if proposal.status != ProposalStatus::Active {
+            return Err(GovernanceError::VotingEnded);
+        }
+
+        let current_ledger = env.ledger().sequence();
+        if (current_ledger as u64) > proposal.voting_end {
+            return Err(GovernanceError::VotingEnded);
+        }
+
+        let vote_key = DataKey::Vote(proposal_id, voter.clone());
+        if env.storage().persistent().has(&vote_key) {
+            return Err(GovernanceError::AlreadyVoted);
+        }
+
+        let weight =
+            Self::internal_get_voting_power_at(&env, &voter, proposal.created_at as u32)?;
+        if weight <= 0 {
+            return Err(GovernanceError::InsufficientVotingPower);
+        }
+
+        match choice {
+            VoteChoice::For => {
+                proposal.votes_for = proposal
+                    .votes_for
+                    .checked_add(weight)
+                    .ok_or(GovernanceError::ArithmeticOverflow)?;
+            }
+            VoteChoice::Against => {
+                proposal.votes_against = proposal
+                    .votes_against
+                    .checked_add(weight)
+                    .ok_or(GovernanceError::ArithmeticOverflow)?;
+            }
+            VoteChoice::Abstain => {
+                proposal.votes_abstain = proposal
+                    .votes_abstain
+                    .checked_add(weight)
+                    .ok_or(GovernanceError::ArithmeticOverflow)?;
+            }
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+        env.storage()
+            .persistent()
+            .set(&vote_key, &VoteRecord { choice, weight });
+
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_LEDGERS);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Proposal(proposal_id),
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_BUMP_LEDGERS,
+        );
+        env.storage().persistent().extend_ttl(
+            &vote_key,
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_BUMP_LEDGERS,
+        );
+
+        env.events().publish(
+            (Symbol::new(&env, "vote_cast"), proposal_id, voter),
+            (choice as u32, weight),
+        );
+
+        Ok(())
+    }
+
+    /// Returns the current vote tallies `(votes_for, votes_against, votes_abstain)` for a proposal.
+    pub fn get_tallies(env: Env, proposal_id: u64) -> Result<(i128, i128, i128), GovernanceError> {
+        let proposal: Proposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proposal(proposal_id))
+            .ok_or(GovernanceError::ProposalNotFound)?;
+        Ok((proposal.votes_for, proposal.votes_against, proposal.votes_abstain))
+    }
+
+    /// Returns whether `voter` has voted on `proposal_id`.
+    pub fn has_voted(env: Env, proposal_id: u64, voter: Address) -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::Vote(proposal_id, voter))
+    }
+
+    /// Returns the vote record of `voter` on `proposal_id`, if cast.
+    pub fn get_vote(env: Env, proposal_id: u64, voter: Address) -> Option<VoteRecord> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Vote(proposal_id, voter))
+    }
+
+    /// Read an account's historical KPRS token balance at a specific ledger sequence.
+    pub fn get_voting_power_at(
+        env: Env,
+        account: Address,
+        ledger: u32,
+    ) -> Result<i128, GovernanceError> {
+        Self::internal_get_voting_power_at(&env, &account, ledger)
     }
 
     /// Read an account's KPRS token balance for governance checks.
@@ -524,8 +685,23 @@ impl GovernanceContract {
             .get(&DataKey::KprsToken)
             .ok_or(GovernanceError::NotInitialized)?;
 
-        let token_client = token::Client::new(env, &token_addr);
+        let token_client = governance_token::GovernanceTokenClient::new(env, &token_addr);
         Ok(token_client.balance(account))
+    }
+
+    fn internal_get_voting_power_at(
+        env: &Env,
+        account: &Address,
+        ledger: u32,
+    ) -> Result<i128, GovernanceError> {
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::KprsToken)
+            .ok_or(GovernanceError::NotInitialized)?;
+
+        let token_client = governance_token::GovernanceTokenClient::new(env, &token_addr);
+        Ok(token_client.balance_at(account, &ledger))
     }
 
     fn internal_validate_action(action: &GovernableAction) -> Result<(), GovernanceError> {

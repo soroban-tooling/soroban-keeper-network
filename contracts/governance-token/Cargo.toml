@@ -13,7 +13,7 @@ keywords = ["soroban", "stellar", "governance", "kprs", "token"]
 categories = ["cryptography::cryptocurrencies"]
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [features]
 default = []

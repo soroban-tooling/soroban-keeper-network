@@ -41,6 +41,13 @@ pub struct AllowanceValue {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Checkpoint {
+    pub ledger: u32,
+    pub balance: i128,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
@@ -48,6 +55,8 @@ pub enum DataKey {
     Balance(Address),
     Allowance(AllowanceDataKey),
     Vesting(Address),
+    CheckpointCount(Address),
+    Checkpoint(Address, u32),
 }
 
 pub const DECIMALS: u32 = 7;
@@ -513,12 +522,91 @@ impl GovernanceToken {
         String::from_str(&env, "KPRS")
     }
 
+    /// Returns the historical balance of `id` at `ledger`, derived from checkpoints.
+    pub fn balance_at(env: Env, id: Address, ledger: u32) -> i128 {
+        let count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::CheckpointCount(id.clone()))
+            .unwrap_or(0);
+        if count == 0 {
+            return 0;
+        }
+
+        let mut low = 0i64;
+        let mut high = (count as i64) - 1;
+        let mut ans = -1i64;
+
+        while low <= high {
+            let mid = low + (high - low) / 2;
+            let cp: Checkpoint = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Checkpoint(id.clone(), mid as u32))
+                .unwrap();
+            if cp.ledger <= ledger {
+                ans = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+
+        if ans >= 0 {
+            let cp: Checkpoint = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Checkpoint(id.clone(), ans as u32))
+                .unwrap();
+            cp.balance
+        } else {
+            0
+        }
+    }
+
     // ── Internal Helpers ───────────────────────────────────────────────────
 
     fn set_balance(env: &Env, id: &Address, amount: i128) {
         env.storage()
             .persistent()
             .set(&DataKey::Balance(id.clone()), &amount);
+
+        let current_ledger = env.ledger().sequence();
+        let count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::CheckpointCount(id.clone()))
+            .unwrap_or(0);
+
+        if count > 0 {
+            let last_idx = count - 1;
+            let last_cp: Checkpoint = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Checkpoint(id.clone(), last_idx))
+                .unwrap();
+            if last_cp.ledger == current_ledger {
+                env.storage().persistent().set(
+                    &DataKey::Checkpoint(id.clone(), last_idx),
+                    &Checkpoint {
+                        ledger: current_ledger,
+                        balance: amount,
+                    },
+                );
+                return;
+            }
+        }
+
+        env.storage().persistent().set(
+            &DataKey::Checkpoint(id.clone(), count),
+            &Checkpoint {
+                ledger: current_ledger,
+                balance: amount,
+            },
+        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::CheckpointCount(id.clone()), &(count + 1));
     }
 }
 
