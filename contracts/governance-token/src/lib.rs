@@ -575,6 +575,9 @@ impl GovernanceToken {
         env.storage()
             .persistent()
             .set(&DataKey::Balance(id.clone()), &amount);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Balance(id.clone()), 100_000, 300_000);
 
         let current_ledger = env.ledger().sequence();
         let count: u32 = env
@@ -598,6 +601,11 @@ impl GovernanceToken {
                         balance: amount,
                     },
                 );
+                env.storage().persistent().extend_ttl(
+                    &DataKey::Checkpoint(id.clone(), last_idx),
+                    100_000,
+                    300_000,
+                );
                 return;
             }
         }
@@ -609,9 +617,17 @@ impl GovernanceToken {
                 balance: amount,
             },
         );
+        env.storage().persistent().extend_ttl(
+            &DataKey::Checkpoint(id.clone(), count),
+            100_000,
+            300_000,
+        );
         env.storage()
             .persistent()
             .set(&DataKey::CheckpointCount(id.clone()), &(count + 1));
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::CheckpointCount(id.clone()), 100_000, 300_000);
     }
 }
 

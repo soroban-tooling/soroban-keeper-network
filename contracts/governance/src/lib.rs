@@ -676,6 +676,165 @@ impl Governance {
         Ok(proposal.status)
     }
 
+    /// Queues a passed proposal for the configured timelock delay.
+    ///
+    /// Transitions proposal status from `Passed` to `Queued` and schedules execution at `eta`.
+    pub fn queue_proposal(env: Env, proposal_id: u64) -> Result<u64, GovernanceError> {
+        if !env.storage().instance().has(&DataKey::Initialized) {
+            return Err(GovernanceError::NotInitialized);
+        }
+
+        let mut proposal: Proposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proposal(proposal_id))
+            .ok_or(GovernanceError::ProposalNotFound)?;
+
+        if proposal.status == ProposalStatus::Queued {
+            return Ok(proposal.eta);
+        }
+
+        if proposal.status == ProposalStatus::Active {
+            let status = Self::evaluate_proposal(env.clone(), proposal_id)?;
+            if status != ProposalStatus::Passed {
+                return Err(GovernanceError::PassingThresholdNotMet);
+            }
+            proposal = Self::get_proposal(env.clone(), proposal_id)?;
+        }
+
+        if proposal.status != ProposalStatus::Passed {
+            return Err(GovernanceError::ProposalNotQueued);
+        }
+
+        let current_ledger = env.ledger().sequence() as u64;
+        let delay = env
+            .storage()
+            .instance()
+            .get(&DataKey::TimelockDelay)
+            .unwrap_or(DEFAULT_TIMELOCK_DELAY) as u64;
+        let eta = current_ledger
+            .checked_add(delay)
+            .ok_or(GovernanceError::ArithmeticOverflow)?;
+
+        proposal.status = ProposalStatus::Queued;
+        proposal.eta = eta;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_LEDGERS);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Proposal(proposal_id),
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_BUMP_LEDGERS,
+        );
+
+        env.events().publish(
+            (Symbol::new(&env, "proposal_queued"), proposal_id),
+            eta,
+        );
+
+        Ok(eta)
+    }
+
+    /// Executes a queued proposal after its timelock delay has elapsed.
+    pub fn execute_proposal(env: Env, proposal_id: u64) -> Result<(), GovernanceError> {
+        if !env.storage().instance().has(&DataKey::Initialized) {
+            return Err(GovernanceError::NotInitialized);
+        }
+
+        let mut proposal: Proposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proposal(proposal_id))
+            .ok_or(GovernanceError::ProposalNotFound)?;
+
+        if proposal.status == ProposalStatus::Executed {
+            return Err(GovernanceError::ProposalAlreadyExecuted);
+        }
+
+        if proposal.status != ProposalStatus::Queued {
+            return Err(GovernanceError::ProposalNotQueued);
+        }
+
+        let current_ledger = env.ledger().sequence() as u64;
+        if current_ledger < proposal.eta {
+            return Err(GovernanceError::TimelockNotElapsed);
+        }
+
+        // Apply parameter mutations if meta-governance action
+        match &proposal.action {
+            GovernableAction::SetVotingPeriod(period) => {
+                env.storage().instance().set(&DataKey::VotingPeriod, period);
+            }
+            GovernableAction::SetTimelockDelay(delay) => {
+                env.storage().instance().set(&DataKey::TimelockDelay, delay);
+            }
+            GovernableAction::SetQuorumBps(bps) => {
+                env.storage().instance().set(&DataKey::QuorumBps, bps);
+            }
+            GovernableAction::SetProposalThreshold(thresh) => {
+                env.storage().instance().set(&DataKey::ProposalThreshold, thresh);
+            }
+            _ => {}
+        }
+
+        proposal.status = ProposalStatus::Executed;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_BUMP_THRESHOLD, INSTANCE_BUMP_LEDGERS);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Proposal(proposal_id),
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_BUMP_LEDGERS,
+        );
+
+        env.events().publish(
+            (Symbol::new(&env, "proposal_executed"), proposal_id),
+            (),
+        );
+
+        Ok(())
+    }
+
+    /// Returns the remaining delay (in ledgers) before a queued proposal can be executed.
+    pub fn get_remaining_delay(env: Env, proposal_id: u64) -> Result<u64, GovernanceError> {
+        let proposal: Proposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proposal(proposal_id))
+            .ok_or(GovernanceError::ProposalNotFound)?;
+
+        if proposal.status != ProposalStatus::Queued {
+            return Err(GovernanceError::ProposalNotQueued);
+        }
+
+        let current_ledger = env.ledger().sequence() as u64;
+        Ok(proposal.eta.saturating_sub(current_ledger))
+    }
+
+    /// Returns whether `proposal_id` is queued and its timelock has elapsed.
+    pub fn is_executable(env: Env, proposal_id: u64) -> Result<bool, GovernanceError> {
+        let proposal: Proposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proposal(proposal_id))
+            .ok_or(GovernanceError::ProposalNotFound)?;
+
+        if proposal.status != ProposalStatus::Queued {
+            return Ok(false);
+        }
+
+        let current_ledger = env.ledger().sequence() as u64;
+        Ok(current_ledger >= proposal.eta)
+    }
+
     /// Returns whether the participating votes on `proposal_id` have met the quorum threshold.
     pub fn is_quorum_met(env: Env, proposal_id: u64) -> Result<bool, GovernanceError> {
         let proposal = Self::get_proposal(env.clone(), proposal_id)?;

@@ -653,4 +653,207 @@ fn test_deterministic_evaluation_by_any_observer_from_public_state() {
     );
 }
 
+#[test]
+fn test_timelock_delay_boundary_checks_and_execution() {
+    let TestContext {
+        env,
+        client,
+        token_client,
+        early_keepers,
+        eligible_proposer,
+        ..
+    } = setup();
+
+    env.ledger().set_sequence_number(100);
+
+    let voter = Address::generate(&env);
+    token_client.transfer(&early_keepers, &voter, &(5_000_000 * ONE_TOKEN));
+
+    // Proposal 1: Action SetFeeBps(250)
+    let action_1 = GovernableAction::SetFeeBps(250);
+    let proposal_1 = client.create_proposal(&eligible_proposer, &action_1);
+    client.vote(&voter, &proposal_1, &VoteChoice::For);
+
+    let prop_1 = client.get_proposal(&proposal_1);
+    // Advance to voting end + 1 (50_501)
+    env.ledger().set_sequence_number((prop_1.voting_end as u32) + 1);
+
+    // Queue proposal 1: delay is DEFAULT_TIMELOCK_DELAY (28_800 ledgers)
+    let eta_1 = client.queue_proposal(&proposal_1);
+    assert_eq!(eta_1, 50_501 + 28_800);
+
+    // 1. Boundary: delay-minus-one (eta_1 - 1 = 79_300)
+    env.ledger().set_sequence_number((eta_1 as u32) - 1);
+    assert_eq!(client.is_executable(&proposal_1), false);
+    assert_eq!(client.get_remaining_delay(&proposal_1), 1);
+
+    let err_early = client.try_execute_proposal(&proposal_1);
+    assert_eq!(err_early, Err(Ok(GovernanceError::TimelockNotElapsed)));
+
+    // 2. Boundary: exactly-at-delay (eta_1 = 79_301)
+    env.ledger().set_sequence_number(eta_1 as u32);
+    assert_eq!(client.is_executable(&proposal_1), true);
+    assert_eq!(client.get_remaining_delay(&proposal_1), 0);
+
+    let exec_res = client.execute_proposal(&proposal_1);
+    assert_eq!(exec_res, ());
+
+    let executed_prop = client.get_proposal(&proposal_1);
+    assert_eq!(executed_prop.status, ProposalStatus::Executed);
+
+    // 3. Boundary: delay-plus-one (for a new proposal)
+    let action_2 = GovernableAction::SetMinReward(20_000);
+    let proposal_2 = client.create_proposal(&eligible_proposer, &action_2);
+    client.vote(&voter, &proposal_2, &VoteChoice::For);
+
+    let prop_2 = client.get_proposal(&proposal_2);
+    env.ledger().set_sequence_number((prop_2.voting_end as u32) + 1);
+    let eta_2 = client.queue_proposal(&proposal_2);
+
+    // Advance to eta_2 + 1
+    env.ledger().set_sequence_number((eta_2 as u32) + 1);
+    assert_eq!(client.is_executable(&proposal_2), true);
+    assert_eq!(client.get_remaining_delay(&proposal_2), 0);
+
+    client.execute_proposal(&proposal_2);
+    assert_eq!(
+        client.get_proposal(&proposal_2).status,
+        ProposalStatus::Executed
+    );
+}
+
+#[test]
+fn test_queued_state_and_remaining_delay_are_queryable() {
+    let TestContext {
+        env,
+        client,
+        token_client,
+        early_keepers,
+        eligible_proposer,
+        ..
+    } = setup();
+
+    env.ledger().set_sequence_number(100);
+
+    let voter = Address::generate(&env);
+    token_client.transfer(&early_keepers, &voter, &(4_500_000 * ONE_TOKEN));
+
+    let action = GovernableAction::PauseRegistry;
+    let proposal_id = client.create_proposal(&eligible_proposer, &action);
+    client.vote(&voter, &proposal_id, &VoteChoice::For);
+
+    let prop = client.get_proposal(&proposal_id);
+    env.ledger().set_sequence_number((prop.voting_end as u32) + 1);
+
+    // Prior to queuing, query fails with ProposalNotQueued
+    assert_eq!(
+        client.try_get_remaining_delay(&proposal_id),
+        Err(Ok(GovernanceError::ProposalNotQueued))
+    );
+
+    let queue_ledger = (prop.voting_end as u32) + 1;
+    let eta = client.queue_proposal(&proposal_id);
+
+    // Once queued, affected parties can inspect the queued status and exact remaining delay
+    let queued_prop = client.get_proposal(&proposal_id);
+    assert_eq!(queued_prop.status, ProposalStatus::Queued);
+    assert_eq!(queued_prop.eta, eta);
+
+    // At queue ledger, remaining delay equals full delay
+    assert_eq!(
+        client.get_remaining_delay(&proposal_id),
+        DEFAULT_TIMELOCK_DELAY as u64
+    );
+    assert_eq!(client.is_executable(&proposal_id), false);
+
+    // Advance 10,000 ledgers into the delay
+    env.ledger().set_sequence_number(queue_ledger + 10_000);
+    assert_eq!(
+        client.get_remaining_delay(&proposal_id),
+        (DEFAULT_TIMELOCK_DELAY - 10_000) as u64
+    );
+    assert_eq!(client.is_executable(&proposal_id), false);
+}
+
+#[test]
+fn test_timelock_cannot_be_bypassed_by_fast_track_proposal_or_other_actions() {
+    let TestContext {
+        env,
+        client,
+        token_client,
+        early_keepers,
+        eligible_proposer,
+        ..
+    } = setup();
+
+    env.ledger().set_sequence_number(100);
+
+    let voter = Address::generate(&env);
+    token_client.transfer(&early_keepers, &voter, &(10_000_000 * ONE_TOKEN));
+
+    // Proposal 1: Critical action (e.g., pause treasury)
+    let action_1 = GovernableAction::PauseTreasury;
+    let prop_1_id = client.create_proposal(&eligible_proposer, &action_1);
+    client.vote(&voter, &prop_1_id, &VoteChoice::For);
+
+    let prop_1 = client.get_proposal(&prop_1_id);
+    env.ledger().set_sequence_number((prop_1.voting_end as u32) + 1);
+    let eta_1 = client.queue_proposal(&prop_1_id);
+
+    // Attempted fast-track: Create Proposal 2 attempting to shorten the timelock delay
+    let action_2 = GovernableAction::SetTimelockDelay(14_400); // 1 day instead of 2 days
+    let prop_2_id = client.create_proposal(&eligible_proposer, &action_2);
+    client.vote(&voter, &prop_2_id, &VoteChoice::For);
+
+    // Even if ledger advances to 65_000 (after 14_400 ledgers would have elapsed from queueing):
+    // Proposal 1's eta was fixed at queue time and cannot be shortened or bypassed!
+    env.ledger().set_sequence_number(65_000);
+    assert!(65_000 < eta_1);
+
+    let res = client.try_execute_proposal(&prop_1_id);
+    assert_eq!(res, Err(Ok(GovernanceError::TimelockNotElapsed)));
+
+    // Furthermore, an unqueued proposal cannot be executed directly
+    let action_3 = GovernableAction::SetFeeBps(100);
+    let prop_3_id = client.create_proposal(&eligible_proposer, &action_3);
+    let unqueued_err = client.try_execute_proposal(&prop_3_id);
+    assert_eq!(unqueued_err, Err(Ok(GovernanceError::ProposalNotQueued)));
+}
+
+#[test]
+fn test_cannot_execute_proposal_twice() {
+    let TestContext {
+        env,
+        client,
+        token_client,
+        early_keepers,
+        eligible_proposer,
+        ..
+    } = setup();
+
+    env.ledger().set_sequence_number(100);
+
+    let voter = Address::generate(&env);
+    token_client.transfer(&early_keepers, &voter, &(5_000_000 * ONE_TOKEN));
+
+    let action = GovernableAction::SetVotingPeriod(72_000);
+    let proposal_id = client.create_proposal(&eligible_proposer, &action);
+    client.vote(&voter, &proposal_id, &VoteChoice::For);
+
+    let prop = client.get_proposal(&proposal_id);
+    env.ledger().set_sequence_number((prop.voting_end as u32) + 1);
+    let eta = client.queue_proposal(&proposal_id);
+
+    env.ledger().set_sequence_number(eta as u32);
+    client.execute_proposal(&proposal_id);
+
+    // Verify parameter was updated by execution
+    assert_eq!(client.voting_period(), 72_000);
+
+    // Second execution must fail with ProposalAlreadyExecuted
+    let res = client.try_execute_proposal(&proposal_id);
+    assert_eq!(res, Err(Ok(GovernanceError::ProposalAlreadyExecuted)));
+}
+
+
 
