@@ -25,6 +25,7 @@ anyhow = "1.0"
 rand = "0.8"
 keeper-registry = { version = "0.1.0", path = "../contracts/keeper-registry" }
 treasury = { version = "0.1.0", path = "../contracts/treasury", package = "keeper-treasury" }
+governance = { version = "0.1.0", path = "../contracts/governance", package = "keeper-governance" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

@@ -32,6 +32,7 @@ pub mod client;
 pub mod cross_contract;
 pub mod error;
 pub mod events;
+pub mod governance_client;
 pub mod network;
 pub mod retry;
 pub mod signing;
@@ -49,6 +50,10 @@ pub use events::{
     decode_event, EventDecodeError, FeesSweptEvent, InitializedEvent, KeeperEvent, PausedEvent,
     RewardsWithdrawnEvent, TaskCancelledEvent, TaskClaimedEvent, TaskExecutedEvent,
     TaskExpiredEvent, TaskRegisteredEvent,
+};
+pub use governance_client::{
+    decode_governance_error, GovernableAction, GovernanceClient, GovernanceError, Proposal,
+    ProposalStatus,
 };
 pub use network::{CustomNetworkConfig, Network, NetworkConfig, FUTURENET, MAINNET, TESTNET};
 pub use retry::{default_classify, ErrorClass, RetryPolicy, RpcCallError, TransportError};
