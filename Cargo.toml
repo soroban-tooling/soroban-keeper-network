@@ -5,12 +5,9 @@ members = [
     "contracts/conditions/oracle-deviation",
     "contracts/keeper-registry",
     "contracts/conditions/time-window",
-    "contracts/oracle-client",
     "contracts/treasury",
     "contracts/governance",
     "contracts/governance-token",
-    "contracts/governance-token",
-    "contracts/governance",
     "indexer",
     "rust-sdk",
 ]
