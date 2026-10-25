@@ -13,11 +13,15 @@ WASM := target/wasm32-unknown-unknown/release/keeper_registry.wasm
 #   make indexer INDEXER_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/indexer_test
 INDEXER_TEST_DATABASE_URL ?=
 
+<<<<<<< HEAD
 # Packages `make setup` installs dependencies for. Each needs a package-lock.json
 # so `npm ci` can run; add new packages here when they gain one.
 SETUP_PACKAGES := packages/sdk-ts packages/indexer-client examples/keeper-bot examples/keeper-bot-v2 examples/batch-register
 
 .PHONY: help build test fmt fmt-check lint wasm optimize clean setup bot bot-test bot-v2-test sdk-ts sdk-ts-lint cli indexer rust-sdk indexer-client ci check
+=======
+.PHONY: help build test fmt fmt-check lint wasm optimize clean bot bot-test bot-v2-test sdk-ts sdk-ts-lint indexer rust-sdk indexer-client cli ci check
+>>>>>>> pr/909
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -94,8 +98,13 @@ rust-sdk: ## Test the Rust SDK crate (matches CI)
 indexer-client: ## Typecheck, build, test and lint the indexer client (matches CI)
 	cd packages/indexer-client && npm ci --no-audit --no-fund && npx tsc --noEmit -p tsconfig.json && npm run build && npm test && npm run lint
 
+<<<<<<< HEAD
 cli: sdk-ts ## Typecheck, build and test the skn CLI (matches CI) — depends on sdk-ts's dist/ output
 	cd packages/cli && npm ci --no-audit --no-fund && npx tsc --noEmit -p tsconfig.json && npm run build && npm test
+=======
+cli: sdk-ts ## Typecheck, build, test and lint the skn CLI (matches CI) — builds against sdk-ts's dist/ output
+	cd packages/cli && npm ci --no-audit --no-fund && npx tsc --noEmit -p tsconfig.json && npm run build && npm test && npm run lint
+>>>>>>> pr/909
 
 clean: ## Remove build artifacts
 	cargo clean

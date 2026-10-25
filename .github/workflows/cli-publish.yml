@@ -1,0 +1,122 @@
+name: Publish cli
+
+# Publishes packages/cli (the `skn` command-line tool) to npm, so `npx skn`
+# works. Modelled on sdk-ts-publish.yml.
+#
+# Its own tag namespace, `cli-vX.Y.Z`, for the same reason sdk-ts has one: the
+# CLI versions independently of the contract and of the SDK, so a contract
+# release tag (vX.Y.Z) or an SDK tag (sdk-ts-vX.Y.Z) must never publish it.
+#
+# Usage:
+#   cd packages/cli
+#   npm version 0.2.0 --no-git-tag-version   # also bump CLI_VERSION in src/version.ts
+#   git tag -a cli-v0.2.0 -m "cli v0.2.0"
+#   git push origin cli-v0.2.0
+#
+# The CLI links the SDK with a `file:` dependency in the repository (so it
+# always builds against the SDK in the same commit). A package published to npm
+# cannot carry a `file:` link, so this workflow pins the dependency to the SDK's
+# published version just before publishing, and refuses to publish if that SDK
+# version is not on npm yet.
+
+on:
+  push:
+    tags: ["cli-v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing cli-v* tag to publish (e.g. cli-v0.2.0)"
+        required: true
+
+permissions:
+  contents: read
+  # Required by `npm publish --provenance` below, which attests the published
+  # package back to this exact workflow run and commit.
+  id-token: write
+
+jobs:
+  publish:
+    name: Test, build, and publish to npm
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      # The tag names the version being published. A mismatch with
+      # package.json would otherwise publish the wrong version number, and a
+      # mismatch with src/version.ts would make `skn --version` lie.
+      - name: Verify the tag matches the package version
+        working-directory: packages/cli
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "cli-v${version}" ]; then
+            echo "::error::tag '$TAG' does not match package.json version (expected 'cli-v${version}')"
+            exit 1
+          fi
+          if ! grep -q "CLI_VERSION = \"${version}\"" src/version.ts; then
+            echo "::error::src/version.ts CLI_VERSION does not match package.json version '${version}'"
+            exit 1
+          fi
+
+      # The CLI builds against the SDK's compiled types.
+      - name: Build the SDK
+        working-directory: packages/sdk-ts
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Install dependencies
+        working-directory: packages/cli
+        run: npm ci --no-audit --no-fund
+
+      # Publish must never skip the checks CI runs: the full suite is a hard gate.
+      - name: Typecheck
+        working-directory: packages/cli
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Run tests
+        working-directory: packages/cli
+        run: npm test
+
+      - name: Lint
+        working-directory: packages/cli
+        run: npm run lint
+
+      - name: Build
+        working-directory: packages/cli
+        run: npm run build
+
+      # The bin is what `npx skn` runs: it must exist, start with a node
+      # shebang, and answer --version.
+      - name: Smoke test the bin
+        working-directory: packages/cli
+        run: |
+          test -f dist/bin.js
+          head -n 1 dist/bin.js | grep -qx '#!/usr/bin/env node'
+          node dist/bin.js --version
+
+      - name: Pin the SDK dependency to its published version
+        working-directory: packages/cli
+        run: |
+          sdk_version="$(node -p "require('../sdk-ts/package.json').version")"
+          if ! npm view "@soroban-keeper-network/sdk@${sdk_version}" version > /dev/null 2>&1; then
+            echo "::error::@soroban-keeper-network/sdk@${sdk_version} is not published to npm; publish the SDK (sdk-ts-v${sdk_version}) first."
+            exit 1
+          fi
+          npm pkg set "dependencies.@soroban-keeper-network/sdk=^${sdk_version}"
+          node -p "'dependencies: ' + JSON.stringify(require('./package.json').dependencies)"
+
+      - name: Publish to npm
+        working-directory: packages/cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.CLI_NPM_TOKEN }}
+        run: npm publish --access public --provenance
