@@ -43,6 +43,7 @@ governance-token = { path = "../governance-token" }
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 keeper-registry = { path = "../keeper-registry", features = ["testutils"] }
+proptest = { version = "1", default-features = false, features = ["std", "alloc"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ["cfg(fuzzing)"] }
