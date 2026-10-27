@@ -1,20 +1,5 @@
 [package]
 name = "keeper-governance"
-name = "soroban-governance"
-version = "0.1.0"
-edition = "2021"
-publish = false
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-soroban-sdk = { version = "20.0", features = ["contract"] }
-
-[profile.release]
-opt-level = "z"
-lto = true
-name = "governance"
 version = "0.1.0"
 edition = "2021"
 authors = ["Soroban Keeper Network Contributors"]
@@ -23,11 +8,7 @@ license = "Apache-2.0"
 repository = "https://github.com/soroban-tooling/soroban-keeper-network"
 keywords = ["soroban", "stellar", "keeper", "governance", "dao"]
 categories = ["cryptography::cryptocurrencies"]
-
-[lib]
-crate-type = ["rlib"]
-keywords = ["soroban", "stellar", "governance", "dao", "proposal"]
-categories = ["cryptography::cryptocurrencies"]
+publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -37,17 +18,13 @@ default = []
 testutils = ["soroban-sdk/testutils"]
 
 [dependencies]
-soroban-sdk = { workspace = true }
+soroban-sdk = { version = "22.0.1" }
 governance-token = { path = "../governance-token" }
 
 [dev-dependencies]
-soroban-sdk = { workspace = true, features = ["testutils"] }
+soroban-sdk = { version = "22.0.1", features = ["testutils"] }
 keeper-registry = { path = "../keeper-registry", features = ["testutils"] }
 proptest = { version = "1", default-features = false, features = ["std", "alloc"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ["cfg(fuzzing)"] }
-soroban-sdk = { version = "22.0.1" }
-
-[dev-dependencies]
-soroban-sdk = { version = "22.0.1", features = ["testutils"] }

@@ -2,22 +2,15 @@
 name = "keeper-oracle-client"
 version = "0.1.0"
 edition = "2021"
+authors = ["Soroban Keeper Network Contributors"]
 license = "Apache-2.0"
 description = "Typed Reflector Pulse client for Keeper Network conditions"
-
-[lib]
-name = "oracle-client"
-version = "0.1.0"
-edition = "2021"
-authors = ["Soroban Keeper Network Contributors"]
-description = "Typed client for the Reflector price-feed oracle interface"
-license = "Apache-2.0"
 repository = "https://github.com/soroban-tooling/soroban-keeper-network"
 keywords = ["soroban", "stellar", "oracle", "reflector", "price-feed"]
 categories = ["cryptography::cryptocurrencies"]
 
 [lib]
-# rlib so other contracts can `use oracle_client::*` as a normal library dependency
+# rlib so other contracts can `use keeper_oracle_client::*` as a normal library dependency
 crate-type = ["rlib"]
 
 [features]
