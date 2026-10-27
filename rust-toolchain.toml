@@ -1,4 +1,8 @@
 [toolchain]
-channel = "1.82.0"
+# 1.98: several transitive dependencies in the pinned Cargo.lock (sha2 0.11,
+# chacha20 0.10 via utoipa-swagger-ui/rust-embed) require the edition2024 Cargo
+# feature, which is not available before Rust 1.85. 1.82 could not even parse
+# their manifests.
+channel = "1.98.0"
 targets = ["wasm32-unknown-unknown"]
-components = ["rustfmt"]
+components = ["rustfmt", "clippy"]

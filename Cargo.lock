@@ -1502,6 +1502,7 @@ version = "0.1.0"
 dependencies = [
  "governance-token",
  "keeper-registry",
+ "proptest",
  "soroban-sdk",
 ]
 
@@ -2792,6 +2793,8 @@ name = "soroban-keeper-sdk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "governance-token",
+ "keeper-governance",
  "keeper-registry",
  "keeper-treasury",
  "rand 0.8.7",
@@ -3306,6 +3309,13 @@ checksum = "c431b87111666e491a90baa837f914fb45cd5dc3c268591b0220ff5057f2085f"
 dependencies = [
  "num-conv",
  "time-core",
+]
+
+[[package]]
+name = "time-window-condition"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]
