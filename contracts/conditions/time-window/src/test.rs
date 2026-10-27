@@ -1,4 +1,4 @@
-﻿//! Tests for the time-window condition contract.
+//! Tests for the time-window condition contract.
 //!
 //! Covers every branch of `check` and every error path in `initialize`,
 //! including the exact boundaries the issue's acceptance criteria require:
@@ -20,7 +20,7 @@ fn env_at(now: u64) -> Env {
 
 /// Registers the contract, calls `initialize(start, end)`, and returns the
 /// client.  Panics if `initialize` returns an error (test setup failure).
-fn setup(env: &Env, start: u64, end: u64) -> TimeWindowConditionClient {
+fn setup<'a>(env: &'a Env, start: u64, end: u64) -> TimeWindowConditionClient<'a> {
     let id = env.register(TimeWindowCondition, ());
     let client = TimeWindowConditionClient::new(env, &id);
     client.initialize(&start, &end);

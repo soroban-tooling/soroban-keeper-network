@@ -27,8 +27,6 @@
 
 use soroban_sdk::{contract, contractclient, contracterror, contractimpl, contracttype, Env};
 
-
-
 // -----------------------------------------------------------------------------
 // Constants
 // -----------------------------------------------------------------------------
@@ -182,11 +180,7 @@ impl TimeWindowCondition {
             .persistent()
             .get(&DataKey::Start)
             .unwrap_or(u64::MAX);
-        let end: u64 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::End)
-            .unwrap_or(0);
+        let end: u64 = env.storage().persistent().get(&DataKey::End).unwrap_or(0);
 
         let now = env.ledger().timestamp();
 
