@@ -104,12 +104,12 @@ impl<S: EventSource> Service<S> {
         );
 
         let app = api::router(
-            ApiState {
+            ApiState::new(
                 ingestor,
-                caches: AggregateCaches::from_secs(config.cache_ttl_secs),
+                AggregateCaches::from_secs(config.cache_ttl_secs),
                 progress,
-                max_healthy_lag_ledgers: config.max_healthy_lag_ledgers,
-            },
+                config.max_healthy_lag_ledgers,
+            ),
             config.rate_limit_per_second,
             config.rate_limit_burst,
         );

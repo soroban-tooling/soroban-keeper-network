@@ -239,7 +239,7 @@ pub async fn enforce(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::{router, router_with_limiter, ApiState};
+    use crate::api::{router_with_limiter, ApiState};
     use crate::cache::AggregateCaches;
     use crate::ingest::Ingestor;
     use crate::progress::IngestionProgress;
@@ -259,7 +259,7 @@ mod tests {
         let ingestor = Ingestor::new(store);
         ApiState::new(
             ingestor,
-            AggregateCaches::new(0),
+            AggregateCaches::from_secs(0),
             IngestionProgress::new(),
             60,
         )

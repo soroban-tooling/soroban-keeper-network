@@ -72,7 +72,7 @@ impl EventType {
     /// Returns `None` for a topic pair the contract does not emit, so an
     /// unrecognised event is skipped rather than mis-parsed as a known one.
     pub fn from_topics(verb: &str, noun: &str) -> Option<Self> {
-        const ALL: [EventType; 17] = [
+        const ALL: [EventType; 18] = [
             EventType::TaskRegistered,
             EventType::ConditionNotMet,
             EventType::TaskClaimed,
@@ -121,7 +121,7 @@ impl EventType {
 
     /// Parse the wire name produced by [`Self::as_str`].
     pub fn parse(s: &str) -> Option<Self> {
-        const ALL: [EventType; 17] = [
+        const ALL: [EventType; 18] = [
             EventType::TaskRegistered,
             EventType::ConditionNotMet,
             EventType::TaskClaimed,

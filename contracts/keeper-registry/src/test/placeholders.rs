@@ -6,10 +6,8 @@ use super::common::*;
 use crate::{KeeperError, TaskStatus};
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Placeholder tests for unimplemented functions
-//
-// These are intentionally left as stubs. When you implement a function,
-// remove the #[ignore] tag and fill in the test body.
+// Tests for reward top-ups, deadline extension, and the claim/re-claim lifecycle,
+// including pause enforcement (regression for issue #20).
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]

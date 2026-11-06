@@ -53,7 +53,7 @@ pub use events::{
 };
 pub use governance_client::{
     decode_governance_error, GovernableAction, GovernanceClient, GovernanceError, Proposal,
-    ProposalStatus,
+    ProposalStatus, VoteChoice,
 };
 pub use network::{CustomNetworkConfig, Network, NetworkConfig, FUTURENET, MAINNET, TESTNET};
 pub use retry::{default_classify, ErrorClass, RetryPolicy, RpcCallError, TransportError};

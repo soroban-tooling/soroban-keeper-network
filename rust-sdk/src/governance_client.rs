@@ -7,7 +7,8 @@ use crate::client::ClientError;
 use crate::signing::TransactionSigner;
 use soroban_sdk::{Address, Env};
 pub use governance::{
-    GovernableAction, GovernanceContractClient, GovernanceError, Proposal, ProposalStatus, VERSION,
+    GovernableAction, GovernanceContractClient, GovernanceError, Proposal, ProposalStatus,
+    VoteChoice, VERSION,
 };
 
 fn alloc_format_error<E: core::fmt::Debug>(err: E) -> String {
@@ -70,22 +71,21 @@ impl<'a, S: TransactionSigner> GovernanceClient<'a, S> {
             .map_err(|e| ClientError::ContractError(alloc_format_error(e)))
     }
 
-    /// Creates and queues a proposal for execution after the specified timelock ETA.
-    pub fn create_proposal(
-        &self,
-        action: &GovernableAction,
-        eta: u64,
-    ) -> Result<u64, ClientError> {
+    /// Creates a proposal against the closed list of governable actions.
+    ///
+    /// The proposer must hold at least the configured proposal threshold. The
+    /// proposal opens in `Active` status; queuing and execution are separate steps.
+    pub fn create_proposal(&self, action: &GovernableAction) -> Result<u64, ClientError> {
         self.raw()
-            .try_create_proposal(&self.signer.address(), action, &eta)
+            .try_create_proposal(&self.signer.address(), action)
             .map_err(|e| ClientError::ContractError(alloc_format_error(e)))?
             .map_err(|e| ClientError::ContractError(alloc_format_error(e)))
     }
 
     /// Casts a vote on an active proposal.
-    pub fn vote(&self, proposal_id: u64, support: u32) -> Result<(), ClientError> {
+    pub fn vote(&self, proposal_id: u64, choice: VoteChoice) -> Result<(), ClientError> {
         self.raw()
-            .try_vote(&self.signer.address(), &proposal_id, &support)
+            .try_vote(&self.signer.address(), &proposal_id, &choice)
             .map_err(|e| ClientError::ContractError(alloc_format_error(e)))?
             .map_err(|e| ClientError::ContractError(alloc_format_error(e)))
     }

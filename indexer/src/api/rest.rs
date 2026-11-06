@@ -12,7 +12,8 @@ use axum::{Json, Router};
 use serde::Deserialize;
 
 use super::types::{
-    AdminConfigResponse, ApiError, EventFeedResponse, HealthResponse, TaskDetail, TaskListResponse,
+    AdminConfigResponse, ApiError, EventFeedResponse, FeedTasksResponse, HealthResponse, TaskDetail,
+    TaskListResponse,
 };
 use super::ApiState;
 use crate::address::normalize_address;
@@ -764,6 +765,7 @@ mod tests {
                 owner: "GOWNER".into(),
                 reward: I128(1_000),
                 deadline: 9_000,
+                condition: None,
             };
             store
                 .insert_event(
@@ -849,7 +851,7 @@ mod tests {
         assert_eq!(s1, StatusCode::OK);
         assert_eq!(b1["since"], 99960);
 
-        let (s2, b2) = get_json(&app, "/v1/leaderboard?since=100059").await;
+        let (s2, b2) = get_json(&app, "/v1/leaderboard?since=100019").await;
         assert_eq!(s2, StatusCode::OK);
         assert_eq!(b2["since"], 99960);
     }

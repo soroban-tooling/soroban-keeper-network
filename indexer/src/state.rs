@@ -138,6 +138,7 @@ impl TaskState {
                             state.oracle_address = Some(oracle.clone());
                             state.asset = Some(asset.clone());
                             state.oracle_threshold = Some(*threshold);
+                        }
                         EventPayload::ConditionNotMet { .. } => {
                             state.condition_rejection_count =
                                 state.condition_rejection_count.saturating_add(1);
