@@ -5,7 +5,7 @@
   "description": "Node.js secret-key signing example for the Soroban Keeper Network SDK",
   "type": "module",
   "scripts": {
-    "start": "tsx claim-task.ts"
+    "start": "node init && tsx claim-task.ts"
   },
   "dependencies": {
     "@soroban-keeper-network/sdk": "file:../..",
