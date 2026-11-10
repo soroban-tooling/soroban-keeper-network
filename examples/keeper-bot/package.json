@@ -4,9 +4,9 @@
   "description": "Example off-chain keeper bot for the Soroban Keeper Network",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "start:testnet": "NETWORK=testnet node index.js",
-    "start:mainnet": "NETWORK=mainnet node index.js",
+    "start": "node init && node index.js",
+    "start:testnet": "node init && NETWORK=testnet node index.js",
+    "start:mainnet": "node init && NETWORK=mainnet node index.js",
     "test": "node --test",
     "lint": "eslint ."
   },

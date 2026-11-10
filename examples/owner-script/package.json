@@ -1,0 +1,34 @@
+{
+  "name": "soroban-owner-script",
+  "version": "0.1.0",
+  "description": "Minimal task owner script template for the Soroban Keeper Network under 100 lines handling execution and deadline expiry",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "node init && tsc -p tsconfig.json",
+    "start": "node init && node dist/index.js",
+    "test": "node --test --import ts-node/esm index.test.ts"
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "keeper",
+    "automation",
+    "task-owner"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@soroban-keeper-network/sdk": "file:../../packages/sdk-ts",
+    "@stellar/stellar-sdk": "^16.2.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
