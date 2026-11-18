@@ -19,8 +19,6 @@ fuzz/corpus/*/*
 fuzz/artifacts/
 
 # Environment / secrets — NEVER commit these
-.env
-.env.*
 !.env.example
 
 # Node
@@ -36,8 +34,8 @@ examples/*/dist/
 # Editor / OS
 .DS_Store
 .idea/
-.vscode/
 *.swp
 
 # Vitest coverage output (packages/*/coverage)
 packages/*/coverage/
+config.bat

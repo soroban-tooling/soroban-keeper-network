@@ -1,12 +1,12 @@
 {
   "name": "soroban-keeper-bot-v2",
   "version": "0.2.0",
-  "description": "Production-grade keeper bot for the Soroban Keeper Network — aimed at operators competing for rewards (see examples/keeper-bot for the beginner-friendly single-file version).",
+  "description": "Production-grade keeper bot for the Soroban Keeper Network \u2014 aimed at operators competing for rewards (see examples/keeper-bot for the beginner-friendly single-file version).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
+    "build": "node init && tsc -p tsconfig.json",
+    "start": "node init && node dist/index.js",
     "test": "vitest run && node --test test/*.test.js",
     "lint": "eslint ."
   },
