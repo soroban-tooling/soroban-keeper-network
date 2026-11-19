@@ -717,6 +717,30 @@ jobs:
           fi
 
   # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — docs/INDEXER_API.md is generated from indexer/openapi.yaml (and
+  # docs/indexer-api/websocket.md). This fails if the committed page is stale.
+  # ───────────────────────────────────────────────────────────────────────────
+  indexer-api-docs:
+    name: Indexer API docs (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: scripts/docs
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify docs/INDEXER_API.md is up to date
+        run: npm run indexer-api:check
+
+  # ───────────────────────────────────────────────────────────────────────────
   # ADVISORY — the example keeper bot. It is a reference implementation, so a
   # lint nit there should not gate a contract PR.
   #
