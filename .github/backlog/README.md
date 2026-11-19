@@ -75,9 +75,9 @@ section says what to finish first.
 E03 Fuzzing & Invariant Testing, E04 On-chain Execution Verifier, and E05
 Batch Operations & Gas. Each epic closes with a detailed retrospective
 documenting what shipped versus what was studied and deferred:
-[E05 retrospective (0118)](#0118),
-[E04 retrospective (0141)](#0141), and
-[E03 retrospective (0142)](#0142). These retrospectives provide the definitive
+[E05 retrospective (0118)](issues/0118-e05-retrospective.md),
+[E04 retrospective (0141)](issues/0141-e04-retrospective.md), and
+[E03 retrospective (0142)](issues/0142-e03-retrospective.md). These retrospectives provide the definitive
 record of design decisions made during wave 2, including the trust-model
 choice for verifiers, batch operation feasibility studies, and invariant
 testing coverage achieved. Additional depth issues grounded in wave-1 surface
