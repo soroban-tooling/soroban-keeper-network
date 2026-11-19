@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `link-check-external.yml`. See `docs/CI.md`.
 - `docs/TASK_LIFECYCLE.md`: state diagram, guards, entry points, emitted events,
   lock-window and deadline rules, and per-transition costs for the five task states.
+- Repaired `.github/workflows/pr-hygiene.yml`, which had duplicate top-level
+  `on`/`permissions`/`jobs` keys and a truncated `changelog` job from an earlier
+  merge, so GitHub never loaded it and none of its jobs ran.
 - Fixed 14 existing broken relative links and anchors in Markdown files found by
   the new checker.
 
