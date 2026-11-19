@@ -75,5 +75,5 @@ The main harness type. Create one with `VerifierTestHarness::new()`.
 
 ## See Also
 
-- [Integration Guide](../../docs/VERIFIERS.md) — For verifier design and usage patterns
-- [Registry Contract](../keeper-registry) — The contract being tested against
+- [Integration Guide](../../../docs/VERIFIERS.md) — For verifier design and usage patterns
+- [Registry Contract](../../keeper-registry) — The contract being tested against

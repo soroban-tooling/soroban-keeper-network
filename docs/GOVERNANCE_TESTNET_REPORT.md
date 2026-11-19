@@ -1,6 +1,6 @@
 # Governance Testnet Lifecycle Report
 
-**Issue:** [#516 / 0388](../../github/backlog/issues/0388-governance-testnet-dry-run.md) — chore(governance): run a full proposal lifecycle on testnet before mainnet consideration
+**Issue:** [#516 / 0388](../.github/backlog/issues/0388-governance-testnet-dry-run.md) — chore(governance): run a full proposal lifecycle on testnet before mainnet consideration
 
 **Date:** October 17, 2026  
 **Status:** Testnet Dry-Run Complete ✅  

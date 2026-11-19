@@ -14,10 +14,13 @@ permissions:
 # output is guidance for the contributor and a summary for the reviewer.
 # Hard gates live in ci.yml.
 #
-# `actionlint` is the one job that can show red: it is not part of
-# `ci-required`, so it still never blocks a merge, but a finding is a real
-# mistake in a workflow file, not a style opinion, so it should not be hidden
-# behind continue-on-error.
+# `actionlint` and `markdown-links` are the jobs that can show red: neither is
+# part of `ci-required`, so they still never block a merge on their own, but a
+# finding is a real mistake (a malformed workflow, a broken relative link or
+# anchor), not a style opinion, so they are not hidden behind
+# continue-on-error. External (http/https) links are deliberately NOT checked
+# here; third-party sites flake, so link-check-external.yml does that on a
+# schedule instead.
 
 on:
   pull_request:
@@ -278,3 +281,27 @@ jobs:
             echo
             echo "Skipped — no changes under \`.github/workflows/\`."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Docs reference files that move. Fail when a relative link or `#anchor` in
+  # any tracked Markdown file no longer resolves. Dependency-free (Python 3
+  # ships on ubuntu-latest), so there is nothing to install or pin.
+  #
+  # Reproduce locally:  python3 scripts/check-md-links.py
+  # ───────────────────────────────────────────────────────────────────────────
+  markdown-links:
+    name: Markdown links (relative + anchors)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Self-test the link checker
+        run: python3 -m unittest scripts/test_check_md_links.py
+
+      - name: Check relative links and anchors
+        run: python3 scripts/check-md-links.py
+
+      - name: How to fix a failure
+        if: failure()
+        run: |
+          echo "::error::Broken relative link or anchor in a Markdown file. Run 'python3 scripts/check-md-links.py' locally to list them. Links are case-sensitive; anchors follow GitHub heading slugs."
