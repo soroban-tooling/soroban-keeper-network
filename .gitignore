@@ -32,6 +32,10 @@ yarn-error.log*
 # TypeScript package build output (packages/*/dist, examples/*/dist)
 packages/*/dist/
 examples/*/dist/
+apps/*/dist/
+apps/*/*.tsbuildinfo
+apps/*/vite.config.js
+apps/*/vite.config.d.ts
 
 # Editor / OS
 .DS_Store
