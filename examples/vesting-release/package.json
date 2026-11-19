@@ -1,0 +1,19 @@
+{
+  "name": "@soroban-keeper-network/example-vesting-release",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Example token vesting release task for Soroban Keeper Network",
+  "main": "src/vesting.js",
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "vesting",
+    "token",
+    "tranche",
+    "keeper"
+  ],
+  "license": "Apache-2.0"
+}
