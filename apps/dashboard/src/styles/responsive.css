@@ -468,3 +468,56 @@ main {
 .search-suggestion-item.active {
   background: var(--surface-hover, rgba(0, 0, 0, 0.04));
 }
+
+/* WCAG 2.1 AA Accessibility & Keyboard Navigation Styles */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 16px;
+  background: var(--accent, #2563eb);
+  color: #ffffff;
+  padding: 10px 18px;
+  z-index: 9999;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  transition: top 0.15s ease-out;
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+  top: 16px;
+  outline: 3px solid #ffffff;
+  outline-offset: 2px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent, #2563eb);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent, #2563eb);
+  outline-offset: 2px;
+}
+
+/* Ensure minimum contrast ratios across themes for WCAG 2.1 AA (4.5:1 for normal text) */
+.muted, .ink-muted {
+  color: var(--ink-muted);
+}
+
+[data-theme="light"] .muted,
+[data-theme="light"] .ink-muted {
+  color: #52525b; /* 4.6:1 contrast against white background */
+}
+
+[data-theme="dark"] .muted,
+[data-theme="dark"] .ink-muted {
+  color: #a1a1aa; /* 5.5:1 contrast against dark background */
+}

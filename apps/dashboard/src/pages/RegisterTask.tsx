@@ -25,13 +25,25 @@ export function RegisterTaskPage() {
 
   return <section className="page narrow-page"><div className="page-heading"><div><p className="eyebrow">Owner operation</p><h1>Register task</h1><p>Validate the call payload and review the network fee before signing.</p></div></div>
     <form className="form-grid" onSubmit={(event) => { event.preventDefault(); void (fee === null ? estimate() : submit()); }}>
-      <label className="span-2">Target contract<input value={target} onChange={(event) => { setTarget(event.target.value.trim()); setFee(null); }} placeholder="C..." /></label>
-      <label>Function<input value={functionName} onChange={(event) => { setFunctionName(event.target.value); setFee(null); }} placeholder="rebalance" /></label>
-      <label>Reward<input inputMode="numeric" value={reward} onChange={(event) => { setReward(event.target.value); setFee(null); }} placeholder="1000000" /></label>
-      <label>Deadline<input type="datetime-local" value={deadline} onChange={(event) => { setDeadline(event.target.value); setFee(null); }} /></label>
-      <label>Verifier (optional)<input value={verifier} onChange={(event) => { setVerifier(event.target.value.trim()); setFee(null); }} placeholder="C..." /></label>
-      <label className="span-2">Arguments (JSON array)<textarea value={argumentsJson} onChange={(event) => { setArgumentsJson(event.target.value); setFee(null); }} rows={7} /></label>
-      <div className="span-2 form-footer"><div>{validation ? <p className="field-error" role="alert">{validation}</p> : fee !== null ? <p>Estimated fee: <strong>{fee.toLocaleString()} stroops</strong></p> : <p className="form-note">The fee is simulated before the wallet prompt.</p>}{message && <p className="field-error" role="alert">{message}</p>}{taskId !== null && <p className="success" role="status">Task #{taskId.toString()} registered.</p>}</div><button className="primary-button" disabled={Boolean(validation) || !operations || busy}><Send />{fee === null ? "Estimate fee" : "Sign and register"}</button></div>
+      <label className="span-2" htmlFor="target-contract">Target contract
+        <input id="target-contract" name="targetContract" value={target} onChange={(event) => { setTarget(event.target.value.trim()); setFee(null); }} placeholder="C..." aria-required="true" />
+      </label>
+      <label htmlFor="target-function">Function
+        <input id="target-function" name="targetFunction" value={functionName} onChange={(event) => { setFunctionName(event.target.value); setFee(null); }} placeholder="rebalance" aria-required="true" />
+      </label>
+      <label htmlFor="task-reward">Reward
+        <input id="task-reward" name="taskReward" inputMode="numeric" value={reward} onChange={(event) => { setReward(event.target.value); setFee(null); }} placeholder="1000000" aria-required="true" />
+      </label>
+      <label htmlFor="task-deadline">Deadline
+        <input id="task-deadline" name="taskDeadline" type="datetime-local" value={deadline} onChange={(event) => { setDeadline(event.target.value); setFee(null); }} aria-required="true" />
+      </label>
+      <label htmlFor="task-verifier">Verifier (optional)
+        <input id="task-verifier" name="taskVerifier" value={verifier} onChange={(event) => { setVerifier(event.target.value.trim()); setFee(null); }} placeholder="C..." />
+      </label>
+      <label className="span-2" htmlFor="task-arguments">Arguments (JSON array)
+        <textarea id="task-arguments" name="taskArguments" value={argumentsJson} onChange={(event) => { setArgumentsJson(event.target.value); setFee(null); }} rows={7} aria-required="true" />
+      </label>
+      <div className="span-2 form-footer"><div>{validation ? <p className="field-error" role="alert">{validation}</p> : fee !== null ? <p>Estimated fee: <strong>{fee.toLocaleString()} stroops</strong></p> : <p className="form-note">The fee is simulated before the wallet prompt.</p>}{message && <p className="field-error" role="alert">{message}</p>}{taskId !== null && <p className="success" role="status">Task #{taskId.toString()} registered.</p>}</div><button className="primary-button" disabled={Boolean(validation) || !operations || busy} aria-label={fee === null ? "Estimate transaction fee" : "Sign and register task"}><Send aria-hidden="true" />{fee === null ? "Estimate fee" : "Sign and register"}</button></div>
     </form>
   </section>;
 }

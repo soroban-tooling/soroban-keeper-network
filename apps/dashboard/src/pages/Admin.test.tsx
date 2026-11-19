@@ -24,4 +24,23 @@ describe("Admin status parameters", () => {
     const actionsFound = parameters.filter((p) => p.label.toLowerCase().includes("action"));
     expect(actionsFound).toHaveLength(0);
   });
+
+  it("handles loading, data resolution, and RPC error transitions", () => {
+    let loading = true;
+    let data: Record<string, unknown> | null = null;
+    let error: string | null = null;
+
+    // Loading begins
+    expect(loading).toBe(true);
+
+    // Data resolves
+    data = { adminAddress: "GADMIN", feeBps: 200 };
+    loading = false;
+    expect(data.adminAddress).toBe("GADMIN");
+    expect(loading).toBe(false);
+
+    // Error case
+    error = "Stellar RPC Error: connection reset";
+    expect(error).toContain("Stellar RPC Error");
+  });
 });

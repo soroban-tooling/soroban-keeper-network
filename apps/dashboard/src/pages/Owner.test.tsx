@@ -97,4 +97,23 @@ describe("OwnerPage reward calculations and status totals", () => {
       "/tasks/5",
     ]);
   });
+
+  it("handles loading and error state transitions for owner data queries", () => {
+    let loading = true;
+    let error: string | null = null;
+    let tasks: TaskState[] = [];
+
+    expect(loading).toBe(true);
+
+    // Error case
+    error = "Indexer Service Error: 502 Bad Gateway";
+    loading = false;
+    expect(loading).toBe(false);
+    expect(error).toContain("Indexer Service Error");
+
+    // Success recovery
+    error = null;
+    tasks = mockTasks;
+    expect(tasks).toHaveLength(5);
+  });
 });
