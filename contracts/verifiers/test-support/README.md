@@ -1,79 +1,76 @@
 # Keeper Registry Test Support
 
-A minimal test harness for third-party verifier authors to test their Soroban smart contracts against the Keeper Registry without needing to understand the registry's internal test infrastructure.
+A minimal test harness for verifier authors: it deploys and initializes a real
+`KeeperRegistry` inside the Soroban test environment so you can test your
+verifier through `execute_task`, the way it will really be called.
 
-## Quick Start
+For a full walkthrough see [docs/WRITING_A_VERIFIER.md](../../../docs/WRITING_A_VERIFIER.md).
+A complete worked example lives in [`../task-bound`](../task-bound).
 
-Add to your `Cargo.toml`:
+## Quick start
 
 ```toml
 [dev-dependencies]
-keeper-registry-test-support = { path = "../path/to/keeper-registry/test-support" }
+keeper-registry-test-support = { path = "../path/to/contracts/verifiers/test-support" }
 soroban-sdk = { version = "22.0.1", features = ["testutils"] }
 ```
 
-## Example
-
 ```rust
-#[test]
-fn test_my_verifier_approves() {
-    use keeper_registry_test_support::{VerifierTestHarness, keeper, owner};
-    use soroban_sdk::{Bytes, Address};
+use keeper_registry_test_support::VerifierTestHarness;
+use soroban_sdk::Bytes;
 
+#[test]
+fn my_verifier_approves() {
     let harness = VerifierTestHarness::new();
     let env = harness.env();
 
-    // Deploy your verifier contract
-    let verifier_id = env.register(MyVerifier, ());
-    let verifier_addr = Address::from_contract_id(&env, &verifier_id);
+    // `register` returns the contract's Address directly.
+    let verifier = env.register(MyVerifier, ());
 
-    // Register a task with your verifier attached
-    let task_id = harness.register_task_with_verifier(
-        &owner(),
-        Some(verifier_addr),
-        1_000_000,  // reward in stroops
-        env.ledger().timestamp() + 3600,  // deadline
-        &Bytes::from_slice(&env, b"calldata"),
-    ).unwrap();
+    let task_id = harness
+        .register_task_with_verifier(
+            harness.owner_address(),
+            Some(verifier),
+            1_000_000,                       // reward in stroops
+            env.ledger().timestamp() + 3600, // deadline
+            &Bytes::from_slice(env, b"calldata"),
+        )
+        .unwrap();
 
-    // Claim and execute the task
-    harness.claim_task(&keeper(), task_id).unwrap();
-    let proof = Bytes::from_slice(&env, b"valid_proof");
-    harness.execute_task(&keeper(), task_id, &proof).unwrap();
+    harness.claim_task(harness.keeper_address(), task_id).unwrap();
+    harness
+        .execute_task(harness.keeper_address(), task_id, &Bytes::from_slice(env, b"proof"))
+        .unwrap();
 
-    // Verify the keeper was credited
-    let balance = harness.keeper_balance(&keeper());
-    assert!(balance > 0);
+    assert!(harness.keeper_balance(harness.keeper_address()) > 0);
 }
 ```
 
 ## API
 
-### `VerifierTestHarness`
+`VerifierTestHarness::new()` creates a registry with a 0% fee, a native-style
+test token, and three accounts: an admin, a funded task owner, and a keeper.
+Use the harness's own addresses; addresses made elsewhere belong to a different
+`Env` and will not work.
 
-The main harness type. Create one with `VerifierTestHarness::new()`.
+- `env()` - the Soroban test `Env` (deploy your verifier with `env.register(..)`)
+- `owner_address()`, `keeper_address()`, `admin_address()` - the harness accounts
+- `register_task_with_verifier(owner, verifier, reward, deadline, calldata)` -
+  returns the new task id, or the registry's `KeeperError`
+- `claim_task(keeper, task_id)`, `execute_task(keeper, task_id, proof)`
+- `get_task(task_id)`, `keeper_balance(keeper)`, `fees_accrued()`
+- `reward_token_address()`, `registry_address()`
+- `assert_escrow_released(harness, task_id)`, `assert_no_escrow_movement(harness, keeper_balance_before, fees_before)`
 
-#### Methods
+`register_task_with_verifier`, `claim_task` and `execute_task` return
+`Result<_, KeeperError>`, so a rejection is a value you can assert on, for
+example `Err(KeeperError::VerificationFailed)`.
 
-- `env()` — Get the Soroban test environment (use to deploy your verifier contract)
-- `register_task_with_verifier(owner, verifier, reward, deadline, calldata)` — Register a task
-- `claim_task(keeper, task_id)` — Claim a task
-- `execute_task(keeper, task_id, proof)` — Execute a claimed task
-- `get_task(task_id)` — Retrieve the current task state
-- `keeper_balance(keeper)` — Get the keeper's credited balance
-- `fees_accrued()` — Get the registry's accumulated fees
-- `reward_token_address()` — Get the reward token address
-- `registry_address()` — Get the registry contract address
+Registration uses `lock_ledgers = 100`, no condition and `TaskType::Custom`;
+`ttl_ledgers` is derived from your deadline so the registry's TTL check always passes.
 
-### Helper Functions
+## See also
 
-- `owner()` — Get a deterministic owner (funder) address
-- `keeper()` — Get a deterministic keeper (claimer/executor) address
-- `admin()` — Get a deterministic admin address
-- `assert_escrow_released(harness, task_id)` — Assert a task's escrow was released
-- `assert_no_escrow_movement(harness, balance_before, fees_before)` — Assert state was unchanged
-
-## See Also
-
-- [Integration Guide](../../docs/VERIFIERS.md) — For verifier design and usage patterns
-- [Registry Contract](../keeper-registry) — The contract being tested against
+- [Verifier design](../../../docs/VERIFIER_DESIGN.md)
+- [Verifier cost catalog and testing notes](../../../docs/VERIFIERS.md)
+- [Registry contract](../../keeper-registry)
