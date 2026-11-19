@@ -47,7 +47,7 @@ pub const CONDITION_BUMP_THRESHOLD: u32 = 50_000;
 //
 // Declared here so the time-window contract is self-contained. The registry's
 // `claim_task` constructs a `ConditionClient` and calls `try_check`, treating
-// any non-`Ok(Ok(true))` result as false — the same pattern `execute_task`
+// any non-`Ok(Ok(true))` result as false â€” the same pattern `execute_task`
 // uses for `KeeperVerifierClient::try_verify`.
 // -----------------------------------------------------------------------------
 
@@ -60,7 +60,7 @@ pub const CONDITION_BUMP_THRESHOLD: u32 = 50_000;
 #[contractclient(name = "ConditionClient")]
 pub trait ICondition {
     /// Returns `true` if the task's condition is currently met and the claim
-    /// may proceed.  Must never panic — any error path must return `false`.
+    /// may proceed.  Must never panic â€” any error path must return `false`.
     fn check(env: Env, task_id: u64) -> bool;
 }
 
