@@ -17,7 +17,7 @@ INDEXER_TEST_DATABASE_URL ?=
 # so `npm ci` can run; add new packages here when they gain one.
 SETUP_PACKAGES := packages/sdk-ts packages/indexer-client examples/keeper-bot examples/keeper-bot-v2 examples/batch-register
 
-.PHONY: help build test fmt fmt-check lint wasm optimize clean setup bot bot-test bot-v2-test sdk-ts sdk-ts-lint cli indexer rust-sdk indexer-client ci check
+.PHONY: help build test fmt fmt-check lint wasm optimize clean setup bot bot-test bot-v2-test sdk-ts sdk-ts-lint cli indexer rust-sdk indexer-client ci check dashboard
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -97,9 +97,12 @@ indexer-client: ## Typecheck, build, test and lint the indexer client (matches C
 cli: sdk-ts ## Typecheck, build and test the skn CLI (matches CI) — depends on sdk-ts's dist/ output
 	cd packages/cli && npm ci --no-audit --no-fund && npx tsc --noEmit -p tsconfig.json && npm run build && npm test
 
+dashboard: sdk-ts ## Typecheck, build, test and lint the dashboard (matches CI) — depends on sdk-ts's dist/ output
+	cd apps/dashboard && npm install --no-audit --no-fund && npm run build && npm test && npm run lint
+
 clean: ## Remove build artifacts
 	cargo clean
 
-ci: fmt-check test wasm sdk-ts bot-test bot-v2-test indexer rust-sdk indexer-client cli ## Run all required CI checks locally (blocking checks only)
+ci: fmt-check test wasm sdk-ts bot-test bot-v2-test indexer rust-sdk indexer-client cli dashboard ## Run all required CI checks locally (blocking checks only)
 
 check: ci lint sdk-ts-lint ## Run all checks contributors should run before opening a PR

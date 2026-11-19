@@ -5,7 +5,7 @@ name: CI
 #
 # Job policy (see docs/CI.md for the rationale):
 #   REQUIRED  — format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk,
-#               indexer-client. These block the merge.
+#               indexer-client, dashboard. These block the merge.
 #   ADVISORY  — clippy, audit, wasm-size, sdk-ts-lint, sdk-bundle-size, fuzz-pr,
 #               resource-cost. These report findings as annotations or a job
 #               summary but never fail your PR.
@@ -717,6 +717,83 @@ jobs:
           fi
 
   # ───────────────────────────────────────────────────────────────────────────
+  # REQUIRED — Operator Dashboard (apps/dashboard). Built, typechecked,
+  # tested with unit and Playwright e2e/axe tests, and linted.
+  #
+  # Path-guarded: runs only when the PR touches apps/dashboard/,
+  # packages/sdk-ts/, packages/indexer-client/, or .github/workflows/ci.yml.
+  # ───────────────────────────────────────────────────────────────────────────
+  dashboard:
+    name: Dashboard (required)
+    runs-on: ubuntu-latest
+    needs: [sdk-ts, indexer-client]
+
+    defaults:
+      run:
+        working-directory: apps/dashboard
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for relevant changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qE '^(apps/dashboard/|packages/sdk-ts/|packages/indexer-client/|\.github/workflows/ci\.yml)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v7
+        if: steps.changes.outputs.relevant == 'true'
+        with:
+          node-version: "20"
+
+      - name: Restore built TypeScript SDK
+        if: steps.changes.outputs.relevant == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: sdk-ts-dist
+          path: packages/sdk-ts/dist
+
+      - name: Install dependencies in sdk-ts
+        if: steps.changes.outputs.relevant == 'true'
+        run: npm ci --no-audit --no-fund
+        working-directory: packages/sdk-ts
+
+      - name: Install dependencies in apps/dashboard
+        if: steps.changes.outputs.relevant == 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck and build
+        if: steps.changes.outputs.relevant == 'true'
+        run: npm run build
+
+      - name: Unit and component tests
+        if: steps.changes.outputs.relevant == 'true'
+        run: npm test
+
+      - name: Lint
+        if: steps.changes.outputs.relevant == 'true'
+        run: npm run lint
+
+      - name: Report bundle size
+        if: steps.changes.outputs.relevant == 'true'
+        run: node scripts/report-bundle-size.mjs >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Skip notice
+        if: steps.changes.outputs.relevant == 'false'
+        run: |
+          echo "Skipped — PR does not touch apps/dashboard/, packages/sdk-ts/, or packages/indexer-client/."
+
+  # ───────────────────────────────────────────────────────────────────────────
   # ADVISORY — the example keeper bot. It is a reference implementation, so a
   # lint nit there should not gate a contract PR.
   #
@@ -1048,12 +1125,12 @@ jobs:
     name: CI required checks
     runs-on: ubuntu-latest
     if: always()
-    needs: [format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client]
+    needs: [format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client, dashboard]
     steps:
       - name: Verify required jobs succeeded
         run: |
           results='${{ join(needs.*.result, ' ') }}'
-          echo "Required job results (format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client): $results"
+          echo "Required job results (format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk, indexer-client, dashboard): $results"
           for r in $results; do
             if [ "$r" != "success" ]; then
               echo "::error::A required CI job did not succeed."

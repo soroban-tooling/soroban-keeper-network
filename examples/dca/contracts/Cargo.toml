@@ -1,0 +1,19 @@
+[package]
+name = "dca-contract"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Soroban dollar-cost averaging (DCA) bot task contract"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+testutils = ["soroban-sdk/testutils"]
+
+[dependencies]
+soroban-sdk = { version = "22.0.1" }
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.1", features = ["testutils"] }
