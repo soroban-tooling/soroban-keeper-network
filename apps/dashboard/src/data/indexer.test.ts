@@ -24,4 +24,26 @@ describe("DashboardIndexer", () => {
     const client = new DashboardIndexer("https://indexer.test/v1", fetchFn);
     await expect(client.leaderboard("executions")).rejects.toThrow("503");
   });
+
+  it("queries tasks by owner via /owners/{owner}/tasks", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          tasks: [
+            { task_id: 101, owner: "GOWNER1", status: "pending", reward: "50000000" },
+            { task_id: 102, owner: "GOWNER1", status: "executed", reward: "25000000" },
+          ],
+          next_cursor: null,
+        }),
+        { status: 200 }
+      )
+    );
+
+    const client = new DashboardIndexer("https://indexer.test/v1", fetchFn);
+    const result = await client.tasksByOwner("GOWNER1");
+
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]?.task_id).toBe(101);
+    expect(fetchFn.mock.calls[0]?.[0].toString()).toContain("/owners/GOWNER1/tasks");
+  });
 });

@@ -2,6 +2,7 @@ import { BarChart3, Coins, Gauge, ListChecks, Menu, PlusCircle, ShieldCheck, Sli
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useNetwork, type NetworkName } from "../config";
+import { Search } from "./Search";
 import { ThemeToggle } from "./ThemeToggle";
 import { WalletControl } from "../wallet/WalletControl";
 
@@ -35,6 +36,7 @@ export function Shell() {
             <small>Network operations</small>
           </span>
         </div>
+        <Search />
         <nav aria-label="Primary navigation">
           {links.map(({ to, label, icon: Icon }) => (
             <NavLink key={to} to={to} onClick={() => setOpen(false)}>

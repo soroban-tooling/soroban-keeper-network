@@ -3,6 +3,7 @@ import { Shell } from "./components/Shell";
 import { AdminPage } from "./pages/Admin";
 import { KeeperPage } from "./pages/Keeper";
 import { LeaderboardPage } from "./pages/Leaderboard";
+import { OwnerPage } from "./pages/Owner";
 import { RegisterTaskPage } from "./pages/RegisterTask";
 import { StatsPage } from "./pages/Stats";
 import { TaskDetailPage } from "./pages/TaskDetail";
@@ -19,6 +20,7 @@ const router = createBrowserRouter([
       { path: "tasks/:taskId", element: <TaskDetailPage /> },
       { path: "keepers", element: <LeaderboardPage /> },
       { path: "keepers/:keeper", element: <KeeperPage /> },
+      { path: "owners/:owner", element: <OwnerPage /> },
       { path: "stats", element: <StatsPage /> },
       { path: "treasury", element: <TreasuryPage /> },
       { path: "admin", element: <AdminPage /> },

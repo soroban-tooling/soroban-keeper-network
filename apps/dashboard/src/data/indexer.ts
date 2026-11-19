@@ -51,6 +51,14 @@ export class DashboardIndexer {
     return { items: payload.tasks ?? [], nextCursor: payload.next_cursor ?? null };
   }
 
+  async tasksByOwner(owner: string, after?: number, limit = 50): Promise<Page<TaskState>> {
+    const payload = await this.get<WirePage<TaskState>>(
+      `/owners/${encodeURIComponent(owner)}/tasks`,
+      { after, limit },
+    );
+    return { items: payload.tasks ?? [], nextCursor: payload.next_cursor ?? null };
+  }
+
   async leaderboard(
     rankBy: "executions" | "reward" | "reputation",
     limit = 100,
