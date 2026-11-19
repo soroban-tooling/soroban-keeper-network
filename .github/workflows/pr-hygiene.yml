@@ -130,26 +130,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
-
-          # Contract source under contracts/*/src, excluding unit-test code
-          # (src/test/ and src/test.rs), which is not user-facing.
-          contract_src="$(grep -E '^contracts/[^/]+/src/' <<< "$changed" \
-            | grep -v -E '^contracts/[^/]+/src/test(/|\.rs$)' || true)"
-
-          if [ -z "$contract_src" ]; then
-            echo "No contract source changes; CHANGELOG entry not required."
-            exit 0
-          fi
-
-          echo "Contract source changes:"
-          echo "$contract_src"
-
-          if grep -qx 'CHANGELOG.md' <<< "$changed"; then
-            echo "CHANGELOG.md is updated."
-          else
-            echo "::error::Contract source changed without a CHANGELOG.md update. Add an entry, or apply the 'no-changelog' label if the change is not user-facing."
-            exit 1
           # Compare against the merge base so unrelated commits landing on the
           # base branch are not counted against this PR.
           base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
