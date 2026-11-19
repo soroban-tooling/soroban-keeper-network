@@ -1,0 +1,22 @@
+{
+  "name": "@soroban-keeper-network/example-local-quickstart",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "One-command local network quickstart for the Soroban Keeper Network",
+  "main": "quickstart.js",
+  "bin": {
+    "local-quickstart": "./quickstart.ts"
+  },
+  "scripts": {
+    "start": "node quickstart.ts",
+    "test": "node --test test/*.test.ts"
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "quickstart",
+    "keeper",
+    "local-network"
+  ],
+  "license": "Apache-2.0"
+}

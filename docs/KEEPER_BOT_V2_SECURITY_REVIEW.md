@@ -1,5 +1,22 @@
 # Keeper Bot v2 Security Review (E15)
 
+## Key hygiene review for both bots
+
+This review covers every current signing-key load, retention, use, and error-output path in both examples. The fixtures below are synthetic; no production key material is committed.
+
+| Bot | Path | Handling | Log/crash behavior |
+|---|---|---|---|
+| v1 | `examples/keeper-bot/index.js::requireEnv` | Reads `KEEPER_SECRET_KEY`; validation marks it secret and never interpolates its value. | Validation emits the variable name and reason only. |
+| v1 | `validateAndLoadConfig` to `main` | Holds the seed in memory, then creates a `Keypair`; it is never written to disk. | Startup output prints only `keypair.publicKey()`. |
+| v1 | dry-run fallback | Generates a temporary in-memory keypair when no seed is supplied. | Logs only that a temporary keypair is in use. |
+| v1 | daemon/top-level failures | Unexpected errors pass through `safeErrorMessage`. | Seed patterns and secret assignments are replaced; `test/key-hygiene.test.js` covers the crash path. |
+| v2 | `src/config.ts::validateConfig` | Reads `KEEPER_SECRET_KEY` or `SIGNING_KEY_POOL`; invalid entries use secret-aware `failField`. | Errors show `[REDACTED]`, never the rejected value. |
+| v2 | `src/accounts.ts` | Converts configured seeds to `Keypair` objects in memory; public keys identify workers. | Invalid-account errors identify index/label, not the seed. |
+| v2 | `bot/config.js` hot reload | Treats the signing key as restart-required and secret. | `_safeDisplayValue` redacts old and new values. |
+| v2 | CLI/top-level failures | Unexpected errors pass through `safeErrorMessage`. | `src/key-hygiene.test.ts` covers a synthetic crash containing a seed. |
+
+Neither bot stores seeds in its task database, outcome store, metrics labels, decision records, or crash output. `.env` remains ignored; `.env.example` files contain names and placeholders only. Operators should inject keys at runtime from a restricted environment or secret manager and disable core dumps because process memory necessarily contains the active signing key.
+
 This document records the pre-release security review for the **Keeper Bot v2**
 architecture (Epic E15, Issue #414 / Backlog Issue 0286).
 
