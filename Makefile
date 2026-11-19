@@ -17,7 +17,7 @@ INDEXER_TEST_DATABASE_URL ?=
 # so `npm ci` can run; add new packages here when they gain one.
 SETUP_PACKAGES := packages/sdk-ts packages/indexer-client examples/keeper-bot examples/keeper-bot-v2 examples/batch-register
 
-.PHONY: help build test fmt fmt-check lint wasm optimize clean setup bot bot-test bot-v2-test sdk-ts sdk-ts-lint cli indexer rust-sdk indexer-client ci check
+.PHONY: help build test fmt fmt-check lint wasm optimize clean setup bot bot-test bot-v2-test sdk-ts sdk-ts-lint cli indexer rust-sdk indexer-client docs docs-indexer-api docs-indexer-api-check ci check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -78,6 +78,14 @@ sdk-ts: ## Typecheck, build and test the TypeScript SDK (matches the required CI
 
 sdk-ts-lint: ## ESLint the TypeScript SDK (advisory in CI, so not part of `make ci`)
 	cd packages/sdk-ts && npm ci --no-audit --no-fund && npm run lint
+
+docs: docs-indexer-api ## Build generated documentation pages
+
+docs-indexer-api: ## Regenerate docs/INDEXER_API.md from indexer/openapi.yaml
+	cd scripts/docs && npm ci --no-audit --no-fund && npm run indexer-api
+
+docs-indexer-api-check: ## Fail if docs/INDEXER_API.md is stale (matches CI)
+	cd scripts/docs && npm ci --no-audit --no-fund && npm run indexer-api:check
 
 cli: sdk-ts ## Build and test the skn CLI (needs the SDK build)
 	cd packages/cli && npm install --no-audit --no-fund && npm run build && npm test
