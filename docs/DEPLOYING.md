@@ -3,6 +3,8 @@
 A step-by-step guide to deploy the `KeeperRegistry` to Stellar testnet and run a
 keeper bot against it.
 
+> Mainnet deployment is gated by the evidence-backed [mainnet readiness checklist](./MAINNET_READINESS.md). An incomplete checklist is a no-go decision.
+
 ## Prerequisites
 
 - Rust with the `wasm32-unknown-unknown` target:

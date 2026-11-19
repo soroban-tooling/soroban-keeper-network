@@ -1,197 +1,128 @@
 # Indexer public API security review
 
-Review date: 2026-09-24
+Review date: 2026-11-19
 
-Reviewed revision: `8b7ba74`
+Code baseline: `22fc723c` plus the controls in the pull request containing
+this document.
 
-Scope: `indexer/src/api/`, `indexer/src/store.rs`,
-`indexer/src/queries/`, the SQLite migrations, `indexer/openapi.yaml`, and
-the committed load-test baseline.
+Scope: `indexer/src/api/`, `indexer/src/store.rs`, `indexer/src/queries/`,
+SQLite migrations, `indexer/openapi.yaml`, and the committed load-test
+baseline.
 
 ## Verdict
 
-The API is **not approved for general availability yet**. The review found
-no SQL-injection path and no endpoint that discloses private application
-data, but it found three availability and authentication gaps that a
-remote client could exploit once the router is exposed publicly. Each gap
-has a filed, scoped follow-up:
+The checked-in API has authentication-aware rate limiting, bounded REST
+queries, validated WebSocket filters, held-connection caps, bounded replay,
+and idle connection expiry. These controls address the source-level findings
+from the prior review. General availability still requires the deployment
+checks in the release gate below; source review does not establish correct
+proxy configuration or live capacity.
 
-| ID | Severity | Finding | Resolution |
-| --- | --- | --- | --- |
-| IDX-SEC-01 | High | An arbitrary `X-API-Key` value selects a fresh rate-limit bucket before authentication, and buckets are never evicted. Authentication is not wired into the router. | [#579](https://github.com/soroban-tooling/soroban-keeper-network/issues/579) |
-| IDX-SEC-02 | High | Several unauthenticated REST requests can perform or return work that grows with all history for a task or address; arbitrary leaderboard windows can force cache misses. | [#580](https://github.com/soroban-tooling/soroban-keeper-network/issues/580) |
-| IDX-SEC-03 | High | Rate limiting charges WebSocket handshakes but does not bound concurrent open sockets, idle lifetime, or total replay work. | [#581](https://github.com/soroban-tooling/soroban-keeper-network/issues/581) |
+## Route, authentication, and limit matrix
 
-Closing this review records the findings; it does not waive them. Public
-deployment remains blocked on those follow-ups or on an explicit,
-maintainer-approved replacement mitigation.
+All routes accept anonymous callers because they return public on-chain data
+or service health. A valid API key selects a stable non-secret key identity
+and its configured request tier. A presented invalid or revoked key receives
+`401` and never falls back to anonymous access. Every HTTP request, including
+a WebSocket upgrade, passes through the same token bucket: 20 requests/second
+with a burst of 40 by default, configurable by deployment. Limiter storage is
+bounded to 10,000 inactive-evictable identities.
 
-The executable currently does not bind the API router: `indexer/src/main.rs`
-opens the store and waits for shutdown. That makes the findings latent in
-the checked-in binary, not resolved. The same controls must be in place
-before the router is wired to a public listener.
+| Route | Authentication | Input and work bounds |
+|---|---|---|
+| `GET /v1/health` | Public; optional API key | Fixed-size response; no user query input. |
+| `GET /v1/tasks/{task_id}` | Public; optional API key | Numeric task id; history defaults to 50 and is capped at 200 events. |
+| `GET /v1/owners/{owner}/tasks` | Public; optional API key | Stellar address validation; cursor pagination defaults to 50 and is capped at 200 tasks. |
+| `GET /v1/keepers/{keeper}/tasks` | Public; optional API key | Stellar address validation; cursor pagination defaults to 50 and is capped at 200 tasks. |
+| `GET /v1/admin/config` | Public; optional API key | Fixed-size fold of public contract administration events. It exposes no API keys, environment variables, or database settings. |
+| `GET /v1/feeds/open-tasks` | Public; optional API key | Typed feed filter and bounded task page. |
+| `GET /v1/leaderboard` | Public; optional API key | Result limit capped at 200; ranking mode is an enum; time windows are normalized to minute boundaries before cache lookup. |
+| `GET /v1/events` | Public; optional API key | Cursor pagination defaults to 50 and is capped at 500; event type is an enum and address filters are validated. |
+| `GET /v1/stream` | Public; optional API key | Upgrade is rate charged. Maximum 8 held sockets per verified key/IP and 256 per process; one immutable filter set per socket; replay capped at 5,000 events; 60-second inactivity expiry. |
 
-## Threat model
+Administrative API-key issuance, listing, and revocation functions have no
+HTTP route. They remain operator-only library operations. Plaintext secrets
+exist only at issuance; storage contains a domain-separated SHA-256 digest and
+public key id.
 
-The attacker is an unauthenticated internet client who can send arbitrary
-paths, query strings, headers, WebSocket upgrade requests, and socket
-traffic. They may open many connections, rotate header values, and choose
-valid but worst-case filters. They do not have filesystem or database
-access and cannot forge Stellar ledger history.
+## Input validation
 
-The assets in scope are:
+- SQL statements are static and all caller values use `sqlx` bind parameters.
+- Event and ranking names are parsed into enums before reaching storage.
+- Account and contract filters use Stellar StrKey normalization; malformed
+  WebSocket filters receive `400` before the protocol upgrade.
+- Pagination limits are clamped at the handler boundary. Unknown cursors yield
+  an empty page or a typed client error, never an unbounded scan.
+- Internal database errors are logged server-side and returned as the generic
+  `internal_error` shape.
 
-- availability of REST, WebSocket, ingestion, and the shared SQLite store;
-- integrity of indexed results and authentication decisions;
-- API credentials and non-public operational configuration; and
-- the privacy boundary between public on-chain data and service-private
-  data.
+No reviewed path concatenates a caller value into SQL, HTML, a filesystem
+path, or a process invocation.
 
-The indexer is read-only at its HTTP boundary, so unauthorized on-chain
-state changes are not part of this surface. Resource exhaustion, query
-amplification, credential handling, and unintended disclosure are.
+## WebSocket resource controls
 
-## SQL injection
+Request-rate limiting alone does not control resources retained after an
+upgrade. `WebSocketLimits` therefore owns two independent semaphores:
 
-**Result: no finding.**
+- a global 256-connection permit pool;
+- an 8-connection pool for each identity already verified by rate-limit
+  middleware.
 
-All reviewed SQL statements are static strings. User-controlled values are
-passed through `sqlx` bind parameters, including task ids, owner and keeper
-addresses, event cursors, event types, API key ids, and leaderboard time
-windows. No route concatenates a request value into SQL.
+The permit is held for the socket lifetime and released on every exit path.
+Empty per-client pools are removed from the identity map. A client cannot mint
+pools by rotating unverified API-key values because invalid keys are rejected
+before `ClientIdentity` is attached to the request.
 
-Two values that could otherwise become dynamic SQL are allow-listed before
-the store sees them:
+Replay reads at most 200 events per database call and 5,000 per connection.
+At the exact boundary the server sends a resumable close reason containing the
+last cursor. The live subscription is a broadcast receiver, so subscribers do
+not issue per-event database queries. A lagging receiver or a connection idle
+for 60 seconds is closed with a resumable reason.
 
-- `event_type` is parsed into `EventType`; an unknown value receives `400`.
-- `rank_by` is parsed into `RankBy`; ordering is performed in Rust rather
-  than interpolated into an `ORDER BY` clause.
+Focused tests cover malformed filters, exact replay-page boundaries, global
+connection exhaustion, per-client exhaustion, permit release, lag handling,
+filtered replay, and fan-out to many subscribers.
 
-Errors returned to clients are typed and generic. Database error text is
-logged server-side and is not reflected into the HTTP response. The
-unknown enum value is reflected only into a JSON string encoded by Serde,
-not into SQL or HTML.
+## Prior finding resolution
 
-This confirmation depends on continuing the static-query-plus-bind pattern.
-Any future endpoint that builds column names, sort expressions, or filter
-fragments dynamically requires a new review.
-
-## Disproportionately expensive REST queries
-
-**Result: finding IDX-SEC-02; follow-up #580.**
-
-The event feed is appropriately cursor-paginated and clamps a page to 500
-events. The leaderboard clamps output to 200 entries and caches identical
-parameter sets. Those controls are useful but do not bound every public
-request:
-
-- `GET /v1/owners/{owner}/tasks` and
-  `GET /v1/keepers/{keeper}/tasks` load every matching task id, then issue
-  another full-history query and fold for each task. Work and response size
-  grow without a request-level maximum, and the query count is N+1.
-- `GET /v1/tasks/{task_id}` returns and folds the task's complete history.
-  Reward increases, deadline extensions, and repeated claims mean that
-  history is not structurally limited to a small constant.
-- `GET /v1/leaderboard?since=...` accepts arbitrary timestamps. Changing
-  `since` on every request defeats the exact-key cache and forces a full
-  aggregate scan. The committed baseline identifies this varied-window
-  case as the capacity path at 8.2 requests/second on only 4,000 events in
-  a debug build.
-
-The current token bucket is not a sufficient compensating control because
-IDX-SEC-01 lets a caller rotate unverified `X-API-Key` values to obtain new
-buckets. Even after that bypass is fixed, a request-rate limit does not by
-itself make unbounded per-request work safe as retained history grows.
-
-Follow-up #580 requires pagination and hard request bounds, removal of the
-N+1 list pattern, a policy for high-cardinality aggregate windows, and a
-load test for the resulting worst case.
-
-## WebSocket connection exhaustion
-
-**Result: finding IDX-SEC-03; follow-up #581.**
-
-The upgrade request passes through the same token bucket as REST, and a
-lagging broadcast receiver is disconnected instead of blocking ingestion.
-Those are positive controls, but they do not bound retained resources:
-
-- the limiter controls connection *rate*, not the number of sockets held
-  open concurrently;
-- there is no global or per-client connection cap;
-- a quiet peer has no server-enforced heartbeat or idle deadline; and
-- `?after=` replay fetches batches of 200 until it reaches the live edge,
-  with no total rows, elapsed-time, or bytes budget for one connection.
-
-A client can therefore open sockets slowly enough to stay within the
-handshake rate and retain them, or repeatedly request long replays. Slow
-subscriber handling protects the broadcast producer but does not address
-this connection and replay exhaustion path.
-
-Follow-up #581 requires held connection permits, global and per-client
-caps, bounded resumable replay, idle handling, metrics, and churn tests.
-
-## Authentication and rate-limit identity
-
-**Result: finding IDX-SEC-01; follow-up #579.**
-
-`api/auth.rs` has sound intent: plaintext keys are returned only at
-issuance, revoked keys are checked from storage on each request, and the
-administrative issue/list/revoke methods have no public HTTP routes.
-However, that module is not connected to `api::router`.
-
-In contrast, `api/rate_limit.rs` treats any non-empty `X-API-Key` value as
-the client's identity without verifying it. Rotating that value creates a
-full new burst allowance and a new `HashMap` entry. Entries have no expiry
-or size bound, and the key string itself is retained in memory. The stored
-credential digest is also documented in code as a 64-bit FNV-1a
-placeholder, which is not acceptable before credentials are issued
-outside the project.
-
-Follow-up #579 joins authentication to rate limiting, uses only a verified
-non-secret key id for identity, preserves immediate revocation, replaces
-the placeholder digest, and bounds limiter memory. Until it lands, API
-keys must not be issued and `X-API-Key` must not be advertised as a higher
-trust or higher capacity tier.
+| Finding | Resolution |
+|---|---|
+| IDX-SEC-01: unverified API-key values selected unbounded limiter buckets | Keys are verified before identity selection; invalid/revoked keys return `401`; buckets use non-secret ids and have capacity/TTL eviction. |
+| IDX-SEC-02: REST work grew without hard request bounds | Task history and address lists are paginated and capped; leaderboard outputs and cache windows are bounded; the event feed remains cursor paginated. |
+| IDX-SEC-03: WebSocket handshakes were charged but retained resources were unlimited | Held sockets now have per-client/global permits, filters validate before upgrade, replay is capped, and idle/lagged sessions close resumably. |
 
 ## Data exposure
 
-**Result: no unintended-data finding.**
+Task state, addresses, rewards, proofs, contract configuration, event ordering,
+and aggregates are already public on the configured ledger. The API adds a
+local event cursor and ingestion-health metadata. It does not join public data
+to API-key records, return credential hashes, expose database URLs, or reflect
+internal errors. `/admin/config` is intentionally public because it is a fold
+of public contract events, not the indexer process configuration.
 
-The core API intentionally republishes information already observable in
-the configured registry contract's event stream. The exposure review is:
+## Accepted residual risks
 
-| Surface | Data returned | Public-data boundary |
-| --- | --- | --- |
-| Task detail and address task lists | task ids, owner/keeper addresses, rewards, deadlines, status, proofs, and event history | Values are emitted on chain or deterministically folded from those events. |
-| Event REST feed and WebSocket stream | decoded payload, ledger/time, transaction hash, event index, and a local pagination cursor | Payload and ledger metadata are public chain data. The local cursor reveals ordering only and is not a secret. |
-| Admin configuration | admin, reward token, fee settings, pause state, upgrade hash, and swept totals | Emitted public contract configuration and deterministic totals. |
-| Leaderboard and statistics | aggregate counts and rewards | Derived exclusively from public indexed events. |
-| Health | last ingested ledger and backfill status | Service-operational metadata, intentionally public for consumer freshness checks; it contains no host, database, or credential detail. |
-
-The address filter matches only the indexed `owner_address` or
-`keeper_address` columns and returns the same event representation as the
-unfiltered public feed. It does not join to the `api_keys` table, expose
-labels or hashes, return the database URL, or include internal errors.
-An address's activity is therefore no more private than its on-chain
-events, and the endpoint adds no off-chain identity or account data.
-
-The API does not expose calldata or every field of the on-chain `Task`
-struct because those values are not present in the indexed event schema.
-That is a completeness limitation, not an over-disclosure.
+- Connection caps are per process. A multi-replica deployment must also set a
+  fleet-wide reverse-proxy cap and capacity alert.
+- Anonymous identity depends on transport `ConnectInfo`. A proxy must pass the
+  intended client address through a reviewed trust boundary; arbitrary
+  forwarded headers are not consumed directly.
+- API rate and socket defaults are defensive starting values, not a substitute
+  for load testing against the deployment's database and retention volume.
+- A reconnecting client can consume another bounded replay window. Request and
+  connection-rate controls limit that churn but do not prove economic
+  resistance to a distributed denial-of-service attack.
 
 ## Release gate
 
-Before describing this surface as production-ready, maintainers must:
+Before public deployment, maintainers must:
 
-1. Close #579, #580, and #581, or document reviewed replacement
-   mitigations that meet the same bounds.
-2. Re-run the REST and WebSocket load tests with the security limits
-   enabled and record the configured limits with the result.
-3. Exercise the fully wired server through its real listener so transport
-   IP extraction, proxy configuration, upgrade rejection, and disconnect
-   cleanup are tested end to end.
-4. Confirm deployment logs and metrics never contain plaintext API keys.
-
-This review is source-based. It did not claim a live deployment or perform
-internet-facing penetration testing, because the reviewed executable does
-not currently start the API server.
+1. Run REST and WebSocket load/churn tests with production-equivalent history,
+   proxying, and the configured limits.
+2. Verify transport IP extraction and ensure untrusted forwarded headers do
+   not select identities.
+3. Alert on rejected upgrades, active sockets, replay-limit closes, limiter
+   saturation, ingestion lag, and database latency.
+4. Confirm logs and metrics never contain plaintext API keys.
+5. Record the test output and configuration snapshot in the release evidence
+   linked from `docs/MAINNET_READINESS.md`.
