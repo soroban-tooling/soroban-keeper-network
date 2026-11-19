@@ -1502,6 +1502,7 @@ version = "0.1.0"
 dependencies = [
  "governance-token",
  "keeper-registry",
+ "proptest",
  "soroban-sdk",
 ]
 
@@ -1547,6 +1548,15 @@ dependencies = [
  "keeper-treasury",
  "proptest",
  "soroban-sdk",
+]
+
+[[package]]
+name = "keeper-registry-test-support"
+version = "0.1.0"
+dependencies = [
+ "keeper-registry",
+ "soroban-sdk",
+ "soroban-token-sdk",
 ]
 
 [[package]]
@@ -2792,6 +2802,8 @@ name = "soroban-keeper-sdk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "governance-token",
+ "keeper-governance",
  "keeper-registry",
  "keeper-treasury",
  "rand 0.8.7",
@@ -2882,6 +2894,15 @@ dependencies = [
  "stellar-xdr",
  "syn 2.0.118",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "soroban-token-sdk"
+version = "22.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0beb76f6bf6871287c688bfb0e5f24c19448e46c7bb2b6b596f7baf0455bdb69"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]
@@ -3217,6 +3238,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "task-bound-verifier"
+version = "0.1.0"
+dependencies = [
+ "keeper-registry-test-support",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3306,6 +3335,13 @@ checksum = "c431b87111666e491a90baa837f914fb45cd5dc3c268591b0220ff5057f2085f"
 dependencies = [
  "num-conv",
  "time-core",
+]
+
+[[package]]
+name = "time-window-condition"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]

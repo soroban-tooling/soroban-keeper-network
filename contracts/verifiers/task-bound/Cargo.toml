@@ -1,0 +1,19 @@
+[package]
+name = "task-bound-verifier"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Worked example for docs/WRITING_A_VERIFIER.md: accepts only a proof bound to the task id"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Explicit version, not `workspace = true`: the workspace entry enables the
+# `testutils` feature, which does not compile for wasm32.
+soroban-sdk = "22.0.1"
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.1", features = ["testutils"] }
+keeper-registry-test-support = { path = "../test-support" }
