@@ -87,6 +87,17 @@ function makeAdapters(network: ReturnType<typeof useNetwork>["network"], account
   const reader: RegistryReader = {
     keeperBalance: (keeper) => client.keeperBalance(keeper), keeperStake: (keeper) => client.keeperStake(keeper), keeperReputation: (keeper) => client.keeperReputation(keeper), pendingUnbond: (keeper) => client.pendingUnbond(keeper), slashHistory: (keeper) => client.slashHistory(keeper), getFeeBps: () => client.getFeeBps(), isPaused: () => client.isPaused(), feesAccrued: () => client.feesAccrued(),
     task: async (taskId) => { const task = await client.getTask(taskId); return { deadline: task.deadline, claimLedger: task.claimLedger, lockLedgers: task.lockLedgers }; },
+    admin: () => client.admin(),
+    minReward: () => client.minReward(),
+    minStake: () => client.minStake(),
+    disputeWindow: () => client.disputeWindow(),
+    reputationFloor: async () => {
+      try {
+        return Number(await client.read<number | bigint>("reputation_floor"));
+      } catch {
+        return 0;
+      }
+    },
   };
   if (!signer || !account) return { reader };
   let pending: { key: string; xdr: string } | undefined;
