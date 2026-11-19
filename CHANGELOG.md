@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — docs link checking and task lifecycle guide
+
+- `scripts/check-md-links.py`: dependency-free checker for relative links and
+  `#anchors` in every tracked Markdown file, run on every PR by the new
+  `markdown-links` job in `pr-hygiene.yml`. External links are checked weekly by
+  `link-check-external.yml`. See `docs/CI.md`.
+- `docs/TASK_LIFECYCLE.md`: state diagram, guards, entry points, emitted events,
+  lock-window and deadline rules, and per-transition costs for the five task states.
+- Fixed 14 existing broken relative links and anchors in Markdown files found by
+  the new checker.
+
 ### Added — optional on-chain condition parameter (VERSION bumped to 6)
 
 - `register_task` now takes a required tenth parameter, `condition: Option<Address>`.
