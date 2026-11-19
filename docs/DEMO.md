@@ -59,6 +59,30 @@ stellar contract deploy --wasm target/wasm32-unknown-unknown/release/keeper_regi
 
 ---
 
+## One-Command Local Network Quickstart
+
+To run the entire network, contracts, and an automated keeper bot locally in a single command without configuring testnet accounts or faucets:
+
+```bash
+cd examples/local-quickstart
+npm start
+```
+
+### What Happens in One Command:
+1. **Network Initialization**: Connects to the local Soroban RPC (`http://localhost:8000/soroban/rpc`).
+2. **Contract Deployment**: Deploys the mock XLM SAC reward token, the `KeeperRegistry` contract, and a demo target contract.
+3. **Contract Identifiers Printed**: All contract IDs are printed to stdout:
+   - `REWARD_TOKEN_ID`: `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`
+   - `REGISTRY_ID`: `CDJOYHBS7C2PVJS47BTRDLGBNG2YOE43VX6Y3EWIZPPPKOPRNYQQ54U4`
+   - `DEMO_TARGET_ID`: `CCDEMOTARGETXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX`
+4. **Demo Task Registration**: Registers demo task #1 with a 1.0 XLM reward and 500-ledger execution deadline.
+5. **Keeper Bot Claim & Execution**: Runs a keeper bot that discovers the pending task, simulates on-chain execution, locks the claim, executes the task, and verifies that the keeper is credited 0.97 XLM while 0.03 XLM (3%) is retained as the protocol fee.
+6. **Safe Re-runs**: The script is idempotent. Running `npm start` again reuses the deployed contracts, prints the IDs, and cleanly executes demo task #2 without collisions.
+
+See [`examples/local-quickstart/README.md`](../examples/local-quickstart/README.md) for full documentation.
+
+---
+
 ## Verifier-gated task walkthrough
 
 The above trace shows the basic flow with no execution verification. The
