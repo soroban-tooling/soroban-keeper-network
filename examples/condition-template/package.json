@@ -1,0 +1,10 @@
+{
+  "name": "@soroban-keeper-network/example-condition-template",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Copyable template for writing task condition contracts",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  }
+}

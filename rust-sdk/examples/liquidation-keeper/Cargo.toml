@@ -7,3 +7,4 @@ publish = false
 [dependencies]
 soroban-sdk = { workspace = true }
 soroban-keeper-sdk = { path = "../.." }
+mock-lending-contract = { path = "../../../examples/liquidation-keeper-ts/contracts/mock-lending" }
