@@ -10,6 +10,12 @@ interface LeaderboardResponse {
   entries: LeaderboardEntry[];
 }
 
+export interface AdminConfig {
+  fee_bps?: number | null;
+  paused?: boolean | null;
+  total_fees_swept: string;
+}
+
 export class DashboardIndexer {
   constructor(private readonly baseUrl: string, private readonly fetchFn = fetch) {}
 
@@ -40,6 +46,10 @@ export class DashboardIndexer {
     limit = 100,
   ): Promise<LeaderboardEntry[]> {
     return (await this.get<LeaderboardResponse>("/leaderboard", { rank_by: rankBy, limit })).entries;
+  }
+
+  adminConfig(): Promise<AdminConfig> {
+    return this.get<AdminConfig>("/admin/config");
   }
 
   async allTasks(after?: number, limit = 25): Promise<Page<TaskState>> {
