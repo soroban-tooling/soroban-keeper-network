@@ -1,8 +1,8 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
-import { DataProvider } from "./data/context";
 import "./styles.css";
 import { NetworkProvider } from "./config";
+import { WalletProvider } from "./wallet/WalletProvider";
 
-ReactDOM.createRoot(document.getElementById("root")!).render(<React.StrictMode><NetworkProvider><DataProvider><App /></DataProvider></NetworkProvider></React.StrictMode>);
+ReactDOM.createRoot(document.getElementById("root")!).render(<React.StrictMode><NetworkProvider><WalletProvider><App /></WalletProvider></NetworkProvider></React.StrictMode>);

@@ -2,6 +2,7 @@ import { BarChart3, Gauge, ListChecks, Menu, PlusCircle, ShieldCheck, X } from "
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useNetwork, type NetworkName } from "../config";
+import { WalletControl } from "../wallet/WalletControl";
 
 const links = [
   { to: "/tasks", label: "Tasks", icon: ListChecks },
@@ -17,6 +18,7 @@ export function Shell() {
     <aside className={open ? "sidebar sidebar-open" : "sidebar"}>
       <div className="brand"><Gauge aria-hidden="true" /><span><strong>Soroban Keeper</strong><small>Network operations</small></span></div>
       <nav aria-label="Primary navigation">{links.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setOpen(false)}><Icon aria-hidden="true" />{label}</NavLink>)}</nav>
+      <WalletControl />
       <div className={`network-mark network-${network.name}`}><span className="network-dot" /><label><span>Active network</span><select value={network.name} onChange={(event) => selectNetwork(event.target.value as NetworkName)}><option value="testnet">Testnet</option><option value="mainnet">Mainnet</option></select></label></div>
     </aside>
     <main>

@@ -14,7 +14,8 @@ nav { display: grid; gap: 4px; }
 nav a { color: #b8c5c0; text-decoration: none; padding: 10px 12px; display: flex; align-items: center; gap: 10px; border-radius: 6px; }
 nav a:hover, nav a.active { background: #263a33; color: #fff; }
 nav svg, .icon-button svg, .pagination svg, .state svg { width: 18px; height: 18px; }
-.network-mark { margin-top: auto; border-top: 1px solid #32453e; padding: 18px 8px 0; display: flex; gap: 8px; align-items: center; color: #b8c5c0; font-size: 14px; }
+.wallet-control { margin-top: auto; padding: 14px 8px 0; border-top: 1px solid #32453e; display: grid; gap: 7px; }.wallet-control button { min-height: 36px; border: 1px solid #41564e; border-radius: 5px; background: #263a33; color: #fff; display: flex; align-items: center; justify-content: center; gap: 7px; }.wallet-control button svg { width: 17px; }.wallet-control span { color: #ffca63; font-size: 11px; line-height: 1.35; }
+.network-mark { padding: 12px 8px 0; display: flex; gap: 8px; align-items: center; color: #b8c5c0; font-size: 14px; }
 .network-mark label { display: grid; gap: 3px; flex: 1; }.network-mark label span { font-size: 10px; text-transform: uppercase; }.network-mark select { min-height: 30px; width: 100%; background: #263a33; border-color: #41564e; color: #fff; }.network-mainnet .network-dot { background: #ffbf3f; }.network-mainnet select { border-color: #bd7e00; }
 .network-dot { width: 8px; height: 8px; border-radius: 50%; background: #63d7af; }
 main { min-width: 0; }
