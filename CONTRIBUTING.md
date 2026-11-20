@@ -19,6 +19,7 @@ Thank you for your interest in contributing! This guide covers everything you ne
 - [PR Template & Review Process](#pr-template--review-process)
 - [Coordination — Issues & Discussions](#coordination--issues--discussions)
 - [Release Process](#release-process)
+- [Secret Scanning](#secret-scanning)
 - [Security Reporting](#security-reporting)
 
 ---
@@ -526,6 +527,49 @@ We follow **Semantic Versioning 2.0.0**:
 - `MAJOR` — breaking changes to the on-chain interface or storage layout
 - `MINOR` — new backwards-compatible functionality
 - `PATCH` — backwards-compatible bug fixes
+
+---
+
+## Secret Scanning
+
+All pull requests are automatically scanned for committed secrets using [Gitleaks](https://github.com/gitleaks/gitleaks). This check runs on every PR and will block merge if potential secrets are detected.
+
+### What Gets Flagged
+
+The scanner flags:
+- Stellar secret keys (starting with `S` followed by base32 characters)
+- Contract IDs appearing as credentials
+- Common credential patterns (API keys, tokens, passwords)
+- Hardcoded database connection strings
+- Any other high-entropy strings matching known secret patterns
+
+### Allowlist for Placeholders
+
+`.env.example` files contain format-valid placeholder secrets to validate configuration parsing and startup logic. These placeholders are allowlisted in `.gitleaks.toml` because they:
+
+1. Follow the correct Stellar key format (S...S keys, C...C contract IDs)
+2. Use only placeholder characters (X's or other valid base32 chars)
+3. Control no funds and serve only to exercise validation code
+4. Are documented as examples, never as real keys
+
+If you need to add a new `.env.example` file with placeholder secrets, add corresponding allowlist entries to `.gitleaks.toml` and justify them in the PR description.
+
+### If a Secret is Accidentally Committed
+
+1. **Stop and notify maintainers immediately** — tag `@Andreschuks101` in a comment.
+2. **Rotate the secret** — change any real keys/credentials that were exposed (even if just in local work that never reached main).
+3. **Rewrite history locally** (before pushing):
+   ```bash
+   git filter-repo --invert-paths --path <file-with-secret>
+   ```
+   Do NOT use `git revert`; secrets should be removed from history, not just undone in a new commit.
+4. **Force push the clean branch** (with care, only to your own branch):
+   ```bash
+   git push origin <branch> --force-with-lease
+   ```
+5. Rebase or re-open the PR against the clean history.
+
+Never commit `.env` files (only `.env.example`) — `.env` files are in `.gitignore`.
 
 ---
 
