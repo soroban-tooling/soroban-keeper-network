@@ -16,14 +16,25 @@ pub mod types;
 pub mod websocket;
 
 use std::sync::Arc;
+use std::time::Instant;
 
+use axum::extract::{MatchedPath, Request, State};
+use axum::http::{header, StatusCode};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
 use axum::Router;
 use utoipa::OpenApi;
 
 use crate::cache::AggregateCaches;
 use crate::ingest::Ingestor;
+use crate::metrics::{self, Metrics};
 use crate::progress::IngestionProgress;
 use rate_limit::RateLimiter;
+
+/// Route template stashed by an inner middleware once the router has matched.
+#[derive(Clone)]
+struct RouteTemplate(String);
 
 /// Shared state every handler reads from.
 #[derive(Clone)]
@@ -40,6 +51,8 @@ pub struct ApiState {
     pub max_healthy_lag_ledgers: u32,
     /// Store and verifier for API keys.
     pub api_keys: Arc<auth::ApiKeys>,
+    /// Shared counters for `/metrics` and the request middleware.
+    pub metrics: Arc<Metrics>,
 }
 
 impl ApiState {
@@ -50,13 +63,14 @@ impl ApiState {
         max_healthy_lag_ledgers: u32,
     ) -> Self {
         let api_keys = Arc::new(auth::ApiKeys::new(ingestor.store().pool().clone()));
-        Self {
+        Self::with_parts(
             ingestor,
             caches,
             progress,
             max_healthy_lag_ledgers,
             api_keys,
-        }
+            Arc::new(Metrics::new()),
+        )
     }
 
     pub fn with_api_keys(
@@ -66,12 +80,51 @@ impl ApiState {
         max_healthy_lag_ledgers: u32,
         api_keys: Arc<auth::ApiKeys>,
     ) -> Self {
+        Self::with_parts(
+            ingestor,
+            caches,
+            progress,
+            max_healthy_lag_ledgers,
+            api_keys,
+            Arc::new(Metrics::new()),
+        )
+    }
+
+    /// Build state with a shared metrics registry, so an ingestor and the API
+    /// report into the same scrape.
+    pub fn with_metrics(
+        ingestor: Ingestor,
+        caches: AggregateCaches,
+        progress: IngestionProgress,
+        max_healthy_lag_ledgers: u32,
+        metrics: Arc<Metrics>,
+    ) -> Self {
+        let api_keys = Arc::new(auth::ApiKeys::new(ingestor.store().pool().clone()));
+        Self::with_parts(
+            ingestor,
+            caches,
+            progress,
+            max_healthy_lag_ledgers,
+            api_keys,
+            metrics,
+        )
+    }
+
+    fn with_parts(
+        ingestor: Ingestor,
+        caches: AggregateCaches,
+        progress: IngestionProgress,
+        max_healthy_lag_ledgers: u32,
+        api_keys: Arc<auth::ApiKeys>,
+        metrics: Arc<Metrics>,
+    ) -> Self {
         Self {
             ingestor,
             caches,
             progress,
             max_healthy_lag_ledgers,
             api_keys,
+            metrics,
         }
     }
 }
@@ -122,15 +175,87 @@ impl ApiState {
 )]
 pub struct ApiDoc;
 
+/// Prometheus text-format metrics for ingestion, the API and the caches.
+///
+/// Served on the API listener so an operator needs only one exposed port.
+/// The body contains operational counts and bounded label values, never a
+/// secret, a full URL or a caller-supplied path.
+pub async fn metrics_handler(State(state): State<ApiState>) -> impl IntoResponse {
+    let body = state.metrics.render(&state.progress, &state.caches);
+    (
+        [(
+            header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        body,
+    )
+}
+
+/// Count every response, including ones rejected before reaching a handler.
+///
+/// The route comes from the router's `MatchedPath` where available, so a task
+/// id cannot multiply the series. The fallback normalises raw paths for 404s
+/// and WebSocket upgrades, which never produce a matched template.
+async fn track_requests(
+    State(metrics): State<Arc<Metrics>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let route = request
+        .extensions()
+        .get::<RouteTemplate>()
+        .map(|template| template.0.clone())
+        .or_else(|| {
+            request
+                .extensions()
+                .get::<MatchedPath>()
+                .map(|matched| matched.as_str().to_string())
+        })
+        .unwrap_or_else(|| metrics::normalize_route(request.uri().path()));
+    let started = Instant::now();
+    let response = next.run(request).await;
+    let status = response.status().as_u16();
+    metrics.record_request(&route, status, started.elapsed());
+    if status == StatusCode::TOO_MANY_REQUESTS.as_u16() {
+        metrics.record_rate_limit_rejection();
+    }
+    response
+}
+
+/// Stash the matched template while routing still has it.
+///
+/// `Router::layer` wraps the router, so an outer metrics middleware runs before
+/// `MatchedPath` is inserted. This inner layer sees it and copies it into an
+/// extension the outer layer can read after the response comes back.
+async fn stash_matched_route(mut request: Request, next: Next) -> Response {
+    let template = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|matched| matched.as_str().to_string());
+    if let Some(template) = template {
+        request.extensions_mut().insert(RouteTemplate(template));
+    }
+    next.run(request).await
+}
+
 /// Build the API router with a pre-configured rate limiter.
 pub fn router_with_limiter(state: ApiState, limiter: Arc<RateLimiter>) -> Router {
+    let metrics = state.metrics.clone();
     Router::new()
         .nest("/v1", rest::routes())
-        .route("/v1/stream", axum::routing::get(websocket::subscribe))
+        .route("/v1/stream", get(websocket::subscribe))
+        .route("/metrics", get(metrics_handler))
         .with_state(state)
         .layer(axum::middleware::from_fn_with_state(
             limiter,
             rate_limit::enforce,
+        ))
+        .layer(axum::middleware::from_fn(stash_matched_route))
+        // Outermost layer: it sees every response, including rate-limit
+        // rejections, and the route template stashed by the inner layer.
+        .layer(axum::middleware::from_fn_with_state(
+            metrics,
+            track_requests,
         ))
 }
 
@@ -157,6 +282,79 @@ pub fn openapi_yaml() -> Result<String, serde_yaml::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::Store;
+    use axum::body::Body;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn metrics_endpoint_serves_every_documented_family() {
+        let store = Store::connect("sqlite::memory:").await.expect("store");
+        let progress = IngestionProgress::new();
+        progress.observe_tip(50);
+        progress.observe_ingested(45);
+        let app = router(
+            ApiState::new(
+                Ingestor::new(store),
+                AggregateCaches::from_secs(10),
+                progress,
+                60,
+            ),
+            20,
+            40,
+        );
+
+        // A prior request proves the middleware and the scrape share one
+        // registry. The scrape's own count is recorded after the body is built.
+        let health = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/health")
+                    .body(Body::empty())
+                    .expect("health request"),
+            )
+            .await
+            .expect("health response");
+        assert_eq!(health.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .expect("scrape request"),
+            )
+            .await
+            .expect("scrape response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .expect("content type")
+            .starts_with("text/plain"));
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let text = String::from_utf8(body.to_vec()).expect("utf-8 metrics");
+        for family in [
+            "soroban_indexer_ingestion_lag_ledgers",
+            "soroban_indexer_events_ingested_total",
+            "soroban_indexer_api_requests_total",
+            "soroban_indexer_api_request_duration_seconds",
+            "soroban_indexer_cache_hit_ratio",
+            "soroban_indexer_rate_limit_rejections_total",
+            "soroban_indexer_websocket_connections",
+        ] {
+            assert!(
+                text.contains(&format!("# TYPE {family}")),
+                "missing {family} in:\n{text}"
+            );
+        }
+        assert!(text.contains("soroban_indexer_ingestion_lag_ledgers 5"));
+        assert!(text.contains("route=\"/v1/health\",status=\"2xx\"} 1"));
+    }
 
     #[test]
     fn the_openapi_document_describes_every_route() {
