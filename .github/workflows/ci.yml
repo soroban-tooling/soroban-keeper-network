@@ -7,7 +7,7 @@ name: CI
 #   REQUIRED  — format, test, build-wasm, sdk-ts, bot, bot-v2, indexer, rust-sdk,
 #               indexer-client. These block the merge.
 #   ADVISORY  — clippy, audit, wasm-size, sdk-ts-lint, sdk-bundle-size, fuzz-pr,
-#               resource-cost. These report findings as annotations or a job
+#               resource-cost, examples. These report findings as annotations or a job
 #               summary but never fail your PR.
 #
 # `bot`'s name/needs status has said "(required)" since before this comment
@@ -1044,6 +1044,63 @@ jobs:
   # Aggregate gate. Branch protection should require only this single check;
   # it passes when all REQUIRED jobs pass and ignores advisory outcomes.
   # ───────────────────────────────────────────────────────────────────────────
+  # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — example tooling. Verifies that every Node example declares a
+  # test command, then builds/tests the examples that have no job of their own
+  # (examples/keeper-bot has `bot`, examples/keeper-bot-v2 has `bot-v2`).
+  # Path-guarded: runs the work only when examples/, the SDKs or this file
+  # change, and reports success otherwise. Not in `ci-required` yet, the same
+  # way `cli` was introduced; promoting it is a maintainer decision.
+  # ───────────────────────────────────────────────────────────────────────────
+  examples:
+    name: Examples (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for relevant changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qE '^(examples/|packages/sdk-ts/|rust-sdk/|scripts/check-example-tests\.js|\.github/workflows/ci\.yml)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v7
+        if: steps.changes.outputs.relevant == 'true'
+        with:
+          node-version: "20"
+
+      - name: Every example declares a test command
+        if: steps.changes.outputs.relevant == 'true'
+        run: node scripts/check-example-tests.js
+
+      - name: batch-register - install
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: examples/batch-register
+        run: npm ci --no-audit --no-fund
+
+      - name: batch-register - test (dry-runs every sample task list)
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: examples/batch-register
+        run: npm test
+
+      - name: batch-register - syntax check and lint
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: examples/batch-register
+        run: |
+          node --check index.js
+          npm run lint
+
   ci-required:
     name: CI required checks
     runs-on: ubuntu-latest
