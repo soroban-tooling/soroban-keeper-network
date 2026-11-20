@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — documentation site and integration guide (E20, E22)
+
+- `docs/site/`: an mdBook documentation site that groups the existing Markdown
+  into Concepts, Guides, Reference and Operations without moving any source
+  file. Build it with `make docs`.
+- `.github/workflows/docs.yml`: builds the site on pull requests that touch the
+  docs and deploys it to GitHub Pages on pushes to `main`.
+- `docs/INTEGRATION_GUIDE.md`: decision guide for protocol teams, with a worked
+  reward-sizing calculation.
+- `examples/README.md`: examples index and epic E22 retrospective.
+- Fixed a broken relative link in `docs/GOVERNANCE_TESTNET_REPORT.md`.
+
+
 ### Added — optional on-chain condition parameter (VERSION bumped to 6)
 
 - `register_task` now takes a required tenth parameter, `condition: Option<Address>`.
