@@ -17,11 +17,17 @@ INDEXER_TEST_DATABASE_URL ?=
 # so `npm ci` can run; add new packages here when they gain one.
 SETUP_PACKAGES := packages/sdk-ts packages/indexer-client examples/keeper-bot examples/keeper-bot-v2 examples/batch-register
 
-.PHONY: help build test fmt fmt-check lint wasm optimize clean setup bot bot-test bot-v2-test sdk-ts sdk-ts-lint cli indexer rust-sdk indexer-client ci check
+.PHONY: help docs docs-serve build test fmt fmt-check lint wasm optimize clean setup bot bot-test bot-v2-test sdk-ts sdk-ts-lint cli indexer rust-sdk indexer-client ci check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+
+docs: ## Build the documentation site into docs/site/book (needs node and mdbook)
+	./docs/site/build.sh
+
+docs-serve: ## Serve the documentation site locally with live reload
+	./docs/site/build.sh serve
 
 setup: ## Install the wasm target and npm dependencies, and report missing system tools
 	@command -v rustup >/dev/null 2>&1 || { echo "setup: rustup is required, see https://rustup.rs"; exit 1; }
