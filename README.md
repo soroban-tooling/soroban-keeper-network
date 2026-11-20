@@ -22,6 +22,8 @@
 | [Fuzzing & property testing](docs/FUZZING.md) | Running/adding fuzz targets, the shared invariant module, crash-to-regression convention |
 | [Verifier design (E04)](docs/VERIFIER_DESIGN.md) | `IKeeperVerifier` interface for optional on-chain proof verification |
 | [Reputation design (E07)](docs/REPUTATION_DESIGN.md) | On-chain keeper reputation scoring architecture and epic retrospective |
+| [Staking guide](docs/STAKING_GUIDE.md) | Keeper operator's guide to staking: unbonding, slashing, appeals, worked example |
+| [Reputation guide](docs/REPUTATION.md) | How the reputation score is computed, decays and is used, and what it does not affect |
 | [Indexer design](docs/INDEXER_DESIGN.md) | One instance per deployment, event-shape versioning policy |
 | [Indexer deployment](docs/INDEXER_DEPLOYMENT.md) | Provisioning, backfill, and operating an indexer instance |
 | [Batch operations (E05)](docs/BATCH_OPERATIONS.md) | Proposed `batch_register_tasks` design + integration guide |
@@ -32,6 +34,8 @@
 | [Governance events](docs/GOVERNANCE_EVENTS.md) | Governance proposal lifecycle event topic pairs, full history reconstruction, voter transparency rationale |
 | [CI](docs/CI.md) | What each CI job checks and which are advisory vs. required |
 | [Deploying & running](docs/DEPLOYING.md) | Testnet deploy walkthrough and keeper-bot operator guide |
+| [Run your first keeper](docs/RUNNING_A_KEEPER.md) | Tutorial: configure, dry-run, run and withdraw with `examples/keeper-bot` |
+| [Treasury and fees](docs/TREASURY.md) | How fees accrue, are swept and are split among recipients, with rounding |
 | [Deployments](docs/DEPLOYMENTS.md) | Canonical record of on-chain addresses |
 | [Contributing](CONTRIBUTING.md) | How to pick up an issue and open your first PR |
 | [Changelog](CHANGELOG.md) | Notable changes |
