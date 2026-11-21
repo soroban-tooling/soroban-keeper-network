@@ -142,4 +142,11 @@ pub enum KeeperError {
     /// The attached task condition returned false or could not be evaluated.
     /// The task remains in its previous claimable state.
     ConditionNotMet = 40,
+
+    // ─── E06: Pending-credit bound (issue #738) ─────────────────────────
+    /// `execute_task` would have created more than [`crate::MAX_PENDING_CREDITS`]
+    /// pending execution credits for this keeper, even after all matured
+    /// credits were finalized. The keeper must withdraw finalized rewards or
+    /// resolve disputes before executing more tasks. No state was changed.
+    TooManyPendingCredits = 41,
 }
