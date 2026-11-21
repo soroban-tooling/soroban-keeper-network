@@ -1041,6 +1041,49 @@ jobs:
         run: cargo test --locked --package soroban-keeper-sdk --test integration_quickstart -- --nocapture
 
   # ───────────────────────────────────────────────────────────────────────────
+  # ADVISORY — ops artifacts. Validates the Prometheus rules with promtool,
+  # checks dashboards and alerts against the canonical metric catalog, and
+  # runs the read-only monitor and canary unit tests. Advisory because a new
+  # upstream toolchain issue should notify rather than block a contract PR.
+  # ───────────────────────────────────────────────────────────────────────────
+  ops:
+    name: Ops checks (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Install promtool
+        run: sudo apt-get update && sudo apt-get install -y prometheus
+
+      - name: Check Prometheus rules
+        run: promtool check rules ops/prometheus/alerts.yml
+
+      # The ops tools depend on the SDK through a file: reference. npm ci
+      # copies that directory as-is, so its dist must be built first, the same
+      # as the bot and bot-v2 jobs.
+      - name: Install SDK dependencies
+        working-directory: packages/sdk-ts
+        run: npm ci --no-audit --no-fund
+
+      - name: Build SDK
+        working-directory: packages/sdk-ts
+        run: npm run build
+
+      - name: Install ops dependencies
+        run: npm ci --no-audit --no-fund --prefix ops
+
+      - name: Check dashboards and alerts against the metric catalog
+        run: npm run check:metrics --prefix ops
+
+      - name: Test ops tools
+        run: npm test --prefix ops
+
+  # ───────────────────────────────────────────────────────────────────────────
   # Aggregate gate. Branch protection should require only this single check;
   # it passes when all REQUIRED jobs pass and ignores advisory outcomes.
   # ───────────────────────────────────────────────────────────────────────────
