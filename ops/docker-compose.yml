@@ -1,0 +1,43 @@
+# Local observability stack for the indexer, keeper bots and canary (issue #721).
+# Run `node ops/scripts/check-stack.mjs` first to verify the prerequisite rule
+# and dashboard files from the monitoring and alerting work are present.
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        sed \
+          -e "s|__INDEXER_TARGET__|$$PROM_INDEXER_TARGET|g" \
+          -e "s|__KEEPER_TARGET__|$$PROM_KEEPER_TARGET|g" \
+          -e "s|__CANARY_TARGET__|$$PROM_CANARY_TARGET|g" \
+          /etc/prometheus-template/prometheus.yml > /etc/prometheus/prometheus.yml
+        exec /bin/prometheus \
+          --config.file=/etc/prometheus/prometheus.yml \
+          --storage.tsdb.retention.time=$$PROM_RETENTION
+    environment:
+      PROM_INDEXER_TARGET: ${PROM_INDEXER_TARGET:-host.docker.internal:8080}
+      PROM_KEEPER_TARGET: ${PROM_KEEPER_TARGET:-host.docker.internal:9102}
+      PROM_CANARY_TARGET: ${PROM_CANARY_TARGET:-host.docker.internal:9103}
+      PROM_RETENTION: ${PROM_RETENTION:-30d}
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./prometheus:/etc/prometheus-template:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    depends_on:
+      - prometheus
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana:/var/lib/grafana/dashboards:ro

@@ -8,16 +8,50 @@ use anyhow::{Context, Result};
 use keeper_indexer::rpc::HttpClient;
 use keeper_indexer::service::shutdown_signal;
 use keeper_indexer::{Config, Service, Store};
-use tracing_subscriber::EnvFilter;
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry_otlp::{SpanExporter, WithExportConfig};
+use opentelemetry_sdk::trace::SdkTracerProvider;
+use tracing::Subscriber;
+use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Layer};
+
+/// Build the optional OTLP layer and its provider together. The provider must
+/// be kept alive until shutdown so the batch processor can flush. The layer is
+/// generic over the subscriber it will be attached to, which keeps it valid
+/// when composed after the formatting layer.
+fn build_otel_layer<S>(
+    endpoint: Option<&str>,
+) -> Result<(
+    Option<OpenTelemetryLayer<S, opentelemetry_sdk::trace::SdkTracer>>,
+    Option<SdkTracerProvider>,
+)>
+where
+    S: Subscriber + for<'span> LookupSpan<'span> + 'static,
+{
+    let Some(endpoint) = endpoint else {
+        return Ok((None, None));
+    };
+    if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
+        anyhow::bail!("INDEXER_OTLP_ENDPOINT must be an http(s) URL, got {endpoint:?}");
+    }
+
+    let exporter = SpanExporter::builder()
+        .with_http()
+        .with_endpoint(endpoint)
+        .build()
+        .context("building the OTLP span exporter")?;
+    let provider = SdkTracerProvider::builder()
+        .with_batch_exporter(exporter)
+        .build();
+    let tracer = provider.tracer("keeper-indexer");
+    Ok((Some(OpenTelemetryLayer::new(tracer)), Some(provider)))
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_env("INDEXER_LOG").unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
-
     let config = match Config::from_env() {
         Ok(config) => config,
         Err(err) => {
@@ -26,6 +60,18 @@ async fn main() -> Result<()> {
             std::process::exit(2);
         }
     };
+
+    let filter = EnvFilter::try_from_env("INDEXER_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
+    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter.clone());
+    let (otel_layer, tracer_provider) = build_otel_layer(config.otlp_endpoint.as_deref())
+        .context("configuring OTLP trace export")?;
+    // `Option<L>` is itself a `Layer`, so the disabled path installs exactly
+    // one formatting layer and creates no exporter or batch worker.
+    let otel_layer = otel_layer.map(|layer| layer.with_filter(filter));
+    tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(otel_layer)
+        .init();
 
     tracing::info!(
         rpc_url = %config.rpc_url,
@@ -59,5 +105,39 @@ async fn main() -> Result<()> {
         .context("keeper indexer stopped")?;
     tracing::info!("shut down cleanly");
 
+    if let Some(provider) = tracer_provider {
+        let _ = provider.shutdown();
+    }
+
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_otel_layer;
+    use tracing_subscriber::Registry;
+
+    #[test]
+    fn no_endpoint_builds_no_layer_and_no_exporter() {
+        let (layer, provider) = build_otel_layer::<Registry>(None).expect("no endpoint is valid");
+        assert!(
+            layer.is_none(),
+            "a disabled exporter must not install a layer"
+        );
+        assert!(
+            provider.is_none(),
+            "a disabled exporter must not spawn a worker"
+        );
+    }
+
+    #[test]
+    fn a_non_http_endpoint_is_rejected() {
+        match build_otel_layer::<Registry>(Some("collector.example.org:4318")) {
+            Ok(_) => panic!("an endpoint without a scheme must be rejected"),
+            Err(err) => assert!(
+                err.to_string().contains("INDEXER_OTLP_ENDPOINT"),
+                "the error should name the setting: {err}"
+            ),
+        }
+    }
 }
