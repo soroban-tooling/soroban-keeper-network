@@ -250,6 +250,7 @@ mod tests {
             rate_limit_burst: 1_000,
             shutdown_drain_secs: 5,
             max_healthy_lag_ledgers: 60,
+            otlp_endpoint: None,
         }
     }
 

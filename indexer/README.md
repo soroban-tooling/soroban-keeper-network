@@ -48,11 +48,30 @@ problems at once and exits, rather than failing later inside the ingest loop.
 | `INDEXER_MAX_HEALTHY_LAG_LEDGERS` | no | `60` | Ingestion lag, in ledgers, beyond which the health check reports unhealthy |
 | `INDEXER_SHUTDOWN_DRAIN_SECS` | no | `30` | Max seconds a SIGINT/SIGTERM shutdown waits for an in-flight ingestion pass to finish and checkpoint before exiting anyway |
 | `INDEXER_LOG` | no | `info` | `tracing` filter directive |
+| `INDEXER_OTLP_ENDPOINT` | no | unset | OTLP/HTTP collector URL for span export, for example `http://collector:4318` |
 
 `INDEXER_START_LEDGER` should be the contract's deployment ledger. On a
 network where that is not known exactly, any ledger at or before the
 `initialize` call works: ingestion is idempotent, so starting early costs
 extra scanning rather than correctness.
+
+### Trace export
+
+Set `INDEXER_OTLP_ENDPOINT` to an OTLP over HTTP collector URL to export spans:
+
+```bash
+export INDEXER_OTLP_ENDPOINT=http://collector.example.org:4318
+```
+
+Export is off by default. When the variable is unset, no exporter, tracer
+provider or batch worker is constructed, and the subscriber installs only the
+formatting layer. A set but blank value is reported as a configuration error at
+startup. The endpoint must use `http://` or `https://`.
+
+`INDEXER_LOG` filters both the formatting layer and the export layer, so a
+narrow directive such as `keeper_indexer=info` bounds span volume on a busy
+deployment. Spans are batched and the provider is shut down after the service
+stops, so pending spans are flushed before exit.
 
 ## Running
 
