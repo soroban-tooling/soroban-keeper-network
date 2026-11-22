@@ -7,6 +7,28 @@
 
 use std::fmt::Write as _;
 
+/// How log records are rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LogFormat {
+    /// The `tracing_subscriber` human-readable format. This is the default.
+    #[default]
+    Human,
+    /// One JSON object per line, for log pipelines.
+    Json,
+}
+
+impl LogFormat {
+    /// Parses `INDEXER_LOG_FORMAT`. Unknown values are reported by the caller
+    /// so one restart surfaces every configuration problem at once.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "human" | "text" => Some(Self::Human),
+            "json" => Some(Self::Json),
+            _ => None,
+        }
+    }
+}
+
 /// Everything the indexer needs to run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -45,6 +67,8 @@ pub struct Config {
     /// Ingestion lag, in ledgers, past which /health reports unhealthy
     /// (issue #359). Roughly 5 minutes at one ledger every ~5 seconds.
     pub max_healthy_lag_ledgers: u32,
+    /// Renderer for log records, from `INDEXER_LOG_FORMAT`.
+    pub log_format: LogFormat,
     /// OTLP/HTTP endpoint for trace export. Unset means no exporter and no
     /// tracing layer are constructed, so tracing stays inert (issue #729).
     pub otlp_endpoint: Option<String>,
@@ -151,6 +175,19 @@ impl Config {
 
         let bind_address = optional_string(&get, "INDEXER_BIND_ADDRESS", DEFAULT_BIND_ADDRESS);
 
+        let log_format = match get("INDEXER_LOG_FORMAT") {
+            Some(value) if !value.trim().is_empty() => match LogFormat::parse(&value) {
+                Some(format) => format,
+                None => {
+                    problems.push(format!(
+                        "INDEXER_LOG_FORMAT must be human or json, got {value:?}"
+                    ));
+                    LogFormat::default()
+                }
+            },
+            _ => LogFormat::default(),
+        };
+
         let poll_interval_secs = optional_parsed(
             &get,
             "INDEXER_POLL_INTERVAL_SECS",
@@ -242,6 +279,7 @@ impl Config {
                 rate_limit_burst,
                 shutdown_drain_secs,
                 max_healthy_lag_ledgers,
+                log_format,
                 otlp_endpoint,
             })
         } else {
@@ -362,6 +400,23 @@ mod tests {
     }
 
     #[test]
+    fn defaults_to_human_log_output_and_accepts_json() {
+        let config = Config::from_source(source(&valid_pairs())).expect("valid config");
+        assert_eq!(config.log_format, LogFormat::Human);
+
+        let mut pairs = valid_pairs();
+        pairs.push(("INDEXER_LOG_FORMAT", "JSON"));
+        let config = Config::from_source(source(&pairs)).expect("json log format");
+        assert_eq!(config.log_format, LogFormat::Json);
+    }
+
+    #[test]
+    fn rejects_an_unknown_log_format() {
+        let mut pairs = valid_pairs();
+        pairs.push(("INDEXER_LOG_FORMAT", "xml"));
+        let err = Config::from_source(source(&pairs)).expect_err("unknown log format");
+        assert_eq!(err.problems.len(), 1);
+        assert!(err.problems[0].contains("INDEXER_LOG_FORMAT"));
     fn otlp_endpoint_defaults_to_none_when_unset() {
         let config = Config::from_source(source(&valid_pairs())).expect("valid config");
         assert_eq!(config.otlp_endpoint, None);

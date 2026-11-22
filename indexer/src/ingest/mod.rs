@@ -6,6 +6,7 @@
 
 pub mod parse;
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
@@ -13,6 +14,7 @@ use tokio::sync::broadcast;
 use tracing::Instrument;
 
 use crate::events::IndexedEvent;
+use crate::metrics::Metrics;
 use crate::rpc::RawEvent;
 use crate::store::Store;
 
@@ -28,6 +30,7 @@ const BROADCAST_CAPACITY: usize = 1_024;
 pub struct Ingestor {
     store: Store,
     live: broadcast::Sender<IndexedEvent>,
+    metrics: Arc<Metrics>,
 }
 
 /// A bounded label for the ledgers covered by one ingest pass.
@@ -51,10 +54,24 @@ pub struct IngestOutcome {
 }
 
 impl Ingestor {
-    /// Build an ingestor over `store`.
+    /// Build an ingestor over `store` with its own metric state.
     pub fn new(store: Store) -> Self {
+        Self::with_metrics(store, Arc::new(Metrics::new()))
+    }
+
+    /// Build an ingestor that shares `metrics` with the API and the scraper.
+    pub fn with_metrics(store: Store, metrics: Arc<Metrics>) -> Self {
         let (live, _) = broadcast::channel(BROADCAST_CAPACITY);
-        Self { store, live }
+        Self {
+            store,
+            live,
+            metrics,
+        }
+    }
+
+    /// Shared metric state, for the service to hand to the API layer.
+    pub fn metrics(&self) -> &Arc<Metrics> {
+        &self.metrics
     }
 
     /// Subscribe to events as they are ingested.
@@ -76,6 +93,32 @@ impl Ingestor {
     /// skipped: a future contract version emitting something new must not stop
     /// ingestion of the events this indexer does understand.
     pub async fn ingest_batch(&self, raw: &[RawEvent]) -> Result<IngestOutcome> {
+        let mut outcome = IngestOutcome::default();
+
+        for event in raw {
+            let Some(payload) = parse::parse_event(event)? else {
+                outcome.unrecognised += 1;
+                continue;
+            };
+
+            let stored = self
+                .store
+                .insert_event(
+                    event.ledger,
+                    event.ledger_close_time,
+                    &event.tx_hash,
+                    event.event_index,
+                    &payload,
+                )
+                .await?;
+
+            match stored {
+                Some(indexed) => {
+                    outcome.stored += 1;
+                    self.metrics.record_event(payload.event_type().as_str());
+                    // A send error only means nobody is listening, which is
+                    // normal when no dashboard is connected.
+                    let _ = self.live.send(indexed);
         // One span per pass, carrying the fields an operator needs to follow
         // a slow batch from a log line back to the events it processed.
         let span = tracing::info_span!(
@@ -146,6 +189,7 @@ impl Ingestor {
 mod tests {
     use super::*;
     use crate::events::{EventType, I128};
+    use crate::progress::IngestionProgress;
     use crate::rpc::RawValue;
 
     #[test]
@@ -191,6 +235,28 @@ mod tests {
 
         assert_eq!(outcome.stored, 2);
         assert_eq!(outcome.duplicates, 0);
+    }
+
+    #[tokio::test]
+    async fn newly_stored_events_are_counted_by_type() {
+        let store = Store::connect("sqlite::memory:").await.expect("store");
+        let metrics = Arc::new(Metrics::new());
+        let ingestor = Ingestor::with_metrics(store, metrics.clone());
+        let batch = [registered_event("tx1", 1)];
+
+        ingestor.ingest_batch(&batch).await.expect("first");
+        ingestor.ingest_batch(&batch).await.expect("duplicate");
+
+        let rendered = metrics.render(
+            &IngestionProgress::new(),
+            &crate::cache::AggregateCaches::from_secs(10),
+        );
+        assert!(
+            rendered.contains(
+                "soroban_indexer_events_ingested_total{event_type=\"task_registered\"} 1"
+            ),
+            "duplicates must not inflate the counter:\n{rendered}"
+        );
     }
 
     #[tokio::test]

@@ -26,6 +26,7 @@
 
 use std::future::{Future, IntoFuture};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -37,6 +38,7 @@ use crate::backfill::Backfiller;
 use crate::cache::AggregateCaches;
 use crate::config::Config;
 use crate::ingest::Ingestor;
+use crate::metrics::Metrics;
 use crate::rpc::EventSource;
 use crate::store::Store;
 
@@ -54,7 +56,7 @@ impl<S: EventSource> Service<S> {
         Self {
             config,
             source,
-            ingestor: Ingestor::new(store),
+            ingestor: Ingestor::with_metrics(store, Arc::new(Metrics::new())),
         }
     }
 
@@ -103,13 +105,16 @@ impl<S: EventSource> Service<S> {
             }),
         );
 
+        // One registry for ingestion, the request middleware and /metrics.
+        let metrics = ingestor.metrics().clone();
         let app = api::router(
-            ApiState {
+            ApiState::with_metrics(
                 ingestor,
-                caches: AggregateCaches::from_secs(config.cache_ttl_secs),
+                AggregateCaches::from_secs(config.cache_ttl_secs),
                 progress,
-                max_healthy_lag_ledgers: config.max_healthy_lag_ledgers,
-            },
+                config.max_healthy_lag_ledgers,
+                metrics,
+            ),
             config.rate_limit_per_second,
             config.rate_limit_burst,
         );
@@ -233,6 +238,7 @@ pub async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::LogFormat;
     use crate::rpc::fixture::FixtureSource;
     use crate::rpc::{RawEvent, RawValue};
 
@@ -250,6 +256,7 @@ mod tests {
             rate_limit_burst: 1_000,
             shutdown_drain_secs: 5,
             max_healthy_lag_ledgers: 60,
+            log_format: LogFormat::Human,
             otlp_endpoint: None,
         }
     }

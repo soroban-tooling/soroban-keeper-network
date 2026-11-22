@@ -7,6 +7,9 @@
 use anyhow::{Context, Result};
 use keeper_indexer::rpc::HttpClient;
 use keeper_indexer::service::shutdown_signal;
+use keeper_indexer::{Config, LogFormat, Service, Store};
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::EnvFilter;
 use keeper_indexer::{Config, Service, Store};
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
@@ -80,6 +83,29 @@ async fn main() -> Result<()> {
         }
     };
 
+    // The filter is identical in both modes. Only the renderer changes, so
+    // switching formats cannot change what is logged or at which level.
+    let filter = EnvFilter::try_from_env("INDEXER_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
+    let registry = tracing_subscriber::registry().with(filter);
+    match config.log_format {
+        LogFormat::Human => registry.with(tracing_subscriber::fmt::layer()).init(),
+        LogFormat::Json => registry
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    // Put `message` and all structured fields at the root:
+                    // log pipelines index one flat object per line.
+                    .flatten_event(true)
+                    .with_current_span(false)
+                    .with_span_list(false)
+                    .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339()),
+            )
+            .init(),
+    }
+
+    tracing::info!(
+        component = "indexer",
+        rpc_url = %config.rpc_url,
     let filter = EnvFilter::try_from_env("INDEXER_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
     let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter.clone());
     let (otel_layer, tracer_provider) = build_otel_layer(config.otlp_endpoint.as_deref())
@@ -113,7 +139,7 @@ async fn main() -> Result<()> {
 
     let service = Service::new(config, source, store);
     let listener = service.bind().await?;
-    tracing::info!(address = %listener.local_addr()?, "serving the /v1 API");
+    tracing::info!(component = "indexer", address = %listener.local_addr()?, "serving the /v1 API and /metrics");
 
     // A returned error is a failed ingestion or HTTP task. Exiting non-zero
     // (rather than leaving the other half running) is what lets a process
@@ -122,7 +148,7 @@ async fn main() -> Result<()> {
         .run(listener, shutdown_signal())
         .await
         .context("keeper indexer stopped")?;
-    tracing::info!("shut down cleanly");
+    tracing::info!(component = "indexer", "shut down cleanly");
 
     if let Some(provider) = tracer_provider {
         let _ = provider.shutdown();
