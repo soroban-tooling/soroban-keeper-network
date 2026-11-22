@@ -17,7 +17,7 @@ INDEXER_TEST_DATABASE_URL ?=
 # so `npm ci` can run; add new packages here when they gain one.
 SETUP_PACKAGES := packages/sdk-ts packages/indexer-client examples/keeper-bot examples/keeper-bot-v2 examples/batch-register
 
-.PHONY: help build test fmt fmt-check lint wasm optimize clean setup bot bot-test bot-v2-test sdk-ts sdk-ts-lint cli indexer rust-sdk indexer-client ci check
+.PHONY: help build test fmt fmt-check error-docs lint wasm optimize clean setup bot bot-test bot-v2-test sdk-ts sdk-ts-lint cli indexer rust-sdk indexer-client ci check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -51,6 +51,9 @@ fmt: ## Format all Rust code
 
 fmt-check: ## Check formatting (matches CI)
 	cargo fmt --all -- --check
+
+error-docs: ## Verify docs/ERRORS.md covers every contract error variant (matches CI)
+	bash scripts/check-error-docs.sh
 
 lint: ## Run clippy with warnings denied (stricter than CI)
 	cargo clippy --all-targets -- -D warnings
@@ -100,6 +103,6 @@ cli: sdk-ts ## Typecheck, build and test the skn CLI (matches CI) — depends on
 clean: ## Remove build artifacts
 	cargo clean
 
-ci: fmt-check test wasm sdk-ts bot-test bot-v2-test indexer rust-sdk indexer-client cli ## Run all required CI checks locally (blocking checks only)
+ci: fmt-check error-docs test wasm sdk-ts bot-test bot-v2-test indexer rust-sdk indexer-client cli ## Run all required CI checks locally (blocking checks only)
 
 check: ci lint sdk-ts-lint ## Run all checks contributors should run before opening a PR

@@ -69,6 +69,18 @@ jobs:
           echo "::error::Formatting check failed. Run 'cargo fmt --all' locally and commit the result."
 
   # ───────────────────────────────────────────────────────────────────────────
+  # REQUIRED — contract error code reference completeness
+  # ───────────────────────────────────────────────────────────────────────────
+  error-docs:
+    name: Error Docs (required)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check docs/ERRORS.md covers every contracts/*/src/errors.rs variant
+        run: bash scripts/check-error-docs.sh
+
+  # ───────────────────────────────────────────────────────────────────────────
   # REQUIRED — test suite
   # ───────────────────────────────────────────────────────────────────────────
   test:
