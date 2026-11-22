@@ -1,0 +1,92 @@
+{
+  "uid": "skn-keeper-bot-v2",
+  "title": "Soroban Keeper Network / Keeper Bot v2",
+  "tags": ["soroban", "keeper-network", "keeper-bot-v2"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "refresh": 1,
+        "includeAll": false,
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Task throughput",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "rate(soroban_keeper_tasks_evaluated_total[5m])", "legendFormat": "evaluated" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "rate(soroban_keeper_tasks_claimed_total[5m])", "legendFormat": "claimed" },
+        { "refId": "C", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (task_type) (rate(soroban_keeper_tasks_claimed_by_type[5m]))", "legendFormat": "claimed {{task_type}}" },
+        { "refId": "D", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "rate(soroban_keeper_tasks_executed_total[5m])", "legendFormat": "executed" },
+        { "refId": "E", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (task_type) (rate(soroban_keeper_tasks_executed_by_type[5m]))", "legendFormat": "executed {{task_type}}" },
+        { "refId": "F", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (reason) (rate(soroban_keeper_tasks_skipped_total[5m]))", "legendFormat": "skipped {{reason}}" },
+        { "refId": "G", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (task_type, reason) (rate(soroban_keeper_tasks_skipped_by_type[5m]))", "legendFormat": "skipped {{task_type}} {{reason}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Profit and keeper balance",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "rate(soroban_keeper_net_profit_stroops_total[5m])", "legendFormat": "net profit stroops/s" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (task_type) (rate(soroban_keeper_net_profit_stroops_by_type[5m]))", "legendFormat": "{{task_type}}" },
+        { "refId": "C", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "soroban_keeper_balance_stroops", "legendFormat": "{{address}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Round duration and RPC errors",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "soroban_keeper_round_duration_seconds", "legendFormat": "round seconds" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (error_type) (rate(soroban_keeper_rpc_errors_total[5m]))", "legendFormat": "{{error_type}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Registry contract state (read-only monitor)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 17 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "soroban_contract_paused", "legendFormat": "paused" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "soroban_contract_fees_accrued_stroops", "legendFormat": "fees accrued" },
+        { "refId": "C", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "soroban_contract_task_count", "legendFormat": "task count" },
+        { "refId": "D", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "soroban_contract_version", "legendFormat": "version" },
+        { "refId": "E", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "soroban_contract_instance_ttl_remaining_seconds", "legendFormat": "instance TTL remaining" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Testnet canary liveness",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 25 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "soroban_canary_time_to_execution_seconds", "legendFormat": "time to execution" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "soroban_canary_last_execution_timestamp_seconds", "legendFormat": "last execution" },
+        { "refId": "C", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (task_id) (rate(soroban_canary_executions_total[10m]))", "legendFormat": "executions {{task_id}}" },
+        { "refId": "D", "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "sum by (task_id) (rate(soroban_canary_missed_executions_total[10m]))", "legendFormat": "misses {{task_id}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    }
+  ]
+}
