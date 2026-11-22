@@ -1,0 +1,92 @@
+# Prometheus alert rules for the Soroban Keeper Network (issue #719).
+#
+# Metric names are the canonical ones in docs/OBSERVABILITY.md. CI runs
+# `promtool check rules ops/prometheus/alerts.yml` and
+# `npm run check:metrics --prefix ops` against this file.
+
+groups:
+  - name: soroban-indexer
+    interval: 30s
+    rules:
+      - alert: IndexerIngestionLag
+        expr: soroban_indexer_ingestion_lag_ledgers > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: indexer
+        annotations:
+          summary: Indexer is more than 10 ledgers behind the head
+          description: Ingestion lag has stayed above 10 ledgers for five minutes.
+          runbook_url: https://github.com/soroban-tooling/soroban-keeper-network/blob/main/docs/runbooks/ops-alerts.md#indexeringestionlag
+
+      - alert: IndexerIngestFailures
+        expr: increase(soroban_indexer_events_ingested_total[10m]) == 0 and soroban_indexer_ingestion_lag_ledgers > 0
+        for: 10m
+        labels:
+          severity: critical
+          component: indexer
+        annotations:
+          summary: Indexer has stored no events while lagging
+          description: No events have been ingested for ten minutes while the head ledger has advanced.
+          runbook_url: https://github.com/soroban-tooling/soroban-keeper-network/blob/main/docs/runbooks/ops-alerts.md#indexeringestfailures
+
+      - alert: IndexerApiErrorRate
+        expr: sum(rate(soroban_indexer_api_requests_total{status=~"5.."}[5m])) / sum(rate(soroban_indexer_api_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: indexer
+        annotations:
+          summary: Indexer API 5xx rate above 5 percent
+          description: More than five percent of indexer API responses are server errors.
+          runbook_url: https://github.com/soroban-tooling/soroban-keeper-network/blob/main/docs/runbooks/ops-alerts.md#indexerapierrorrate
+
+  - name: soroban-keeper-bots
+    interval: 30s
+    rules:
+      - alert: KeeperRpcErrors
+        expr: increase(soroban_keeper_rpc_errors_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: keeper-bot-v2
+        annotations:
+          summary: Keeper bot is hitting RPC errors
+          description: More than ten RPC errors were recorded by a keeper in five minutes.
+          runbook_url: https://github.com/soroban-tooling/soroban-keeper-network/blob/main/docs/runbooks/ops-alerts.md#keeperrpcerrors
+
+      - alert: KeeperBalanceNotGrowing
+        expr: delta(soroban_keeper_balance_stroops[24h]) <= 0
+        for: 30m
+        labels:
+          severity: warning
+          component: keeper-bot-v2
+        annotations:
+          summary: Keeper on-chain balance is not growing
+          description: A keeper's withdrawable balance has not increased over the last day.
+          runbook_url: https://github.com/soroban-tooling/soroban-keeper-network/blob/main/docs/runbooks/ops-alerts.md#keeperbalancenotgrowing
+
+      - alert: KeeperRoundsStalled
+        expr: time() - timestamp(soroban_keeper_round_duration_seconds) > 300
+        for: 2m
+        labels:
+          severity: critical
+          component: keeper-bot-v2
+        annotations:
+          summary: Keeper bot has stopped running rounds
+          description: The round duration metric has not been refreshed for five minutes.
+          runbook_url: https://github.com/soroban-tooling/soroban-keeper-network/blob/main/docs/runbooks/ops-alerts.md#keeperroundsstalled
+
+  - name: soroban-canary
+    interval: 30s
+    rules:
+      - alert: CanaryExecutionLate
+        expr: soroban_canary_time_to_execution_seconds > 60 or increase(soroban_canary_missed_executions_total[10m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: canary
+        annotations:
+          summary: Testnet canary was not executed within the target
+          description: End-to-end liveness is broken; no keeper executed the canary task in time.
+          runbook_url: https://github.com/soroban-tooling/soroban-keeper-network/blob/main/docs/runbooks/ops-alerts.md#canaryexecutionlate

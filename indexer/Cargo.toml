@@ -27,6 +27,13 @@ sqlx = { version = "0.8", default-features = false, features = [
     "macros",
     "migrate",
 ] }
+# Tracing export is opt-in via INDEXER_OTLP_ENDPOINT. These versions match the
+# OpenTelemetry API used by tracing-opentelemetry 0.31 and keep the minimal
+# async HTTP client, so no exporter or worker exists while export is disabled.
+opentelemetry = "0.30"
+opentelemetry_sdk = { version = "0.30", default-features = false, features = ["trace", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.30", default-features = false, features = ["trace", "http-proto", "reqwest-client", "reqwest-rustls"] }
+tracing-opentelemetry = { version = "0.31", default-features = false }
 # Matches the soroban-sdk version keeper-registry pins, so both crates decode
 # the same ScVal shapes. `base64` unlocks ScVal::from_xdr_base64.
 stellar-strkey = "0.0.9"

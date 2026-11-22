@@ -257,6 +257,7 @@ mod tests {
             shutdown_drain_secs: 5,
             max_healthy_lag_ledgers: 60,
             log_format: LogFormat::Human,
+            otlp_endpoint: None,
         }
     }
 

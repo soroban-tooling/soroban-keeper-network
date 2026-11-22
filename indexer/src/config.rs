@@ -69,6 +69,9 @@ pub struct Config {
     pub max_healthy_lag_ledgers: u32,
     /// Renderer for log records, from `INDEXER_LOG_FORMAT`.
     pub log_format: LogFormat,
+    /// OTLP/HTTP endpoint for trace export. Unset means no exporter and no
+    /// tracing layer are constructed, so tracing stays inert (issue #729).
+    pub otlp_endpoint: Option<String>,
 }
 
 /// A configuration value that is missing or unusable.
@@ -251,6 +254,17 @@ impl Config {
             problems.push("INDEXER_MAX_HEALTHY_LAG_LEDGERS must be greater than zero".to_string());
         }
 
+        // Optional, and off by default. A set-but-blank value is rejected so
+        // an operator does not believe export is enabled when it is not.
+        let otlp_endpoint = match get("INDEXER_OTLP_ENDPOINT") {
+            Some(value) if !value.trim().is_empty() => Some(value.trim().to_string()),
+            Some(_) => {
+                problems.push("INDEXER_OTLP_ENDPOINT is set but empty".to_string());
+                None
+            }
+            None => None,
+        };
+
         if problems.is_empty() {
             Ok(Self {
                 rpc_url,
@@ -266,6 +280,7 @@ impl Config {
                 shutdown_drain_secs,
                 max_healthy_lag_ledgers,
                 log_format,
+                otlp_endpoint,
             })
         } else {
             Err(ConfigError { problems })
@@ -402,5 +417,28 @@ mod tests {
         let err = Config::from_source(source(&pairs)).expect_err("unknown log format");
         assert_eq!(err.problems.len(), 1);
         assert!(err.problems[0].contains("INDEXER_LOG_FORMAT"));
+    fn otlp_endpoint_defaults_to_none_when_unset() {
+        let config = Config::from_source(source(&valid_pairs())).expect("valid config");
+        assert_eq!(config.otlp_endpoint, None);
+    }
+
+    #[test]
+    fn otlp_endpoint_is_read_when_set() {
+        let mut pairs = valid_pairs();
+        pairs.push(("INDEXER_OTLP_ENDPOINT", "http://collector.example.org:4318"));
+        let config = Config::from_source(source(&pairs)).expect("valid config");
+        assert_eq!(
+            config.otlp_endpoint.as_deref(),
+            Some("http://collector.example.org:4318")
+        );
+    }
+
+    #[test]
+    fn rejects_a_blank_otlp_endpoint() {
+        let mut pairs = valid_pairs();
+        pairs.push(("INDEXER_OTLP_ENDPOINT", "   "));
+        let err = Config::from_source(source(&pairs)).expect_err("blank otlp endpoint");
+        assert_eq!(err.problems.len(), 1);
+        assert!(err.problems[0].contains("INDEXER_OTLP_ENDPOINT"));
     }
 }

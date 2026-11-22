@@ -7,9 +7,11 @@
 pub mod parse;
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::Result;
 use tokio::sync::broadcast;
+use tracing::Instrument;
 
 use crate::events::IndexedEvent;
 use crate::metrics::Metrics;
@@ -29,6 +31,15 @@ pub struct Ingestor {
     store: Store,
     live: broadcast::Sender<IndexedEvent>,
     metrics: Arc<Metrics>,
+}
+
+/// A bounded label for the ledgers covered by one ingest pass.
+fn ledger_range_label(raw: &[RawEvent]) -> String {
+    let ledgers = raw.iter().map(|event| event.ledger);
+    match (ledgers.clone().min(), ledgers.max()) {
+        (Some(start), Some(end)) => format!("{start}..={end}"),
+        _ => "empty".to_string(),
+    }
 }
 
 /// What one call to [`Ingestor::ingest_batch`] did.
@@ -108,12 +119,69 @@ impl Ingestor {
                     // A send error only means nobody is listening, which is
                     // normal when no dashboard is connected.
                     let _ = self.live.send(indexed);
+        // One span per pass, carrying the fields an operator needs to follow
+        // a slow batch from a log line back to the events it processed.
+        let span = tracing::info_span!(
+            "ingest_pass",
+            ledger_range = %ledger_range_label(raw),
+            event_count = raw.len(),
+            duration_seconds = tracing::field::Empty,
+            stored = tracing::field::Empty,
+            duplicates = tracing::field::Empty,
+            unrecognised = tracing::field::Empty,
+            status = tracing::field::Empty,
+        );
+        let started = Instant::now();
+
+        let result = async {
+            let mut outcome = IngestOutcome::default();
+
+            for event in raw {
+                let Some(payload) = parse::parse_event(event)? else {
+                    outcome.unrecognised += 1;
+                    continue;
+                };
+
+                let stored = self
+                    .store
+                    .insert_event(
+                        event.ledger,
+                        event.ledger_close_time,
+                        &event.tx_hash,
+                        event.event_index,
+                        &payload,
+                    )
+                    .await?;
+
+                match stored {
+                    Some(indexed) => {
+                        outcome.stored += 1;
+                        // A send error only means nobody is listening, which is
+                        // normal when no dashboard is connected.
+                        let _ = self.live.send(indexed);
+                    }
+                    None => outcome.duplicates += 1,
                 }
-                None => outcome.duplicates += 1,
+            }
+
+            Ok(outcome)
+        }
+        .instrument(span.clone())
+        .await;
+
+        span.record("duration_seconds", started.elapsed().as_secs_f64());
+        match &result {
+            Ok(outcome) => {
+                span.record("stored", outcome.stored as u64);
+                span.record("duplicates", outcome.duplicates as u64);
+                span.record("unrecognised", outcome.unrecognised as u64);
+                span.record("status", "ok");
+            }
+            Err(_) => {
+                span.record("status", "error");
             }
         }
-
-        Ok(outcome)
+        result
     }
 }
 
@@ -123,6 +191,17 @@ mod tests {
     use crate::events::{EventType, I128};
     use crate::progress::IngestionProgress;
     use crate::rpc::RawValue;
+
+    #[test]
+    fn ingest_span_ledger_range_is_bounded() {
+        assert_eq!(ledger_range_label(&[]), "empty");
+        let mut later = registered_event("b", 2);
+        later.ledger = 12;
+        assert_eq!(
+            ledger_range_label(&[registered_event("a", 1), later]),
+            "10..=12"
+        );
+    }
 
     async fn ingestor() -> Ingestor {
         let store = Store::connect("sqlite::memory:").await.expect("store");
