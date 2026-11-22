@@ -11,6 +11,7 @@
 
 pub mod auth;
 pub mod rate_limit;
+pub mod request_id;
 pub mod rest;
 pub mod types;
 pub mod websocket;
@@ -132,6 +133,9 @@ pub fn router_with_limiter(state: ApiState, limiter: Arc<RateLimiter>) -> Router
             limiter,
             rate_limit::enforce,
         ))
+        // Layers run from the inside out, so this one wraps the rate limiter:
+        // even a rejected request gets a correlation id and a span.
+        .layer(axum::middleware::from_fn(request_id::trace_requests))
 }
 
 /// Build the API router, rate limited per client (by `X-API-Key`, else IP)
