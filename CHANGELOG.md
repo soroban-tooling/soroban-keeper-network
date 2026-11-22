@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - bounded execution dispute credits (VERSION bumped to 7)
+
+- `PendingReward` is capped at `MAX_PENDING_CREDITS` (50). When the cap is
+  reached, `execute_task` finalizes matured credits before appending a new
+  one, and returns `TooManyPendingCredits` if no slot can be freed.
+- New read-only `max_pending_credits` view lets bots preflight the cap.
+- Matured credits are credited to `KeeperReward` in one storage write, with
+  one `RewardsFinalized` event per credit.
+- `VERSION` bumped from 6 to 7. No existing entry point signature changed.
+
 ### Added — optional on-chain condition parameter (VERSION bumped to 6)
 
 - `register_task` now takes a required tenth parameter, `condition: Option<Address>`.
