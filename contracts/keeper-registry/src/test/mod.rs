@@ -3,6 +3,7 @@
 //! One module per area of behaviour, mirroring the source layout, so two
 //! contributors adding tests in different areas edit different files.
 
+mod access_control;
 mod admin;
 mod batch;
 mod batch_reads;
