@@ -111,7 +111,6 @@ impl KeeperRegistry {
             claim_ledger: None,
             lock_ledgers,
             verifier,
-            condition,
             condition: condition.clone(),
         };
         save_task(&e, task_id, &task);
