@@ -69,6 +69,17 @@ pub(crate) fn setup_long_lived() -> TestSetup {
     setup_in(env)
 }
 
+/// Same as [`setup`], but raises the host's `max_entry_ttl` cap. Tests that
+/// need one persistent entry to expire while keeping the shared *instance*
+/// alive first extend the instance TTL with `testutils` up to this higher cap;
+/// the default 100_000-ledger cap would otherwise age both out together and
+/// mask which entry actually archived.
+pub(crate) fn setup_with_ttl_cap(max_entry_ttl: u32) -> TestSetup {
+    let env = Env::default();
+    env.ledger().with_mut(|li| li.max_entry_ttl = max_entry_ttl);
+    setup_in(env)
+}
+
 // The transmutes below intentionally re-bind the env/client to a 'static
 // lifetime — the standard Soroban test-harness pattern for a shared Setup.
 #[allow(clippy::useless_transmute, clippy::missing_transmute_annotations)]
