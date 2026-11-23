@@ -11,6 +11,7 @@ mod cancel;
 mod claim;
 mod common;
 mod condition;
+mod cross_contract;
 mod events;
 mod expire;
 mod fee_accrual;
