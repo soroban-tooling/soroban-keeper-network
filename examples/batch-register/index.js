@@ -60,9 +60,9 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 
+const stellarSdk = require("@stellar/stellar-sdk");
 const {
   Keypair,
-  SorobanRpc,
   TransactionBuilder,
   Networks,
   BASE_FEE,
@@ -71,7 +71,11 @@ const {
   xdr,
   Contract,
   StrKey,
-} = require("@stellar/stellar-sdk");
+} = stellarSdk;
+
+// stellar-sdk 13 exports the RPC client as `rpc`; 12 and earlier used
+// `SorobanRpc`. Accept either so the script runs against the locked version.
+const SorobanRpc = stellarSdk.rpc || stellarSdk.SorobanRpc;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Contract-side bounds, mirrored for local pre-flight validation

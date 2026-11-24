@@ -15,6 +15,7 @@ without blocking your PR.
 | `bot-v2` | Required | The production keeper bot v2 (`examples/keeper-bot-v2`) must build, lint, and pass its test suite against an ephemeral Postgres service container. See [The keeper-bot-v2 job](#the-keeper-bot-v2-job). |
 | `indexer` | Required | The indexer service (`indexer/`) must format, build, and pass its test suite, including the database-backed tests. See [The indexer job](#the-indexer-job). |
 | `rust-sdk` | Required | The Rust SDK crate (`rust-sdk/`) must compile and pass all unit and integration tests. |
+| `examples` | Advisory (`continue-on-error: true`) | Checks every Node example under `examples/` declares a `test` script (`scripts/check-example-tests.js`), then installs, tests and lints `examples/batch-register`. See [The examples job](#the-examples-job). |
 | `rust-sdk-quickstart` | Advisory (`continue-on-error: true`) | On pushes to `main`, deploys the registry to a local Stellar Quickstart network and runs the opt-in Rust SDK lifecycle test. |
 | `indexer-client` | Required | The indexer's TypeScript client (`packages/indexer-client`) must typecheck, build, test and lint, and its generated types must match `indexer/openapi.yaml`. |
 | `clippy` | Advisory (`continue-on-error: true`) | Lints are useful but subjective enough that a maintainer should decide case-by-case, not have every PR blocked by a new upstream lint. |
@@ -249,3 +250,32 @@ test suite: the recommendation there is conditional adoption as a
 periodic, advisory job (same non-blocking posture as `fuzz-nightly.yml`),
 pending a first real timed run to confirm the open questions that
 evaluation raises.
+
+## The examples job
+
+Examples rot when nothing builds them. The advisory `examples` job keeps them honest:
+
+| Example | Test command | Run by |
+|---------|--------------|--------|
+| `examples/keeper-bot` | `npm test` | `bot` job |
+| `examples/keeper-bot-v2` | `npm test` | `bot-v2` job |
+| `examples/batch-register` | `npm test` (dry-runs every sample task list, including `recipes/`) | `examples` job |
+| `rust-sdk/examples/*` | none yet | not covered (see below) |
+
+`scripts/check-example-tests.js` fails the job if a new directory is added under
+`examples/` without a `test` script in its `package.json`, so new examples must
+ship a test command CI can run.
+
+The job is **path-guarded**: on pull requests it does the work only when the
+diff touches `examples/`, `packages/sdk-ts/`, `rust-sdk/`,
+`scripts/check-example-tests.js`, or `.github/workflows/ci.yml`; otherwise it
+reports success without running. It always runs on pushes.
+
+Reproduce locally with `make examples-test`.
+
+**Not covered yet:** the Rust examples under `rust-sdk/examples/`
+(`calling-contract`, `liquidation-keeper`) are not members of the root Cargo
+workspace, so there is no `cargo test` command for them in CI today. Adding
+them needs them to join the workspace (and `Cargo.lock`), which is separate
+work from this job. The job also starts advisory like `cli`; promoting it to
+`ci-required` is a maintainer decision.

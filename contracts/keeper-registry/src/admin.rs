@@ -80,8 +80,10 @@ impl KeeperRegistry {
     // | `expire_task`      | allowed     | permissionless fund recovery           |
     // | `withdraw_rewards` | allowed     | keeper pulling already-earned balance  |
     // | `stake_deposit`    | BLOCKED     | opens new keeper exposure              |
-    // | `initiate_unbond`  | allowed     | keeper requesting stake return;        |
-    // |                    |             | no new exposure                        |
+    // | `initiate_unbond`  | BLOCKED     | calls `require_not_paused`; an earlier |
+    // |                    |             | version of this table said "allowed",  |
+    // |                    |             | which did not match the code. See      |
+    // |                    |             | docs/ACCESS_CONTROL.md (issue #735)    |
     // | `withdraw_stake`   | allowed     | keeper pulling already-owned funds     |
     // | `slash`            | allowed     | admin action; never gated              |
     // | read-only views    | allowed     | side-effect-free, never gated          |
