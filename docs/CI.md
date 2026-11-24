@@ -18,6 +18,7 @@ without blocking your PR.
 | `examples` | Advisory (`continue-on-error: true`) | Checks every Node example under `examples/` declares a `test` script (`scripts/check-example-tests.js`), then installs, tests and lints `examples/batch-register`. See [The examples job](#the-examples-job). |
 | `rust-sdk-quickstart` | Advisory (`continue-on-error: true`) | On pushes to `main`, deploys the registry to a local Stellar Quickstart network and runs the opt-in Rust SDK lifecycle test. |
 | `indexer-client` | Required | The indexer's TypeScript client (`packages/indexer-client`) must typecheck, build, test and lint, and its generated types must match `indexer/openapi.yaml`. |
+| `indexer-api-docs` | Advisory (`continue-on-error: true`) | `docs/INDEXER_API.md` is generated from `indexer/openapi.yaml`; this fails if the committed page is stale. Fix with `make docs-indexer-api`. |
 | `clippy` | Advisory (`continue-on-error: true`) | Lints are useful but subjective enough that a maintainer should decide case-by-case, not have every PR blocked by a new upstream lint. |
 | `audit` | Advisory (`continue-on-error: true`) | A new upstream dependency CVE should notify maintainers, not fail every open PR the moment it's published. |
 | `deny` | Advisory (`continue-on-error: true`) | License allow-list enforcement, duplicate crate version detection, yanked crate warnings, and source validation via `cargo-deny`. See [Cargo-deny](#cargo-deny) below. |
