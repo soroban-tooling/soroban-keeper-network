@@ -1,0 +1,19 @@
+{
+  "name": "@soroban-keeper-network/example-ttl-extension",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Example TTL-extension task for a dApp's own storage on Soroban",
+  "main": "src/ttl-extension.js",
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "register": "node scripts/register-ttl-task.ts"
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "ttl",
+    "keeper",
+    "storage"
+  ],
+  "license": "Apache-2.0"
+}
