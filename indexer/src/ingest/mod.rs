@@ -93,32 +93,6 @@ impl Ingestor {
     /// skipped: a future contract version emitting something new must not stop
     /// ingestion of the events this indexer does understand.
     pub async fn ingest_batch(&self, raw: &[RawEvent]) -> Result<IngestOutcome> {
-        let mut outcome = IngestOutcome::default();
-
-        for event in raw {
-            let Some(payload) = parse::parse_event(event)? else {
-                outcome.unrecognised += 1;
-                continue;
-            };
-
-            let stored = self
-                .store
-                .insert_event(
-                    event.ledger,
-                    event.ledger_close_time,
-                    &event.tx_hash,
-                    event.event_index,
-                    &payload,
-                )
-                .await?;
-
-            match stored {
-                Some(indexed) => {
-                    outcome.stored += 1;
-                    self.metrics.record_event(payload.event_type().as_str());
-                    // A send error only means nobody is listening, which is
-                    // normal when no dashboard is connected.
-                    let _ = self.live.send(indexed);
         // One span per pass, carrying the fields an operator needs to follow
         // a slow batch from a log line back to the events it processed.
         let span = tracing::info_span!(
@@ -156,6 +130,7 @@ impl Ingestor {
                 match stored {
                     Some(indexed) => {
                         outcome.stored += 1;
+                        self.metrics.record_event(payload.event_type().as_str());
                         // A send error only means nobody is listening, which is
                         // normal when no dashboard is connected.
                         let _ = self.live.send(indexed);

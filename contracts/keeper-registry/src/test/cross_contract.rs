@@ -24,8 +24,7 @@ use soroban_sdk::{testutils::Address as _, Address, Bytes, Env};
 use super::common::*;
 use crate::{
     mocks::{
-        ReentrantToken, ReentrantTokenClient, POINT_BEFORE_BALANCE_UPDATE,
-        TARGET_WITHDRAW_REWARDS,
+        ReentrantToken, ReentrantTokenClient, POINT_BEFORE_BALANCE_UPDATE, TARGET_WITHDRAW_REWARDS,
     },
     KeeperRegistry, KeeperRegistryClient, TaskStatus, TaskType,
 };
@@ -47,21 +46,18 @@ mod reentering_condition {
     #[contractimpl]
     impl ReenteringCondition {
         pub fn configure(env: Env, registry: Address, admin: Address) {
-            env.storage().instance().set(&symbol_short!("reg"), &registry);
-            env.storage().instance().set(&symbol_short!("adm"), &admin);
             env.storage()
                 .instance()
-                .set(&symbol_short!("ok"), &false);
+                .set(&symbol_short!("reg"), &registry);
+            env.storage().instance().set(&symbol_short!("adm"), &admin);
+            env.storage().instance().set(&symbol_short!("ok"), &false);
         }
 
         pub fn is_met(env: Env, _task_id: u64) -> bool {
             let registry: Address = env.storage().instance().get(&symbol_short!("reg")).unwrap();
             let admin: Address = env.storage().instance().get(&symbol_short!("adm")).unwrap();
             let client = KeeperRegistryClient::new(&env, &registry);
-            let succeeded = matches!(
-                client.try_set_fee_bps(&admin, &9_999u32),
-                Ok(Ok(()))
-            );
+            let succeeded = matches!(client.try_set_fee_bps(&admin, &9_999u32), Ok(Ok(())));
             env.storage()
                 .instance()
                 .set(&symbol_short!("ok"), &succeeded);
@@ -91,21 +87,18 @@ mod reentering_verifier {
     #[contractimpl]
     impl ReenteringVerifier {
         pub fn configure(env: Env, registry: Address, admin: Address) {
-            env.storage().instance().set(&symbol_short!("reg"), &registry);
-            env.storage().instance().set(&symbol_short!("adm"), &admin);
             env.storage()
                 .instance()
-                .set(&symbol_short!("ok"), &false);
+                .set(&symbol_short!("reg"), &registry);
+            env.storage().instance().set(&symbol_short!("adm"), &admin);
+            env.storage().instance().set(&symbol_short!("ok"), &false);
         }
 
         pub fn verify(env: Env, _task_id: u64, _keeper: Address, _proof: Bytes) -> bool {
             let registry: Address = env.storage().instance().get(&symbol_short!("reg")).unwrap();
             let admin: Address = env.storage().instance().get(&symbol_short!("adm")).unwrap();
             let client = KeeperRegistryClient::new(&env, &registry);
-            let succeeded = matches!(
-                client.try_set_fee_bps(&admin, &9_999u32),
-                Ok(Ok(()))
-            );
+            let succeeded = matches!(client.try_set_fee_bps(&admin, &9_999u32), Ok(Ok(())));
             env.storage()
                 .instance()
                 .set(&symbol_short!("ok"), &succeeded);
@@ -123,11 +116,7 @@ mod reentering_verifier {
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
-fn register_task_with(
-    s: &TestSetup,
-    verifier: Option<Address>,
-    condition: Option<Address>,
-) -> u64 {
+fn register_task_with(s: &TestSetup, verifier: Option<Address>, condition: Option<Address>) -> u64 {
     let deadline = s.env.ledger().timestamp() + 3_600;
     s.registry.register_task(
         &s.admin,
@@ -152,8 +141,7 @@ fn malicious_condition_cannot_mutate_registry_during_claim() {
     let condition = s
         .env
         .register(reentering_condition::ReenteringCondition, ());
-    let condition_client =
-        reentering_condition::ReenteringConditionClient::new(&s.env, &condition);
+    let condition_client = reentering_condition::ReenteringConditionClient::new(&s.env, &condition);
     condition_client.configure(&s.registry.address, &s.admin);
 
     let keeper = Address::generate(&s.env);
@@ -239,7 +227,10 @@ fn malicious_token_reentry_during_reward_withdrawal_cannot_double_spend() {
     registry.execute_task(&keeper, &task_id, &Bytes::from_slice(&env, b"proof"));
 
     let earned = registry.keeper_balance(&keeper);
-    assert!(earned > 0, "the keeper must actually have a reward to steal");
+    assert!(
+        earned > 0,
+        "the keeper must actually have a reward to steal"
+    );
 
     // Arm the token so the payout transfer tries to re-enter withdraw_rewards
     // before the token's own balance update completes.
@@ -255,7 +246,10 @@ fn malicious_token_reentry_during_reward_withdrawal_cannot_double_spend() {
 
     registry.withdraw_rewards(&keeper);
 
-    assert!(token.reentry_fired(), "the hostile transfer must fire the hook");
+    assert!(
+        token.reentry_fired(),
+        "the hostile transfer must fire the hook"
+    );
     assert!(
         !token.reentry_succeeded(),
         "a re-entrant withdrawal must never succeed"
@@ -289,11 +283,7 @@ fn call_sites(pattern: &str) -> BTreeSet<String> {
         for line in source.lines() {
             let trimmed = line.trim();
             if let Some(rest) = trimmed.strip_prefix("pub fn ") {
-                current_fn = rest
-                    .split('(')
-                    .next()
-                    .unwrap_or("")
-                    .trim();
+                current_fn = rest.split('(').next().unwrap_or("").trim();
             }
             if trimmed.contains(pattern) {
                 found.insert(format!("{file}::{current_fn}"));
@@ -315,7 +305,10 @@ fn every_external_call_is_documented() {
     let mut total = 0;
     for (label, pattern) in groups {
         let sites = call_sites(pattern);
-        assert!(!sites.is_empty(), "{label} call pattern not found in source");
+        assert!(
+            !sites.is_empty(),
+            "{label} call pattern not found in source"
+        );
         for site in &sites {
             assert!(
                 REVIEW_DOC.contains(site),

@@ -8,8 +8,6 @@ use anyhow::{Context, Result};
 use keeper_indexer::rpc::HttpClient;
 use keeper_indexer::service::shutdown_signal;
 use keeper_indexer::{Config, LogFormat, Service, Store};
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::EnvFilter;
 use keeper_indexer::{Config, Service, Store};
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
@@ -17,8 +15,10 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::prelude::*;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::{EnvFilter, Layer};
 
 /// Build the optional OTLP layer and its provider together. The provider must
@@ -169,6 +169,9 @@ mod tests {
         assert_eq!(
             redact_url("http://localhost:8000/foo"),
             "http://localhost:8000"
+        );
+    }
+
     use super::build_otel_layer;
     use tracing_subscriber::Registry;
 
@@ -197,6 +200,9 @@ mod tests {
             redact_url("postgres://u:p@db:5432/name"),
             "postgres://db:5432"
         );
+    }
+
+    #[test]
     fn a_non_http_endpoint_is_rejected() {
         match build_otel_layer::<Registry>(Some("collector.example.org:4318")) {
             Ok(_) => panic!("an endpoint without a scheme must be rejected"),

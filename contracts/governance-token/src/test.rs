@@ -125,10 +125,7 @@ fn test_standard_transfers_and_allowances() {
     let amount = 1_000_000 * ONE_TOKEN;
     client.transfer(&public_distribution, &recipient, &amount);
     assert_eq!(client.balance(&recipient), amount);
-    assert_eq!(
-        client.balance(&public_distribution),
-        ALLOC_PUBLIC - amount
-    );
+    assert_eq!(client.balance(&public_distribution), ALLOC_PUBLIC - amount);
 
     // Approve and transfer_from
     let expiration = env.ledger().sequence() + 100;
@@ -165,14 +162,16 @@ fn test_on_chain_vesting_enforces_cliff_and_linear_schedule() {
     assert_eq!(res, Err(Ok(TokenError::TokensLocked)));
 
     // ── Phase 2: Day 100 (still before 180-day cliff) ──
-    env.ledger().set_timestamp(start_timestamp + (100 * 24 * 60 * 60));
+    env.ledger()
+        .set_timestamp(start_timestamp + (100 * 24 * 60 * 60));
     assert_eq!(client.spendable_balance(&core_team), 0);
     let res = client.try_transfer(&core_team, &recipient, &ONE_TOKEN);
     assert_eq!(res, Err(Ok(TokenError::TokensLocked)));
 
     // ── Phase 3: Day 182 (cliff elapsed, ~25% vested) ──
     let elapsed = 182.5 * 24.0 * 60.0 * 60.0;
-    env.ledger().set_timestamp(start_timestamp + (elapsed as u64));
+    env.ledger()
+        .set_timestamp(start_timestamp + (elapsed as u64));
 
     let vested = client.vested_balance(&core_team);
     assert!(
@@ -194,7 +193,8 @@ fn test_on_chain_vesting_enforces_cliff_and_linear_schedule() {
     assert_eq!(res, Err(Ok(TokenError::TokensLocked)));
 
     // ── Phase 4: Day 735 (full 2-year vesting duration passed) ──
-    env.ledger().set_timestamp(start_timestamp + (735 * 24 * 60 * 60));
+    env.ledger()
+        .set_timestamp(start_timestamp + (735 * 24 * 60 * 60));
     assert_eq!(client.unvested_balance(&core_team), 0);
     let remaining = client.balance(&core_team);
     assert_eq!(client.spendable_balance(&core_team), remaining);

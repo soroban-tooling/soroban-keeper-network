@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use keeper_indexer::alerts::{
     AdminTransferredRule, AlertManager, AlertRule, AlertSeverity, AlertSystemConfig,
-    FeeUpdatedRule, FeesSweptThresholdRule, InMemoryTransport, NewProposalRule,
-    PausedRule, VotingWindowClosingSoonRule,
+    FeeUpdatedRule, FeesSweptThresholdRule, InMemoryTransport, NewProposalRule, PausedRule,
+    VotingWindowClosingSoonRule,
 };
 use keeper_indexer::event::{Event, EventCursor, EventPayload};
 
@@ -39,7 +39,10 @@ async fn new_proposal_rule_fires_correctly_on_governance_event() {
 
     let dispatched = manager.evaluate(&event).await;
     assert_eq!(dispatched.len(), 1);
-    assert_eq!(dispatched[0].incident, format!("new-proposal:{proposal_id}"));
+    assert_eq!(
+        dispatched[0].incident,
+        format!("new-proposal:{proposal_id}")
+    );
     assert_eq!(dispatched[0].severity, AlertSeverity::Info);
     assert_eq!(
         dispatched[0].title,
@@ -154,11 +157,7 @@ async fn voting_window_closing_soon_suppressed_when_token_holder_voted() {
 
     // 3. Ledger reaches closing window at 9,000
     let d = manager
-        .evaluate(&at(
-            9_000,
-            0,
-            EventPayload::Paused { paused: false },
-        ))
+        .evaluate(&at(9_000, 0, EventPayload::Paused { paused: false }))
         .await;
 
     // Suppressed: token holder has already participated
@@ -171,7 +170,10 @@ async fn both_governance_rules_combined_in_alert_manager() {
     let transport = Arc::new(InMemoryTransport::new());
     let rules: Vec<Box<dyn AlertRule>> = vec![
         Box::new(NewProposalRule),
-        Box::new(VotingWindowClosingSoonRule::new(500, Some(VOTER_A.to_string()))),
+        Box::new(VotingWindowClosingSoonRule::new(
+            500,
+            Some(VOTER_A.to_string()),
+        )),
     ];
     let manager = AlertManager::new(transport.clone(), rules);
 

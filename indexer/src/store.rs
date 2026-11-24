@@ -493,14 +493,10 @@ impl Store {
                         || state.status == crate::state::TaskStatus::Claimed
                     {
                         let feed_key = format!("{}:{}", oracle, asset);
-                        let entry = result
-                            .entry(feed_key.clone())
-                            .or_insert_with(|| {
-                                (oracle.clone(), asset.clone(), *threshold, Vec::new())
-                            });
-                        entry
-                            .3
-                            .push((task_id, state.owner.clone(), state.reward.0));
+                        let entry = result.entry(feed_key.clone()).or_insert_with(|| {
+                            (oracle.clone(), asset.clone(), *threshold, Vec::new())
+                        });
+                        entry.3.push((task_id, state.owner.clone(), state.reward.0));
                     }
                 }
             }
@@ -516,9 +512,7 @@ impl Store {
             .collect();
 
         // Sort by oracle address, then asset
-        result_vec.sort_by(|a, b| {
-            a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1))
-        });
+        result_vec.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
         Ok(result_vec)
     }

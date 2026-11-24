@@ -17,13 +17,14 @@ use std::{format, string::ToString};
 
 use soroban_sdk::{
     testutils::{storage::Persistent as _, Address as _, Deployer as _},
-    token, xdr::ToXdr, Address, Bytes, Env,
+    token,
+    xdr::ToXdr,
+    Address, Bytes, Env,
 };
 
 use super::common::*;
 use crate::{
-    reputation::ReputationKey, DataKey, KEEPER_BALANCE_BUMP_LEDGERS,
-    KEEPER_BALANCE_BUMP_THRESHOLD,
+    reputation::ReputationKey, DataKey, KEEPER_BALANCE_BUMP_LEDGERS, KEEPER_BALANCE_BUMP_THRESHOLD,
 };
 
 const REGISTRY_TYPES: &str = include_str!("../types.rs");
@@ -59,7 +60,10 @@ const PRODUCTION_SOURCES: &[&str] = &[
 
 // ── Exhaustiveness of the documented key matrix ────────────────────────────
 
-fn enum_variants(source: &str, enum_header: &str) -> std::collections::BTreeSet<std::string::String> {
+fn enum_variants(
+    source: &str,
+    enum_header: &str,
+) -> std::collections::BTreeSet<std::string::String> {
     let from = source
         .find(enum_header)
         .unwrap_or_else(|| panic!("enum header {enum_header:?} present"))
@@ -69,11 +73,7 @@ fn enum_variants(source: &str, enum_header: &str) -> std::collections::BTreeSet<
     rest[..to]
         .lines()
         .map(str::trim)
-        .filter(|line| {
-            !line.is_empty()
-                && !line.starts_with("//")
-                && !line.starts_with('#')
-        })
+        .filter(|line| !line.is_empty() && !line.starts_with("//") && !line.starts_with('#'))
         .map(|line| line.trim_end_matches(',').to_string())
         .collect()
 }
@@ -120,16 +120,26 @@ fn every_storage_key_has_a_storage_class_and_ttl_row() {
     }
 
     assert_eq!(
-        expected_registry_full, documented_registry,
+        expected_registry_full,
+        documented_registry,
         "registry key matrix out of sync — missing: {:?}, stale: {:?}",
-        expected_registry_full.difference(&documented_registry).collect::<std::vec::Vec<_>>(),
-        documented_registry.difference(&expected_registry_full).collect::<std::vec::Vec<_>>(),
+        expected_registry_full
+            .difference(&documented_registry)
+            .collect::<std::vec::Vec<_>>(),
+        documented_registry
+            .difference(&expected_registry_full)
+            .collect::<std::vec::Vec<_>>(),
     );
     assert_eq!(
-        expected_treasury, documented_treasury,
+        expected_treasury,
+        documented_treasury,
         "treasury key matrix out of sync — missing: {:?}, stale: {:?}",
-        expected_treasury.difference(&documented_treasury).collect::<std::vec::Vec<_>>(),
-        documented_treasury.difference(&expected_treasury).collect::<std::vec::Vec<_>>(),
+        expected_treasury
+            .difference(&documented_treasury)
+            .collect::<std::vec::Vec<_>>(),
+        documented_treasury
+            .difference(&expected_treasury)
+            .collect::<std::vec::Vec<_>>(),
     );
 }
 
@@ -192,8 +202,9 @@ fn every_registry_key_encodes_to_a_distinct_xdr_value() {
 // ── TTL policy values ──────────────────────────────────────────────────────
 
 fn persistent_ttl(s: &TestSetup, key: &DataKey) -> u32 {
-    s.env
-        .as_contract(&s.registry.address, || s.env.storage().persistent().get_ttl(key))
+    s.env.as_contract(&s.registry.address, || {
+        s.env.storage().persistent().get_ttl(key)
+    })
 }
 
 /// Keeps the *shared instance* alive for the whole test while a single
@@ -203,7 +214,12 @@ fn keep_instance_alive(s: &TestSetup) {
     s.env.as_contract(&s.registry.address, || {
         s.env.storage().instance().extend_ttl(999_999, 1_000_000)
     });
-    assert!(s.env.deployer().get_contract_instance_ttl(&s.registry.address) > 900_000);
+    assert!(
+        s.env
+            .deployer()
+            .get_contract_instance_ttl(&s.registry.address)
+            > 900_000
+    );
 }
 
 fn advance_past_entry_ttl(s: &TestSetup, key: &DataKey) {

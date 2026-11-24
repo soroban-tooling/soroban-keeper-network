@@ -40,7 +40,11 @@ fn setup() -> TestContext {
 
     // Fund eligible proposer with exactly the proposal threshold
     let eligible_proposer = Address::generate(&env);
-    token_client.transfer(&early_keepers, &eligible_proposer, &DEFAULT_PROPOSAL_THRESHOLD);
+    token_client.transfer(
+        &early_keepers,
+        &eligible_proposer,
+        &DEFAULT_PROPOSAL_THRESHOLD,
+    );
 
     TestContext {
         env,
@@ -105,7 +109,10 @@ fn test_create_proposal_enforces_minimum_holding_threshold() {
         &(DEFAULT_PROPOSAL_THRESHOLD - 1),
     );
     let res_below = client.try_create_proposal(&below_threshold_caller, &action);
-    assert_eq!(res_below, Err(Ok(GovernanceError::InsufficientProposerBalance)));
+    assert_eq!(
+        res_below,
+        Err(Ok(GovernanceError::InsufficientProposerBalance))
+    );
 
     // 3. Caller with exactly the threshold succeeds
     let res_ok = client.create_proposal(&eligible_proposer, &action);
@@ -189,7 +196,7 @@ fn test_parameter_boundary_validations_reject_invalid_values() {
         GovernableAction::SetVotingPeriod(250_000), // above 201_600
         GovernableAction::SetTimelockDelay(100), // below 14_400
         GovernableAction::SetTimelockDelay(100_000), // above 86_400
-        GovernableAction::SetQuorumBps(50), // below 100
+        GovernableAction::SetQuorumBps(50),    // below 100
         GovernableAction::SetQuorumBps(2_500), // above 2_000
         GovernableAction::SetProposalThreshold(-1),
     ];
@@ -243,7 +250,10 @@ fn test_non_enumerated_and_arbitrary_call_is_rejected() {
         invalid_args,
     );
 
-    assert!(res.is_err(), "non-enumerated or arbitrary call must be rejected");
+    assert!(
+        res.is_err(),
+        "non-enumerated or arbitrary call must be rejected"
+    );
 }
 
 #[test]
@@ -413,7 +423,8 @@ fn test_cannot_vote_after_voting_period_ends() {
     let proposal = client.get_proposal(&proposal_id);
 
     // Advance past voting_end
-    env.ledger().set_sequence_number((proposal.voting_end as u32) + 1);
+    env.ledger()
+        .set_sequence_number((proposal.voting_end as u32) + 1);
 
     let res = client.try_vote(&voter, &proposal_id, &VoteChoice::For);
     assert_eq!(res, Err(Ok(GovernanceError::VotingEnded)));
@@ -468,7 +479,8 @@ fn test_proposal_fails_when_below_quorum_regardless_of_lopsided_votes() {
     assert_eq!(err_active, Err(Ok(GovernanceError::VotingStillActive)));
 
     // Advance past voting_end
-    env.ledger().set_sequence_number((proposal.voting_end as u32) + 1);
+    env.ledger()
+        .set_sequence_number((proposal.voting_end as u32) + 1);
 
     // Public state checks
     assert_eq!(client.is_quorum_met(&proposal_id), false);
@@ -514,7 +526,8 @@ fn test_proposal_meeting_quorum_but_below_passing_threshold_fails() {
     client.vote(&voter_against, &proposal_id, &VoteChoice::Against);
 
     // Advance past voting_end
-    env.ledger().set_sequence_number((proposal.voting_end as u32) + 1);
+    env.ledger()
+        .set_sequence_number((proposal.voting_end as u32) + 1);
 
     assert_eq!(client.is_quorum_met(&proposal_id), true);
     assert_eq!(client.is_passing_threshold_met(&proposal_id), false);
@@ -554,7 +567,8 @@ fn test_proposal_tied_votes_meeting_quorum_fails() {
     client.vote(&voter_for, &proposal_id, &VoteChoice::For);
     client.vote(&voter_against, &proposal_id, &VoteChoice::Against);
 
-    env.ledger().set_sequence_number((proposal.voting_end as u32) + 1);
+    env.ledger()
+        .set_sequence_number((proposal.voting_end as u32) + 1);
 
     assert_eq!(client.is_quorum_met(&proposal_id), true);
     assert_eq!(client.is_passing_threshold_met(&proposal_id), false);
@@ -593,7 +607,8 @@ fn test_proposal_meeting_both_quorum_and_passing_threshold_passes() {
     client.vote(&voter_against, &proposal_id, &VoteChoice::Against);
     client.vote(&voter_abstain, &proposal_id, &VoteChoice::Abstain);
 
-    env.ledger().set_sequence_number((proposal.voting_end as u32) + 1);
+    env.ledger()
+        .set_sequence_number((proposal.voting_end as u32) + 1);
 
     // Meets both criteria
     assert_eq!(client.is_quorum_met(&proposal_id), true);
@@ -645,7 +660,8 @@ fn test_deterministic_evaluation_by_any_observer_from_public_state() {
 
     // Observer query matches contract status check exactly
     let proposal = client.get_proposal(&proposal_id);
-    env.ledger().set_sequence_number((proposal.voting_end as u32) + 1);
+    env.ledger()
+        .set_sequence_number((proposal.voting_end as u32) + 1);
 
     assert_eq!(
         client.get_proposal_status(&proposal_id),
@@ -676,7 +692,8 @@ fn test_timelock_delay_boundary_checks_and_execution() {
 
     let prop_1 = client.get_proposal(&proposal_1);
     // Advance to voting end + 1 (50_501)
-    env.ledger().set_sequence_number((prop_1.voting_end as u32) + 1);
+    env.ledger()
+        .set_sequence_number((prop_1.voting_end as u32) + 1);
 
     // Queue proposal 1: delay is DEFAULT_TIMELOCK_DELAY (28_800 ledgers)
     let eta_1 = client.queue_proposal(&proposal_1);
@@ -707,7 +724,8 @@ fn test_timelock_delay_boundary_checks_and_execution() {
     client.vote(&voter, &proposal_2, &VoteChoice::For);
 
     let prop_2 = client.get_proposal(&proposal_2);
-    env.ledger().set_sequence_number((prop_2.voting_end as u32) + 1);
+    env.ledger()
+        .set_sequence_number((prop_2.voting_end as u32) + 1);
     let eta_2 = client.queue_proposal(&proposal_2);
 
     // Advance to eta_2 + 1
@@ -743,7 +761,8 @@ fn test_queued_state_and_remaining_delay_are_queryable() {
     client.vote(&voter, &proposal_id, &VoteChoice::For);
 
     let prop = client.get_proposal(&proposal_id);
-    env.ledger().set_sequence_number((prop.voting_end as u32) + 1);
+    env.ledger()
+        .set_sequence_number((prop.voting_end as u32) + 1);
 
     // Prior to queuing, query fails with ProposalNotQueued
     assert_eq!(
@@ -797,7 +816,8 @@ fn test_timelock_cannot_be_bypassed_by_fast_track_proposal_or_other_actions() {
     client.vote(&voter, &prop_1_id, &VoteChoice::For);
 
     let prop_1 = client.get_proposal(&prop_1_id);
-    env.ledger().set_sequence_number((prop_1.voting_end as u32) + 1);
+    env.ledger()
+        .set_sequence_number((prop_1.voting_end as u32) + 1);
     let eta_1 = client.queue_proposal(&prop_1_id);
 
     // Attempted fast-track: Create Proposal 2 attempting to shorten the timelock delay
@@ -841,7 +861,8 @@ fn test_cannot_execute_proposal_twice() {
     client.vote(&voter, &proposal_id, &VoteChoice::For);
 
     let prop = client.get_proposal(&proposal_id);
-    env.ledger().set_sequence_number((prop.voting_end as u32) + 1);
+    env.ledger()
+        .set_sequence_number((prop.voting_end as u32) + 1);
     let eta = client.queue_proposal(&proposal_id);
 
     env.ledger().set_sequence_number(eta as u32);
@@ -887,14 +908,23 @@ fn test_read_only_views_at_all_lifecycle_stages() {
     assert_eq!(prop.proposer, eligible_proposer);
     assert_eq!(prop.action, action);
     assert_eq!(prop.status, ProposalStatus::Active);
-    assert_eq!(client.get_proposal_status(&proposal_id), ProposalStatus::Active);
-    assert_eq!(client.get_proposal_state(&proposal_id), ProposalStatus::Active);
+    assert_eq!(
+        client.get_proposal_status(&proposal_id),
+        ProposalStatus::Active
+    );
+    assert_eq!(
+        client.get_proposal_state(&proposal_id),
+        ProposalStatus::Active
+    );
 
     assert_eq!(client.get_tallies(&proposal_id), (0, 0, 0));
     assert_eq!(client.is_quorum_met(&proposal_id), false);
     assert_eq!(client.is_passing_threshold_met(&proposal_id), false);
     assert_eq!(client.is_executable(&proposal_id), false);
-    assert_eq!(client.try_get_remaining_delay(&proposal_id), Err(Ok(GovernanceError::ProposalNotQueued)));
+    assert_eq!(
+        client.try_get_remaining_delay(&proposal_id),
+        Err(Ok(GovernanceError::ProposalNotQueued))
+    );
 
     // 2. Voting in progress: vote For, Against, Abstain
     client.vote(&voter_for, &proposal_id, &VoteChoice::For);
@@ -902,7 +932,10 @@ fn test_read_only_views_at_all_lifecycle_stages() {
     assert_eq!(client.has_voted(&proposal_id, &voter_against), false);
     assert_eq!(
         client.get_vote(&proposal_id, &voter_for),
-        Some(VoteRecord { choice: VoteChoice::For, weight: 3_000_000 * ONE_TOKEN })
+        Some(VoteRecord {
+            choice: VoteChoice::For,
+            weight: 3_000_000 * ONE_TOKEN
+        })
     );
     assert_eq!(client.is_passing_threshold_met(&proposal_id), true);
     // Quorum (4M) not met with only 3M:
@@ -912,16 +945,36 @@ fn test_read_only_views_at_all_lifecycle_stages() {
     client.vote(&voter_abstain, &proposal_id, &VoteChoice::Abstain);
 
     let tallies = client.get_tallies(&proposal_id);
-    assert_eq!(tallies, (3_000_000 * ONE_TOKEN, 1_000_000 * ONE_TOKEN, 1_000_000 * ONE_TOKEN));
+    assert_eq!(
+        tallies,
+        (
+            3_000_000 * ONE_TOKEN,
+            1_000_000 * ONE_TOKEN,
+            1_000_000 * ONE_TOKEN
+        )
+    );
     assert_eq!(client.is_quorum_met(&proposal_id), true);
     assert_eq!(client.is_passing_threshold_met(&proposal_id), true);
-    assert_eq!(client.get_proposal_status(&proposal_id), ProposalStatus::Active);
-    assert_eq!(client.get_proposal_state(&proposal_id), ProposalStatus::Active);
+    assert_eq!(
+        client.get_proposal_status(&proposal_id),
+        ProposalStatus::Active
+    );
+    assert_eq!(
+        client.get_proposal_state(&proposal_id),
+        ProposalStatus::Active
+    );
 
     // 3. Voting period ended (passed but not yet queued)
-    env.ledger().set_sequence_number((prop.voting_end as u32) + 1);
-    assert_eq!(client.get_proposal_status(&proposal_id), ProposalStatus::Passed);
-    assert_eq!(client.get_proposal_state(&proposal_id), ProposalStatus::Passed);
+    env.ledger()
+        .set_sequence_number((prop.voting_end as u32) + 1);
+    assert_eq!(
+        client.get_proposal_status(&proposal_id),
+        ProposalStatus::Passed
+    );
+    assert_eq!(
+        client.get_proposal_state(&proposal_id),
+        ProposalStatus::Passed
+    );
     assert_eq!(client.is_executable(&proposal_id), false);
 
     // 4. Queued stage
@@ -929,8 +982,14 @@ fn test_read_only_views_at_all_lifecycle_stages() {
     let prop_queued = client.get_proposal(&proposal_id);
     assert_eq!(prop_queued.status, ProposalStatus::Queued);
     assert_eq!(prop_queued.eta, eta);
-    assert_eq!(client.get_proposal_status(&proposal_id), ProposalStatus::Queued);
-    assert_eq!(client.get_proposal_state(&proposal_id), ProposalStatus::Queued);
+    assert_eq!(
+        client.get_proposal_status(&proposal_id),
+        ProposalStatus::Queued
+    );
+    assert_eq!(
+        client.get_proposal_state(&proposal_id),
+        ProposalStatus::Queued
+    );
     assert_eq!(client.is_executable(&proposal_id), false);
 
     let remaining = client.get_remaining_delay(&proposal_id);
@@ -940,17 +999,32 @@ fn test_read_only_views_at_all_lifecycle_stages() {
     env.ledger().set_sequence_number(eta as u32);
     assert_eq!(client.get_remaining_delay(&proposal_id), 0);
     assert_eq!(client.is_executable(&proposal_id), true);
-    assert_eq!(client.get_proposal_status(&proposal_id), ProposalStatus::Queued);
-    assert_eq!(client.get_proposal_state(&proposal_id), ProposalStatus::Queued);
+    assert_eq!(
+        client.get_proposal_status(&proposal_id),
+        ProposalStatus::Queued
+    );
+    assert_eq!(
+        client.get_proposal_state(&proposal_id),
+        ProposalStatus::Queued
+    );
 
     // 6. Executed stage
     client.execute_proposal(&proposal_id);
     let prop_executed = client.get_proposal(&proposal_id);
     assert_eq!(prop_executed.status, ProposalStatus::Executed);
-    assert_eq!(client.get_proposal_status(&proposal_id), ProposalStatus::Executed);
-    assert_eq!(client.get_proposal_state(&proposal_id), ProposalStatus::Executed);
+    assert_eq!(
+        client.get_proposal_status(&proposal_id),
+        ProposalStatus::Executed
+    );
+    assert_eq!(
+        client.get_proposal_state(&proposal_id),
+        ProposalStatus::Executed
+    );
     assert_eq!(client.is_executable(&proposal_id), false);
-    assert_eq!(client.try_get_remaining_delay(&proposal_id), Err(Ok(GovernanceError::ProposalNotQueued)));
+    assert_eq!(
+        client.try_get_remaining_delay(&proposal_id),
+        Err(Ok(GovernanceError::ProposalNotQueued))
+    );
 
     // 7. Failed/Defeated proposal lifecycle
     let action_fail = GovernableAction::SetFeeBps(300);
@@ -962,24 +1036,35 @@ fn test_read_only_views_at_all_lifecycle_stages() {
     client.vote(&voter_against, &prop_fail_id, &VoteChoice::Against);
     client.vote(&voter_abstain, &prop_fail_id, &VoteChoice::Against);
 
-    env.ledger().set_sequence_number((prop_fail.voting_end as u32) + 1);
+    env.ledger()
+        .set_sequence_number((prop_fail.voting_end as u32) + 1);
     assert_eq!(client.is_quorum_met(&prop_fail_id), true);
     assert_eq!(client.is_passing_threshold_met(&prop_fail_id), false);
-    assert_eq!(client.get_proposal_status(&prop_fail_id), ProposalStatus::Defeated);
-    assert_eq!(client.get_proposal_state(&prop_fail_id), ProposalStatus::Defeated);
+    assert_eq!(
+        client.get_proposal_status(&prop_fail_id),
+        ProposalStatus::Defeated
+    );
+    assert_eq!(
+        client.get_proposal_state(&prop_fail_id),
+        ProposalStatus::Defeated
+    );
 
     client.evaluate_proposal(&prop_fail_id);
-    assert_eq!(client.get_proposal(&prop_fail_id).status, ProposalStatus::Defeated);
-    assert_eq!(client.get_proposal_status(&prop_fail_id), ProposalStatus::Defeated);
-    assert_eq!(client.get_proposal_state(&prop_fail_id), ProposalStatus::Defeated);
+    assert_eq!(
+        client.get_proposal(&prop_fail_id).status,
+        ProposalStatus::Defeated
+    );
+    assert_eq!(
+        client.get_proposal_status(&prop_fail_id),
+        ProposalStatus::Defeated
+    );
+    assert_eq!(
+        client.get_proposal_state(&prop_fail_id),
+        ProposalStatus::Defeated
+    );
 }
 
-
-
-
-use keeper_registry::{
-    KeeperError, KeeperRegistry, KeeperRegistryClient as RegistryTestClient,
-};
+use keeper_registry::{KeeperError, KeeperRegistry, KeeperRegistryClient as RegistryTestClient};
 
 #[allow(dead_code)]
 struct PreMigrationSetup {
@@ -1005,7 +1090,13 @@ fn setup_pre_migration() -> PreMigrationSetup {
 
     let token_id = env.register(governance_token::GovernanceToken, ());
     let token_client = governance_token::GovernanceTokenClient::new(&env, &token_id);
-    token_client.initialize(&token_admin, &early_keepers, &treasury, &core_team, &public_dist);
+    token_client.initialize(
+        &token_admin,
+        &early_keepers,
+        &treasury,
+        &core_team,
+        &public_dist,
+    );
 
     let governance_id = env.register(GovernanceContract, ());
     let client = GovernanceContractClient::new(&env, &governance_id);

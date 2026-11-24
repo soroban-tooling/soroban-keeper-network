@@ -93,14 +93,8 @@ fn documented(section: &str) -> BTreeSet<String> {
 }
 
 fn matrix_section(start: &str, end: &str) -> &'static str {
-    let from = MATRIX
-        .find(start)
-        .expect("matrix start marker present")
-        + start.len();
-    let to = from
-        + MATRIX[from..]
-            .find(end)
-            .expect("matrix end marker present");
+    let from = MATRIX.find(start).expect("matrix start marker present") + start.len();
+    let to = from + MATRIX[from..].find(end).expect("matrix end marker present");
     &MATRIX[from..to]
 }
 
@@ -108,7 +102,10 @@ fn assert_complete(label: &str, sources: &[&str], section: &str) {
     let actual = entry_points(sources);
     let documented = documented(section);
 
-    assert!(!actual.is_empty(), "{label} source parse found no entry points");
+    assert!(
+        !actual.is_empty(),
+        "{label} source parse found no entry points"
+    );
     assert!(
         !documented.is_empty(),
         "{label} matrix section has no rows — markers may have moved"
@@ -148,7 +145,7 @@ fn every_registry_entry_point_has_an_access_control_row() {
         REGISTRY_SOURCES,
         matrix_section(
             "<!-- BEGIN REGISTRY MATRIX -->",
-            "<!-- END REGISTRY MATRIX -->"
+            "<!-- END REGISTRY MATRIX -->",
         ),
     );
 }
@@ -160,7 +157,7 @@ fn every_treasury_entry_point_has_an_access_control_row() {
         TREASURY_SOURCES,
         matrix_section(
             "<!-- BEGIN TREASURY MATRIX -->",
-            "<!-- END TREASURY MATRIX -->"
+            "<!-- END TREASURY MATRIX -->",
         ),
     );
 }

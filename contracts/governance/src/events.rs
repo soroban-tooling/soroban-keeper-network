@@ -8,12 +8,7 @@
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
 /// Emitted when a new proposal is submitted.
-pub fn emit_proposal_created(
-    e: &Env,
-    proposal_id: u64,
-    proposer: &Address,
-    eta: u64,
-) {
+pub fn emit_proposal_created(e: &Env, proposal_id: u64, proposer: &Address, eta: u64) {
     e.events().publish(
         (symbol_short!("proposed"), symbol_short!("gov")),
         (proposal_id, proposer.clone(), eta),

@@ -5,10 +5,10 @@
 
 use crate::client::ClientError;
 use crate::signing::TransactionSigner;
-use soroban_sdk::{Address, Env};
 pub use governance::{
     GovernableAction, GovernanceContractClient, GovernanceError, Proposal, ProposalStatus, VERSION,
 };
+use soroban_sdk::{Address, Env};
 
 fn alloc_format_error<E: core::fmt::Debug>(err: E) -> String {
     format!("{err:?}")
@@ -71,11 +71,7 @@ impl<'a, S: TransactionSigner> GovernanceClient<'a, S> {
     }
 
     /// Creates and queues a proposal for execution after the specified timelock ETA.
-    pub fn create_proposal(
-        &self,
-        action: &GovernableAction,
-        eta: u64,
-    ) -> Result<u64, ClientError> {
+    pub fn create_proposal(&self, action: &GovernableAction, eta: u64) -> Result<u64, ClientError> {
         self.raw()
             .try_create_proposal(&self.signer.address(), action, &eta)
             .map_err(|e| ClientError::ContractError(alloc_format_error(e)))?

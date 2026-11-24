@@ -19,13 +19,13 @@ pub mod websocket;
 use std::sync::Arc;
 use std::time::Instant;
 
-use axum::{Extension, Router};
 use axum::extract::{MatchedPath, Request, State};
 use axum::http::{header, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
+use axum::{Extension, Router};
 use utoipa::OpenApi;
 
 use crate::cache::AggregateCaches;

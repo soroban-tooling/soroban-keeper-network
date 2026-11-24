@@ -430,7 +430,8 @@ impl VotingWindowClosingSoonRule {
     }
 
     fn check_proposal_closing(&self, prop: &TrackedProposal, current_ledger: u64) -> Option<Alert> {
-        if current_ledger + self.closing_threshold_ledgers >= prop.eta && current_ledger < prop.eta {
+        if current_ledger + self.closing_threshold_ledgers >= prop.eta && current_ledger < prop.eta
+        {
             let state = self.state.lock().unwrap();
             if let Some(target) = &self.token_holder {
                 if state.votes.contains(&(prop.proposal_id, target.clone())) {
@@ -521,9 +522,7 @@ impl AlertRule for VotingWindowClosingSoonRule {
                 );
             }
             EventPayload::VoteCast {
-                proposal_id,
-                voter,
-                ..
+                proposal_id, voter, ..
             } => {
                 let mut state = self.state.lock().unwrap();
                 state.votes.insert((*proposal_id, voter.clone()));
@@ -883,11 +882,7 @@ mod tests {
             .await;
 
         // 3. Chain enters closing window at ledger 4,500
-        let advance_event = at(
-            4_500,
-            0,
-            EventPayload::Paused { paused: false },
-        );
+        let advance_event = at(4_500, 0, EventPayload::Paused { paused: false });
         let alerts = manager.evaluate(&advance_event).await;
         // VOTER_A already voted! Must NOT fire.
         assert_eq!(alerts.len(), 0);

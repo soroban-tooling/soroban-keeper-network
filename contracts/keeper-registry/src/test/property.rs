@@ -1,4 +1,4 @@
-﻿//! Property tests, one per money invariant, sharing `crate::invariants`.
+//! Property tests, one per money invariant, sharing `crate::invariants`.
 //!
 //! Intentionally a SMALL proptest per invariant, not the full-depth
 //! exploration that backlog 0054-0060 calls for — those remain open,

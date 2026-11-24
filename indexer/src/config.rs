@@ -417,6 +417,9 @@ mod tests {
         let err = Config::from_source(source(&pairs)).expect_err("unknown log format");
         assert_eq!(err.problems.len(), 1);
         assert!(err.problems[0].contains("INDEXER_LOG_FORMAT"));
+    }
+
+    #[test]
     fn otlp_endpoint_defaults_to_none_when_unset() {
         let config = Config::from_source(source(&valid_pairs())).expect("valid config");
         assert_eq!(config.otlp_endpoint, None);
