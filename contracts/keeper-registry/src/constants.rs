@@ -87,7 +87,10 @@ pub(crate) const KEEPER_BALANCE_BUMP_THRESHOLD: u32 = 50_000;
 ///   before changing claim state, and batch registration accepts the same
 ///   field. The registration event includes the condition and rejected
 ///   claims emit `ConditionNotMet`. See `docs/TASK_CONDITIONS_DESIGN.md`.
-pub const VERSION: u32 = 6;
+/// - `7` — bounded execution-dispute credits (issue #738):
+///   [`MAX_PENDING_CREDITS`], the `max_pending_credits` view, and the
+///   `TooManyPendingCredits` error. No existing entry point signature changed.
+pub const VERSION: u32 = 7;
 
 /// Maximum `calldata` length, in bytes. Sized to hold an encoded contract
 /// call — a target address, a function symbol, and a handful of scalar or
@@ -197,6 +200,16 @@ pub const DISPUTE_WINDOW_LEDGERS: u32 = 51_840; // ~3 days
 /// keeper's `PendingReward` entry in the meantime, outlive its own storage
 /// TTL before it is ever finalized.
 pub const MAX_EXECUTION_DISPUTE_WINDOW_LEDGERS: u32 = 86_400; // ~5 days
+
+/// Maximum number of undisputed execution credits a keeper may have pending
+/// at once (issue #738). Every credit is one `PendingCredit` entry in a single
+/// Persistent storage vector, read and rewritten whole by `finalize_rewards`,
+/// `dispute_execution`, `resolve_execution_dispute`, and the `pending_reward`
+/// view. Bounding the vector bounds both the storage it can occupy and the
+/// resource cost of every one of those paths. 50 matches the existing
+/// `MAX_BATCH_READ` and `MAX_RECIPIENTS` limits and leaves ample room for a
+/// busy keeper inside one transaction.
+pub const MAX_PENDING_CREDITS: u32 = 50;
 
 /// Highest floor `set_reputation_floor` accepts, in basis points: the score of
 /// a keeper with only successes. Any higher floor would lock out every keeper.

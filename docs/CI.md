@@ -12,12 +12,14 @@ without blocking your PR.
 | `build-wasm` | Required | The `keeper-registry` and `keeper-treasury` contracts must actually compile to the `wasm32-unknown-unknown` target they deploy to. |
 | `sdk-ts` | Required | The TypeScript SDK (`packages/sdk-ts`) must typecheck (`tsc --noEmit`), build, and pass its own test suite. Uploads its built `dist/` as an artifact for `bot` to consume. Lint is the advisory `sdk-ts-lint` job. See [SDK typecheck and lint](#sdk-typecheck-and-lint). |
 | `bot` | Required | The example keeper bot (`examples/keeper-bot`) must lint, syntax-check, and pass its own test suite. Depends on `sdk-ts`'s built output (the bot's `@soroban-keeper-network/sdk` dependency is a local `file:` reference, which `npm install` copies as-is rather than building). |
-| `bot-v2` | Required | The production keeper bot v2 (`examples/keeper-bot-v2`) must build, lint, and pass its test suite against an ephemeral Postgres service container. See [The keeper-bot-v2 job](#the-keeper-bot-v2-job). |
+| `bot-v2` | Required | The production keeper bot v2 (`examples/keeper-bot-v2`) must build, lint, and pass its test suite against an ephemeral Postgres service container. See [The keeper-bot-v2 job](#ephemeral-database-for-keeper-bot-v2). |
 | `indexer` | Required | The indexer service (`indexer/`) must format, build, and pass its test suite, including the database-backed tests. See [The indexer job](#the-indexer-job). |
 | `rust-sdk` | Required | The Rust SDK crate (`rust-sdk/`) must compile and pass all unit and integration tests. |
+| `examples` | Advisory (`continue-on-error: true`) | Checks every Node example under `examples/` declares a `test` script (`scripts/check-example-tests.js`), then installs, tests and lints `examples/batch-register`. See [The examples job](#the-examples-job). |
 | `rust-sdk-quickstart` | Advisory (`continue-on-error: true`) | On pushes to `main`, deploys the registry to a local Stellar Quickstart network and runs the opt-in Rust SDK lifecycle test. |
 | `indexer-client` | Required | The indexer's TypeScript client (`packages/indexer-client`) must typecheck, build, test and lint, and its generated types must match `indexer/openapi.yaml`. |
 | `dashboard` | Required | The operator dashboard (`apps/dashboard`) must typecheck, build, lint, pass unit tests, and pass automated axe accessibility audits. Path-guarded to PRs touching `apps/dashboard/`, `packages/sdk-ts/`, or `packages/indexer-client/`. |
+| `indexer-api-docs` | Advisory (`continue-on-error: true`) | `docs/INDEXER_API.md` is generated from `indexer/openapi.yaml`; this fails if the committed page is stale. Fix with `make docs-indexer-api`. |
 | `clippy` | Advisory (`continue-on-error: true`) | Lints are useful but subjective enough that a maintainer should decide case-by-case, not have every PR blocked by a new upstream lint. |
 | `audit` | Advisory (`continue-on-error: true`) | A new upstream dependency CVE should notify maintainers, not fail every open PR the moment it's published. |
 | `deny` | Advisory (`continue-on-error: true`) | License allow-list enforcement, duplicate crate version detection, yanked crate warnings, and source validation via `cargo-deny`. See [Cargo-deny](#cargo-deny) below. |
@@ -41,6 +43,34 @@ make ci
 `make ci` covers blocking checks only, so it does not lint the SDK. `make check`
 runs `make ci` plus the advisory lints (`make lint` for clippy, `make sdk-ts-lint`
 for the SDK's ESLint).
+
+## Markdown link checking
+
+Docs reference files that move, so two workflows check links in every tracked
+`*.md` file with `scripts/check-md-links.py` (Python 3 standard library only, no
+install step):
+
+| Check | Where | When | Fails on |
+|-------|-------|------|----------|
+| `markdown-links` | `pr-hygiene.yml` | every PR | A relative link whose file or directory does not exist (case-sensitive), or an `#anchor` that matches no heading or `<a id>` in the target Markdown file. |
+| `external-links` | `link-check-external.yml` | weekly (Mondays 06:17 UTC) and on demand | An `http(s)` link answering 404/410 or unreachable. 401/403/429 are ignored, since they usually mean a bot wall or rate limit rather than a dead link. |
+
+External links are deliberately not checked per PR: third-party sites flake and
+redesign on their own schedule, and a contributor should not be blocked by a
+page they did not touch. Like `actionlint`, `markdown-links` shows red on a real
+finding but is not part of `ci-required`.
+
+Run them locally from the repository root:
+
+```bash
+python3 scripts/check-md-links.py                 # relative links and anchors
+python3 scripts/check-md-links.py --external      # external links (network)
+python3 -m unittest scripts/test_check_md_links.py  # the checker's own tests
+```
+
+Anchors follow GitHub's heading slug rules (lowercase, punctuation dropped,
+spaces to hyphens, repeated headings suffixed `-1`, `-2`). Links inside code
+spans and fenced code blocks are ignored.
 
 ## Rust SDK Quickstart integration
 
@@ -250,3 +280,32 @@ test suite: the recommendation there is conditional adoption as a
 periodic, advisory job (same non-blocking posture as `fuzz-nightly.yml`),
 pending a first real timed run to confirm the open questions that
 evaluation raises.
+
+## The examples job
+
+Examples rot when nothing builds them. The advisory `examples` job keeps them honest:
+
+| Example | Test command | Run by |
+|---------|--------------|--------|
+| `examples/keeper-bot` | `npm test` | `bot` job |
+| `examples/keeper-bot-v2` | `npm test` | `bot-v2` job |
+| `examples/batch-register` | `npm test` (dry-runs every sample task list, including `recipes/`) | `examples` job |
+| `rust-sdk/examples/*` | none yet | not covered (see below) |
+
+`scripts/check-example-tests.js` fails the job if a new directory is added under
+`examples/` without a `test` script in its `package.json`, so new examples must
+ship a test command CI can run.
+
+The job is **path-guarded**: on pull requests it does the work only when the
+diff touches `examples/`, `packages/sdk-ts/`, `rust-sdk/`,
+`scripts/check-example-tests.js`, or `.github/workflows/ci.yml`; otherwise it
+reports success without running. It always runs on pushes.
+
+Reproduce locally with `make examples-test`.
+
+**Not covered yet:** the Rust examples under `rust-sdk/examples/`
+(`calling-contract`, `liquidation-keeper`) are not members of the root Cargo
+workspace, so there is no `cargo test` command for them in CI today. Adding
+them needs them to join the workspace (and `Cargo.lock`), which is separate
+work from this job. The job also starts advisory like `cli`; promoting it to
+`ci-required` is a maintainer decision.

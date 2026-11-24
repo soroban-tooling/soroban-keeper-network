@@ -48,11 +48,31 @@ problems at once and exits, rather than failing later inside the ingest loop.
 | `INDEXER_MAX_HEALTHY_LAG_LEDGERS` | no | `60` | Ingestion lag, in ledgers, beyond which the health check reports unhealthy |
 | `INDEXER_SHUTDOWN_DRAIN_SECS` | no | `30` | Max seconds a SIGINT/SIGTERM shutdown waits for an in-flight ingestion pass to finish and checkpoint before exiting anyway |
 | `INDEXER_LOG` | no | `info` | `tracing` filter directive |
+| `INDEXER_LOG_FORMAT` | no | `human` | `human` (default, readable) or `json` (one flat JSON object per line) |
+| `INDEXER_OTLP_ENDPOINT` | no | unset | OTLP/HTTP collector URL for span export, for example `http://collector:4318` |
 
 `INDEXER_START_LEDGER` should be the contract's deployment ledger. On a
 network where that is not known exactly, any ledger at or before the
 `initialize` call works: ingestion is idempotent, so starting early costs
 extra scanning rather than correctness.
+
+### Trace export
+
+Set `INDEXER_OTLP_ENDPOINT` to an OTLP over HTTP collector URL to export spans:
+
+```bash
+export INDEXER_OTLP_ENDPOINT=http://collector.example.org:4318
+```
+
+Export is off by default. When the variable is unset, no exporter, tracer
+provider or batch worker is constructed, and the subscriber installs only the
+formatting layer. A set but blank value is reported as a configuration error at
+startup. The endpoint must use `http://` or `https://`.
+
+`INDEXER_LOG` filters both the formatting layer and the export layer, so a
+narrow directive such as `keeper_indexer=info` bounds span volume on a busy
+deployment. Spans are batched and the provider is shut down after the service
+stops, so pending spans are flushed before exit.
 
 ## Running
 
@@ -72,6 +92,41 @@ serves the API on `INDEXER_BIND_ADDRESS`:
 - REST under `/v1` (`/v1/health`, `/v1/tasks/{id}`, `/v1/events`, ...), described
   by `openapi.yaml`.
 - A live WebSocket feed at `/v1/stream`.
+- Prometheus metrics at `/metrics`, served on the same listener.
+
+### Logging
+
+`INDEXER_LOG_FORMAT=human` is the default and keeps the readable output the
+indexer has always produced. Set `INDEXER_LOG_FORMAT=json` for log pipelines:
+each line is one JSON object with root-level `timestamp` (RFC 3339), `level`,
+`message` and any structured fields known at that point (`component`,
+`request_id`, `route`, `status`, `ledger_range`, `event_count`,
+`duration_seconds`, `error`). `INDEXER_LOG` still selects what is logged; the
+format only changes how it is rendered. An unknown value is reported with the
+other configuration problems at startup instead of silently falling back.
+
+### Metrics
+
+`GET /metrics` returns Prometheus text format on the API listener, so only one
+port needs to be exposed. It is subject to the same per-client rate limit as
+the REST API. Keep `INDEXER_BIND_ADDRESS` private or put the endpoint behind an
+authenticated proxy: the values are operational counts and bounded labels, not
+secrets, but they still describe your deployment.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `soroban_indexer_ingestion_lag_ledgers` | gauge | none | Head ledger minus last ingested ledger; `0` before the first observation |
+| `soroban_indexer_events_ingested_total` | counter | `event_type` | Newly stored events by contract event name |
+| `soroban_indexer_api_requests_total` | counter | `route`, `status` | Responses by normalised route template and status class (`2xx`, `4xx`, ...) |
+| `soroban_indexer_api_request_duration_seconds` | histogram | `route` | Response latency buckets, sum and count |
+| `soroban_indexer_cache_hit_ratio` | gauge | none | Leaderboard cache hits divided by lookups; `0` before any lookup |
+| `soroban_indexer_rate_limit_rejections_total` | counter | none | Responses rejected with 429 |
+| `soroban_indexer_websocket_connections` | gauge | none | Open WebSocket subscriptions |
+
+Route labels come from the router's matched template. Unmatched paths are
+collapsed by replacing long identifier-like segments, so a caller cannot create
+a new time series with an arbitrary URL. No metric label contains a raw path,
+secret, full URL or signing key.
 
 ### Startup, in order
 

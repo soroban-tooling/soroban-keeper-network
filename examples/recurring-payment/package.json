@@ -1,0 +1,18 @@
+{
+  "name": "@soroban-keeper-network/example-recurring-payment",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Example recurring payment / subscription task for Soroban Keeper Network",
+  "main": "src/subscription.js",
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "subscription",
+    "recurring-payment",
+    "keeper"
+  ],
+  "license": "Apache-2.0"
+}
