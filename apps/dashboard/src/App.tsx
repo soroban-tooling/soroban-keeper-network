@@ -5,10 +5,12 @@ import { LeaderboardPage } from "./pages/Leaderboard";
 import { StatsPage } from "./pages/Stats";
 import { TasksPage } from "./pages/Tasks";
 import { RegisterTaskPage } from "./pages/RegisterTask";
+import { TaskDetailPage } from "./pages/TaskDetail";
 
 const router = createBrowserRouter([{ path: "/", element: <Shell />, children: [
   { index: true, element: <Navigate to="/tasks" replace /> },
   { path: "tasks", element: <TasksPage /> },
+  { path: "tasks/:taskId", element: <TaskDetailPage /> },
   { path: "keepers", element: <LeaderboardPage /> },
   { path: "keepers/:keeper", element: <KeeperPage /> },
   { path: "stats", element: <StatsPage /> },

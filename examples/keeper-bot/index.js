@@ -109,6 +109,15 @@ async function loadSdk() {
 
 let CONFIG; // Initialized in main() after validation
 
+const STELLAR_SECRET_PATTERN = /S[A-Z2-7]{55}/g;
+
+function safeErrorMessage(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(STELLAR_SECRET_PATTERN, "[REDACTED_STELLAR_KEY]")
+    .replace(/((?:KEEPER_SECRET_KEY|SIGNING_KEY_POOL)\s*=\s*)[^\s,]+/gi, "$1[REDACTED]");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Dry-run decision recording types and utilities
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1429,7 +1438,7 @@ async function main() {
       }
     } catch (err) {
       // This is for truly unexpected errors in the loop itself
-      console.error("Fatal keeper loop error:", err.message);
+      console.error("Fatal keeper loop error:", safeErrorMessage(err));
     } finally {
       roundInFlight = false;
       if (shuttingDown) {
@@ -1486,6 +1495,7 @@ module.exports = {
   OutcomeStore,
   isAmbiguousTimeoutError,
   verifyOnChainLanding,
+  safeErrorMessage,
   // Optional metrics (issue #717)
   metrics,
   MetricsCollector,
@@ -1495,7 +1505,7 @@ module.exports = {
 // Only run main() when executed directly, not when imported for testing
 if (require.main === module) {
   main().catch((err) => {
-    console.error("Fatal error:", err);
+    console.error("Fatal error:", safeErrorMessage(err));
     process.exit(1);
   });
 }

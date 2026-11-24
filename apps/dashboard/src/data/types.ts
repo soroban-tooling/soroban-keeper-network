@@ -46,6 +46,7 @@ export interface RegistryReader {
   getFeeBps(): Promise<number>;
   isPaused(): Promise<boolean>;
   feesAccrued(): Promise<bigint>;
+  task(taskId: number): Promise<{ deadline: number; claimLedger?: number; lockLedgers: number }>;
 }
 
 export interface RegisterTaskInput {

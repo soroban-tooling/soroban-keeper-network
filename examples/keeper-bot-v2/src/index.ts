@@ -27,6 +27,15 @@ import { TaskStateStore } from "./db/store.js";
 import { ExecutorRegistry } from "./executors/registry.js";
 import { TaskExecutor, TaskExecutionPayload, TaskExecutionResult } from "./executors/interface.js";
 
+const STELLAR_SECRET_PATTERN = /S[A-Z2-7]{55}/g;
+
+export function safeErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(STELLAR_SECRET_PATTERN, "[REDACTED_STELLAR_KEY]")
+    .replace(/((?:KEEPER_SECRET_KEY|SIGNING_KEY_POOL)\s*=\s*)[^\s,]+/gi, "$1[REDACTED]");
+}
+
 export * from "./config.js";
 export * from "./metrics.js";
 export * from "./db/client.js";
@@ -213,12 +222,12 @@ if (require.main === module) {
     process.on("SIGTERM", shutdown);
 
     bot.start().catch((err) => {
-      console.error("[KEEPER-BOT-V2 FATAL]", err);
+      console.error("[KEEPER-BOT-V2 FATAL]", safeErrorMessage(err));
       process.exit(1);
     });
   } catch (err: unknown) {
     if (err instanceof Error) {
-      console.error(`[CONFIG ERROR] ${err.message}`);
+      console.error(`[CONFIG ERROR] ${safeErrorMessage(err)}`);
     }
     process.exit(1);
   }
