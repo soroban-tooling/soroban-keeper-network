@@ -71,6 +71,8 @@ Registration uses `lock_ledgers = 100`, no condition and `TaskType::Custom`;
 
 ## See also
 
+- [Integration Guide](../../../docs/VERIFIERS.md) — For verifier design and usage patterns
+- [Registry Contract](../../keeper-registry) — The contract being tested against
 - [Verifier design](../../../docs/VERIFIER_DESIGN.md)
 - [Verifier cost catalog and testing notes](../../../docs/VERIFIERS.md)
 - [Registry contract](../../keeper-registry)

@@ -18,6 +18,7 @@
 | Doc | What's inside |
 |-----|---------------|
 | [Live demo](docs/DEMO.md) | Deployed testnet contract + full on-chain transaction trace |
+| [Task lifecycle](docs/TASK_LIFECYCLE.md) | Pending, Claimed, Executed, Cancelled, Expired: state diagram, guards, entry points, events, costs |
 | [Architecture](docs/ARCHITECTURE.md) | Components, task lifecycle, storage, money invariants, trust model |
 | [Fuzzing & property testing](docs/FUZZING.md) | Running/adding fuzz targets, the shared invariant module, crash-to-regression convention |
 | [Verifier design (E04)](docs/VERIFIER_DESIGN.md) | `IKeeperVerifier` interface for optional on-chain proof verification |

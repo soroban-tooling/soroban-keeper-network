@@ -12,7 +12,7 @@ without blocking your PR.
 | `build-wasm` | Required | The `keeper-registry` and `keeper-treasury` contracts must actually compile to the `wasm32-unknown-unknown` target they deploy to. |
 | `sdk-ts` | Required | The TypeScript SDK (`packages/sdk-ts`) must typecheck (`tsc --noEmit`), build, and pass its own test suite. Uploads its built `dist/` as an artifact for `bot` to consume. Lint is the advisory `sdk-ts-lint` job. See [SDK typecheck and lint](#sdk-typecheck-and-lint). |
 | `bot` | Required | The example keeper bot (`examples/keeper-bot`) must lint, syntax-check, and pass its own test suite. Depends on `sdk-ts`'s built output (the bot's `@soroban-keeper-network/sdk` dependency is a local `file:` reference, which `npm install` copies as-is rather than building). |
-| `bot-v2` | Required | The production keeper bot v2 (`examples/keeper-bot-v2`) must build, lint, and pass its test suite against an ephemeral Postgres service container. See [The keeper-bot-v2 job](#the-keeper-bot-v2-job). |
+| `bot-v2` | Required | The production keeper bot v2 (`examples/keeper-bot-v2`) must build, lint, and pass its test suite against an ephemeral Postgres service container. See [The keeper-bot-v2 job](#ephemeral-database-for-keeper-bot-v2). |
 | `indexer` | Required | The indexer service (`indexer/`) must format, build, and pass its test suite, including the database-backed tests. See [The indexer job](#the-indexer-job). |
 | `rust-sdk` | Required | The Rust SDK crate (`rust-sdk/`) must compile and pass all unit and integration tests. |
 | `examples` | Advisory (`continue-on-error: true`) | Checks every Node example under `examples/` declares a `test` script (`scripts/check-example-tests.js`), then installs, tests and lints `examples/batch-register`. See [The examples job](#the-examples-job). |
@@ -41,6 +41,34 @@ make ci
 `make ci` covers blocking checks only, so it does not lint the SDK. `make check`
 runs `make ci` plus the advisory lints (`make lint` for clippy, `make sdk-ts-lint`
 for the SDK's ESLint).
+
+## Markdown link checking
+
+Docs reference files that move, so two workflows check links in every tracked
+`*.md` file with `scripts/check-md-links.py` (Python 3 standard library only, no
+install step):
+
+| Check | Where | When | Fails on |
+|-------|-------|------|----------|
+| `markdown-links` | `pr-hygiene.yml` | every PR | A relative link whose file or directory does not exist (case-sensitive), or an `#anchor` that matches no heading or `<a id>` in the target Markdown file. |
+| `external-links` | `link-check-external.yml` | weekly (Mondays 06:17 UTC) and on demand | An `http(s)` link answering 404/410 or unreachable. 401/403/429 are ignored, since they usually mean a bot wall or rate limit rather than a dead link. |
+
+External links are deliberately not checked per PR: third-party sites flake and
+redesign on their own schedule, and a contributor should not be blocked by a
+page they did not touch. Like `actionlint`, `markdown-links` shows red on a real
+finding but is not part of `ci-required`.
+
+Run them locally from the repository root:
+
+```bash
+python3 scripts/check-md-links.py                 # relative links and anchors
+python3 scripts/check-md-links.py --external      # external links (network)
+python3 -m unittest scripts/test_check_md_links.py  # the checker's own tests
+```
+
+Anchors follow GitHub's heading slug rules (lowercase, punctuation dropped,
+spaces to hyphens, repeated headings suffixed `-1`, `-2`). Links inside code
+spans and fenced code blocks are ignored.
 
 ## Rust SDK Quickstart integration
 

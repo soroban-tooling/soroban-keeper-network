@@ -126,7 +126,7 @@ but this is a big enough behavioral and storage-shape change that it belongs
 in its own scoped issue with migration analysis, not decided here.
 
 **Conclusion: worthwhile enough to file a follow-up issue** — see
-[0201-task-storage-hot-cold-split.md](../.github/backlog/issues/0201-task-storage-hot-cold-split.md).
+[0204-task-storage-hot-cold-split.md](../.github/backlog/issues/0204-task-storage-hot-cold-split.md).
 
 ## Q3 — Where should the E04 verifier field live, once it exists?
 
@@ -164,7 +164,7 @@ field.
 | Question | Finding | Action |
 |----------|---------|--------|
 | Q1 — redundant fields | None — every field is re-read on a recurring path, and events can't substitute for storage | No action |
-| Q2 — hot/cold split | Real, measurable win on the write side for the two hottest entry points | Follow-up issue filed: [0201](../.github/backlog/issues/0201-task-storage-hot-cold-split.md) |
+| Q2 — hot/cold split | Real, measurable win on the write side for the two hottest entry points | Follow-up issue filed: [0204](../.github/backlog/issues/0204-task-storage-hot-cold-split.md) |
 | Q3 — verifier field placement | Separate `DataKey::TaskVerifier(task_id)` is cheaper than a `Task` field for the common no-verifier case | Recorded here for issue 0072 to apply when implemented |
 
 ---
