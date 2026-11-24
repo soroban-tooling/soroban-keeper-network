@@ -87,6 +87,14 @@ jobs:
             echo "size=$(stat -c%s keeper_registry.optimized.wasm)"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Generate Rust workspace SBOM
+        uses: cyclonedx/gh-action@v4
+        with:
+          version: v1
+          spec-version: "1.4"
+          output-directory: dist
+          output-filename: "rust-workspace-sbom.json"
+
       - name: Upload WASM and hash
         uses: actions/upload-artifact@v7
         with:
@@ -143,6 +151,14 @@ jobs:
             echo "sha256=$(sha256sum keeper_registry.optimized.wasm | cut -d' ' -f1)"
             echo "size=$(stat -c%s keeper_registry.optimized.wasm)"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Generate Rust workspace SBOM
+        uses: cyclonedx/gh-action@v4
+        with:
+          version: v1
+          spec-version: "1.4"
+          output-directory: dist
+          output-filename: "rust-workspace-sbom.json"
 
       - name: Upload WASM and hash
         uses: actions/upload-artifact@v7
@@ -233,6 +249,25 @@ jobs:
           name: build-a-artifacts
           path: dist/
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Generate npm package SBOMs
+        run: |
+          npx @cyclonedx/npm@latest --output-file dist/npm-packages-sbom.json --output-format json
+          # Also generate individual package SBOMs for each package
+          for package_dir in packages/*/; do
+            package_name=$(basename "$package_dir")
+            cd "$package_dir"
+            npx @cyclonedx/npm@latest --output-file "../../dist/npm-${package_name}-sbom.json" --output-format json --type library
+            cd ../../
+          done
+
       - name: Assemble release notes
         env:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
@@ -263,6 +298,16 @@ jobs:
             echo "Verify a deployment matches this release by comparing the WASM hash"
             echo "reported by \`stellar contract install\` against the sha256 above."
             echo
+            echo "### Bill of Materials"
+            echo
+            echo "CycloneDX SBOMs are attached to this release:"
+            echo
+            echo "- \`rust-workspace-sbom.json\` — Rust workspace dependencies"
+            echo "- \`npm-packages-sbom.json\` — All npm packages"
+            echo "- \`npm-*.json\` — Individual npm package SBOMs"
+            echo
+            echo "SBOMs list exact resolved versions from Cargo.lock and package-lock.json files."
+            echo
             echo "### Changes"
             echo
             if [ -n "$previous" ]; then
@@ -282,10 +327,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
+          # Collect all SBOM files
+          SBOM_FILES=$(find dist -maxdepth 1 -name "*sbom*.json" -type f)
+          
           gh release create "$TAG" \
             --title "$TAG" \
             --notes-file RELEASE_NOTES.md \
             --verify-tag \
             dist/keeper_registry.wasm \
             dist/keeper_registry.optimized.wasm \
-            dist/SHA256SUMS.txt
+            dist/SHA256SUMS.txt \
+            $SBOM_FILES

@@ -1,4 +1,4 @@
-﻿//! Tests for the time-window condition contract.
+//! Tests for the time-window condition contract.
 //!
 //! Covers every branch of `check` and every error path in `initialize`,
 //! including the exact boundaries the issue's acceptance criteria require:

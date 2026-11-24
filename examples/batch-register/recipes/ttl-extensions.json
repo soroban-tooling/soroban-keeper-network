@@ -1,0 +1,112 @@
+{
+  "tasks": [
+    {
+      "label": "extend-ttl-vault-01",
+      "task_type": "TtlExtension",
+      "calldata": "657874656e645f74746c3a7661756c743a3031",
+      "reward": "100000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 60
+    },
+    {
+      "label": "extend-ttl-vault-02",
+      "task_type": "TtlExtension",
+      "calldata": "657874656e645f74746c3a7661756c743a3032",
+      "reward": "100000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 60
+    },
+    {
+      "label": "extend-ttl-vault-03",
+      "task_type": "TtlExtension",
+      "calldata": "657874656e645f74746c3a7661756c743a3033",
+      "reward": "100000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 60
+    },
+    {
+      "label": "extend-ttl-vault-04",
+      "task_type": "TtlExtension",
+      "calldata": "657874656e645f74746c3a7661756c743a3034",
+      "reward": "100000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 60
+    },
+    {
+      "label": "extend-ttl-vault-05",
+      "task_type": "TtlExtension",
+      "calldata": "657874656e645f74746c3a7661756c743a3035",
+      "reward": "100000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 60
+    },
+    {
+      "label": "extend-ttl-vault-06",
+      "task_type": "TtlExtension",
+      "calldata": "657874656e645f74746c3a7661756c743a3036",
+      "reward": "100000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 60
+    },
+    {
+      "label": "extend-ttl-vault-07",
+      "task_type": "TtlExtension",
+      "calldata": "657874656e645f74746c3a7661756c743a3037",
+      "reward": "100000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 60
+    },
+    {
+      "label": "extend-ttl-vault-08",
+      "task_type": "TtlExtension",
+      "calldata": "657874656e645f74746c3a7661756c743a3038",
+      "reward": "100000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 60
+    },
+    {
+      "label": "extend-ttl-vault-09",
+      "task_type": "TtlExtension",
+      "calldata": "657874656e645f74746c3a7661756c743a3039",
+      "reward": "100000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 60
+    },
+    {
+      "label": "extend-ttl-vault-10",
+      "task_type": "TtlExtension",
+      "calldata": "657874656e645f74746c3a7661756c743a3130",
+      "reward": "100000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 60
+    },
+    {
+      "label": "extend-ttl-vault-11",
+      "task_type": "TtlExtension",
+      "calldata": "657874656e645f74746c3a7661756c743a3131",
+      "reward": "100000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 60
+    },
+    {
+      "label": "extend-ttl-vault-12",
+      "task_type": "TtlExtension",
+      "calldata": "657874656e645f74746c3a7661756c743a3132",
+      "reward": "100000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 60
+    }
+  ]
+}

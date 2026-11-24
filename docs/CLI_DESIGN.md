@@ -234,3 +234,95 @@ Scripts should branch on the exit code and read `error.code` only for detail.
   release.
 - **Amount formatting.** Amounts are raw base units in v1. Decimal formatting
   would need the reward token's decimals, which the CLI does not read yet.
+
+## 11. Epic E16 retrospective (issue #712)
+
+This section closes epic E16. It records what shipped, where the implementation
+diverged from sections 1 to 10, and what was deferred. It is a historical
+record, so the design above is left unchanged.
+
+### 11.1 What shipped
+
+The `packages/cli` package builds, typechecks and has command-level tests in
+CI through the advisory `cli` job. `skn --version` prints the supported
+contract `VERSION` range. The shipped command groups are `config`, `task`,
+`keeper`, `admin`, `batch`, `deploy`, `events` and `inspect`.
+
+| Area | Shipped behavior | Source issue |
+|------|------------------|--------------|
+| Package scaffold and command tree | `skn` bin, flat result type, shared usage output | #690 |
+| Configuration | `config init` and `config show`, named profiles | #691 |
+| Output and failures | `--json`, human messages for SDK error codes, stable exit codes | #693, #694 |
+| Keys | `SKN_SECRET_KEY`, `--key-file`, `--identity`, redaction in errors | #692 |
+| Task mutation | `register`, `cancel`, `expire`, `increase-reward`, `extend-deadline` | #695, #699 |
+| Keeper commands | `balance`, `withdraw`, `stake`, `unbond`, `withdraw-stake`, `unbonding` | #700, #701 |
+| Admin commands | `pause`, `unpause`, `set-fee-bps`, `set-min-reward`, `set-min-stake`, `set-dispute-window`, `sweep-fees` | #702 |
+| Batch registration | JSON and CSV input | #703 |
+| Deployment | `deploy registry`, `deploy treasury`, `deploy all` | #704 |
+| Events | `events watch` | #705 |
+| Inspection | `inspect summary`, `inspect version` | #706 |
+| Tests | Command-level tests against the SDK fake RPC | #707 |
+| CI and release | CLI CI job and `cli-publish.yml` workflow | #708, #709 |
+
+### 11.2 Divergences from the design
+
+| Design | Shipped | Reason and impact |
+|--------|---------|-------------------|
+| `--registry <C...>` (section 2) | `--contract-id <id>` | The shorter global flag collides with other uses of "registry". Scripts must use the new name; the old one was never released as stable. |
+| `--dry-run` (sections 2, 4 and 7) | Not implemented | Simulation is already performed before every signed submission, but a standalone dry-run that prints resource cost is still missing. Callers cannot inspect a transaction without submitting it. Deferred to a follow-up release. |
+| `--yes` for non-interactive mainnet changes (sections 2 and 7) | `--confirm-mainnet` | The shipped name is explicit about which network it unlocks. Scripts must use the new flag. |
+| `skn admin set-fee <bps>` (section 2) | `skn admin set-fee-bps` | The shipped name states the unit, matching on-chain `fee_bps`. |
+| Exit codes 0 to 6 plus 130 with keys, config and rejection split out (section 6) | 0 success, 1 internal, 2 usage, 3 RPC, 4 contract, 5 not found | Configuration and key failures are reported as usage errors (2), and contract rejections as 4. Scripts that branch on 3, 4 or 6 need to be updated. This is the largest behavioral divergence. |
+| Key source order in section 4: `SKN_SECRET_KEY`, then `--key-file` | `--key-file`, then `--identity`, then `SKN_SECRET_KEY` | Named Stellar CLI identities are supported as a first-class source. The "no secret on argv" and redaction rules still hold. |
+| No `--rpc-url` in section 2 | `--rpc-url <url>` added | Needed to operate against a replacement provider during an RPC outage, see `docs/runbooks/rpc-outage.md`. |
+| No `--treasury-contract-id` in section 2 | Added | `deploy treasury` and treasury-aware admin flows need a second contract id. |
+| Groups fixed in section 2 | `inspect version`, `keeper unbonding`, `deploy all`, `admin set-min-stake`, `admin set-dispute-window` added | These are additive. No designed group was removed. |
+
+### 11.3 Deferred commands
+
+These commands are named in section 2 and still print "not implemented yet" on
+`main` at the time of writing. Their implementation issues are closed, but the
+commands are still listed in `PLANNED` in
+`packages/cli/src/commands/task/index.ts`, so they are not part of this
+release. Reconciling the closed issues with the shipped tree is a follow-up
+task, not a documentation change.
+
+| Command | Reason |
+|---------|--------|
+| `skn task show <id>` | Read path exists in the SDK but the command needs a stable JSON shape aligned with `inspect summary`. Left open until that schema is agreed. |
+| `skn task list [--status ...] [--owner ...] [--limit N]` | Needs pagination rules. The SDK returns bounded ranges, and no CLI-level cursor format was agreed. |
+| `skn task claim <id>` | Mutating command needs the same confirmation policy as admin commands, which was not settled before release. |
+| `skn task execute <id> [--proof <hex>]` | Same confirmation policy, plus proof encoding validation against the contract's maximum proof length. |
+
+Also deferred from section 10: keystore aliases, decimal amount formatting and
+the choice of how `deploy` installs WASM. The shipped `deploy` uses the SDK's
+upload path; switching it to shell out to the Stellar CLI would need the key
+handling review below.
+
+### 11.4 Security review outcome
+
+The pre-release security review is **still open**: issue #711,
+`security(cli): review key handling and admin commands before release`. This
+retrospective does not claim it passed.
+
+What is verifiable in the shipped tree today:
+
+- Secret material is read from a file, an identity or the environment, never
+  from an argument. Argument-shaped seeds are rejected as usage errors.
+- Error output passes through a redactor, and command tests assert a known
+  fake seed never appears in stdout or stderr.
+- Mainnet state-changing commands require an explicit non-interactive
+  confirmation flag.
+
+What remains for #711: an independent review of the redactor against every
+error path, of the identity provider's subprocess boundary, and of the
+confirmation flow for `deploy all`. The npm release itself is done: #709 is
+closed and `.github/workflows/cli-publish.yml` exists.
+
+### 11.5 Follow-up issues to open
+
+1. Reconcile #696, #697 and #698 with the four `PLANNED` task commands.
+2. Implement `--dry-run` or remove it from the design with a recorded decision.
+3. Publish a migration note for the exit-code and flag renames in section 11.2.
+4. Close #711 after the independent review, then update this section with the
+   review date and outcome.

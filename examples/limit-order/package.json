@@ -1,0 +1,19 @@
+{
+  "name": "@soroban-keeper-network/example-limit-order",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Example oracle-driven limit order keeper task with slippage protection on Soroban",
+  "main": "src/limit-order.js",
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "limit-order",
+    "oracle",
+    "slippage",
+    "keeper"
+  ],
+  "license": "Apache-2.0"
+}

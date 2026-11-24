@@ -1,6 +1,7 @@
 import { defaultConfig, writeConfig } from "../config.js";
 import { resolveKey } from "../keys.js";
 import { ok, jsonResult, usage, type RunResult } from "../output.js";
+import { redactSecrets } from "../redact.js";
 import { resolveSettings } from "../settings.js";
 import { loadConfig, parseCommandArgs, settingFlagsFrom, type CommandContext } from "../args.js";
 
@@ -60,7 +61,9 @@ export async function runConfigShow(
     configFound: config !== undefined,
     profile: settings.profile ?? null,
     network: settings.network,
-    rpcUrl: settings.rpcUrl,
+    // Keep scheme and host so the operator can identify the endpoint, but
+    // drop any API key embedded in user info or the query string.
+    rpcUrl: redactSecrets(settings.rpcUrl),
     networkPassphrase: settings.networkPassphrase,
     contractId: settings.contractId ?? null,
     ...(settings.treasuryContractId !== undefined

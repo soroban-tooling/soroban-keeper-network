@@ -11,6 +11,7 @@ import { runKeeperCommand } from "./commands/keeper/index.js";
 import { runTaskCommand } from "./commands/task/index.js";
 import type { ConfirmFn } from "./confirm.js";
 import { commandError } from "./failures.js";
+import { HELP_GROUPS, HELP_TEXT, helpFor, helpPathFromArgs } from "./help.js";
 import { ok, usage, type RunResult } from "./output.js";
 import { CLI_VERSION } from "./version.js";
 
@@ -34,52 +35,9 @@ export interface RunOptions {
   now?: (() => number) | undefined;
 }
 
-/** Command groups from `docs/CLI_DESIGN.md`. Each one appears in help. */
-export const COMMAND_GROUPS = [
-  "config",
-  "task",
-  "keeper",
-  "admin",
-  "batch",
-  "deploy",
-  "events",
-  "inspect",
-] as const;
-
-export const HELP_TEXT = `skn ${CLI_VERSION}: command-line tool for the Soroban Keeper Network
-
-Usage:
-  skn <group> [command] [flags]
-  skn --help | --version
-
-Command groups:
-  config    init | show: manage the config file and named profiles
-  task      register | cancel | expire | increase-reward | extend-deadline (show, list, claim, execute: not yet)
-  keeper    balance | withdraw | stake | unbond | withdraw-stake | unbonding
-  admin     pause | unpause | set-fee-bps | set-min-reward | set-min-stake | set-dispute-window | sweep-fees
-  batch     register: batch task registration from JSON or CSV
-  deploy    registry | treasury | all: upload WASM, deploy and initialize contracts
-  events    watch contract events
-  inspect   [summary | version]: print protocol state and SDK compatibility
-
-Global flags (accepted by every command):
-  --profile <name>                       named profile from the config file
-  --network <testnet|futurenet|mainnet>  network preset (default: the profile's, else testnet)
-  --rpc-url <url>                        override the preset's RPC URL
-  --contract-id <id>                     keeper-registry contract ID
-  --treasury-contract-id <id>            treasury contract ID
-  --key-file <path>                      read the signing key from a file (must not be readable by others)
-  --identity <name>                      read the signing key from a Stellar CLI identity
-  --confirm-mainnet                      required to send a transaction on mainnet
-  --json                                 print machine-readable JSON
-
-Signing key precedence: --key-file, then --identity, then SKN_SECRET_KEY.
-Config file: SKN_CONFIG, or ~/.config/skn/skn.config.json.
-
-Exit codes:
-  0 success     1 internal error   2 usage error
-  3 RPC error   4 contract error   5 not found
-`;
+export { HELP_TEXT };
+/** Command groups, derived from the same data that renders `--help`. */
+export const COMMAND_GROUPS: readonly string[] = HELP_GROUPS.map((group) => group.name);
 
 /**
  * Runs `skn` with the given arguments (without the node and script path) and
@@ -96,6 +54,14 @@ export async function run(argv: readonly string[], options: RunOptions = {}): Pr
   if (first === "--version" || first === "-v") {
     const { min, max } = SUPPORTED_CONTRACT_VERSIONS;
     return ok(`skn ${CLI_VERSION}\nsupported contract VERSION: ${min} to ${max}\n`);
+  }
+  // `skn <group> [command] --help` prints the matching page before any flag
+  // parsing or network access. Unknown paths fall through to the normal
+  // router, which reports them as usage errors.
+  const helpPath = helpPathFromArgs(argv);
+  if (helpPath !== undefined) {
+    const page = helpFor(helpPath);
+    if (page !== undefined) return ok(page);
   }
   if (!isCommandGroup(first)) {
     return usage(`unknown command '${first}'`, json);

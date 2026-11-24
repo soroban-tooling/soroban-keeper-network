@@ -1,0 +1,108 @@
+name: Docs
+
+# Builds the documentation site (docs/site, an mdBook) and publishes it.
+#
+#   pull_request -> build only. A broken build (bad SUMMARY.md, a page that is
+#                   not listed, an mdBook error) fails the PR. Nothing is
+#                   deployed and no token with write access is involved, so
+#                   this is safe for fork PRs.
+#   push to main -> build, then deploy to GitHub Pages.
+#
+# One-time setup for maintainers: in the repository settings, set
+# Pages > Build and deployment > Source to "GitHub Actions". Until that is
+# done the deploy job fails with a Pages-not-enabled error; the build job,
+# which is the PR gate, is unaffected.
+#
+# Reproduce locally with `make docs` (see docs/site/README.md).
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "examples/README.md"
+      - "examples/batch-register/README.md"
+      - "examples/keeper-bot-v2/README.md"
+      - "examples/keeper-bot-v2/DEPLOYMENT.md"
+      - "packages/cli/README.md"
+      - "packages/sdk-ts/README.md"
+      - "packages/indexer-client/README.md"
+      - "rust-sdk/README.md"
+      - "indexer/README.md"
+      - ".github/workflows/docs.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "examples/README.md"
+      - "examples/batch-register/README.md"
+      - "examples/keeper-bot-v2/README.md"
+      - "examples/keeper-bot-v2/DEPLOYMENT.md"
+      - "packages/cli/README.md"
+      - "packages/sdk-ts/README.md"
+      - "packages/indexer-client/README.md"
+      - "rust-sdk/README.md"
+      - "indexer/README.md"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel an in-flight deploy; do cancel superseded PR builds.
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  MDBOOK_VERSION: "0.5.4"
+  # sha256 of mdbook-v0.5.4-x86_64-unknown-linux-gnu.tar.gz as published on the
+  # rust-lang/mdBook release. Update together with MDBOOK_VERSION.
+  MDBOOK_SHA256: "3f28de05dafca9d0f2eab99c662116b0e37b89b1d96a08f8f430b9eeae958cd7"
+
+jobs:
+  build:
+    name: build docs site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install mdBook
+        run: |
+          set -euo pipefail
+          archive="mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$archive" \
+            "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/${archive}"
+          echo "${MDBOOK_SHA256}  ${archive}" | sha256sum --check -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf "$archive" -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build the site
+        run: ./docs/site/build.sh
+
+      - name: Upload the site for deployment
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/site/book
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

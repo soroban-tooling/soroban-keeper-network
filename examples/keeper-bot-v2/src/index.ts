@@ -18,8 +18,10 @@ export * from "./task_source.js";
 
 // Main loop and integration points will be added as v2 development progresses
 import "dotenv/config";
+import { rpc } from "@stellar/stellar-sdk";
+import { NETWORK_PRESETS } from "@soroban-keeper-network/sdk";
 import { validateConfig, KeeperBotV2Config } from "./config.js";
-import { MetricsCollector, startMetricsServer } from "./metrics.js";
+import { MetricsCollector, startMetricsServer, ReadinessResult } from "./metrics.js";
 import { DatabaseClient } from "./db/client.js";
 import { TaskStateStore } from "./db/store.js";
 import { ExecutorRegistry } from "./executors/registry.js";
@@ -42,6 +44,26 @@ export * from "./db/store.js";
 export * from "./executors/interface.js";
 export * from "./executors/registry.js";
 export * from "./cli.js";
+
+/** Upper bound for the RPC call inside a readiness probe, in milliseconds. */
+const READINESS_RPC_TIMEOUT_MS = 3_000;
+
+/** Rejects if a promise does not settle within the given time. */
+function bounded<T>(work: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 class TtlExtensionExecutor implements TaskExecutor {
   public readonly taskType = "ttl_extension";
@@ -76,10 +98,12 @@ export class KeeperBotV2 {
 
   private isRunning = false;
   private metricsServer?: ReturnType<typeof startMetricsServer>;
+  private readonly rpcServer: rpc.Server;
 
   constructor(config: KeeperBotV2Config) {
     this.config = config;
     this.metrics = new MetricsCollector();
+    this.rpcServer = new rpc.Server(config.rpcUrl ?? NETWORK_PRESETS[config.network].rpcUrl);
     this.executorRegistry = new ExecutorRegistry(this.metrics);
 
     // Register built-in default executors
@@ -109,8 +133,9 @@ export class KeeperBotV2 {
     }
 
     if (this.config.metricsEnabled) {
-      this.metricsServer = startMetricsServer(this.metrics, this.config.metricsPort);
+      this.metricsServer = startMetricsServer(this.metrics, this.config.metricsPort, () => this.checkReadiness());
       console.log(`[KEEPER-BOT-V2] Prometheus metrics listening on :${this.config.metricsPort}/metrics`);
+      console.log(`[KEEPER-BOT-V2] Probes on :${this.config.metricsPort}/healthz and /readyz`);
     }
 
     if (this.config.runOnce) {
@@ -121,6 +146,32 @@ export class KeeperBotV2 {
     }
 
     this.scheduleNextRound();
+  }
+
+  /**
+   * Readiness is deliberately live: a cached "ready" result would keep a pod
+   * in service after its RPC provider or database disappears. Each probe
+   * rechecks both dependencies, and the metric server returns 503 with the
+   * collected reasons while either one is down.
+   */
+  private async checkReadiness(): Promise<ReadinessResult> {
+    const reasons: string[] = [];
+
+    try {
+      await bounded(this.rpcServer.getHealth(), READINESS_RPC_TIMEOUT_MS, "RPC health check timed out");
+    } catch (error) {
+      reasons.push(`RPC unreachable: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    if (this.dbClient) {
+      try {
+        await this.dbClient.query("SELECT 1");
+      } catch (error) {
+        reasons.push(`database unreachable: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    return { ready: reasons.length === 0, reasons };
   }
 
   public async runRound(): Promise<void> {
