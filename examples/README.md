@@ -14,8 +14,10 @@ A curated collection of runnable examples, reference implementations, and automa
 │   ─────────────────────      ────────────────────────────    ───────────────────────── │
 │   • local-quickstart         • batch-register                • keeper-bot-v2           │
 │   • keeper-bot               • ttl-extension                 • limit-order             │
-│                              • recurring-payment                                       │
+│   • owner-script             • recurring-payment             • governance-execution    │
 │                              • vesting-release                                         │
+│                              • auction-settlement                                      │
+│                              • dca                                                     │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -23,12 +25,16 @@ A curated collection of runnable examples, reference implementations, and automa
 | :--- | :---: | :---: | :--- | :--- |
 | [`local-quickstart`](./local-quickstart/) | 🟢 Beginner | Developers, Evaluators | One-command local network deployment, demo task execution | Docker, Node.js 18+ |
 | [`keeper-bot`](./keeper-bot/) | 🟢 Beginner | New Keeper Operators | Single-file polling bot, transaction simulation, claiming | Node.js 18+, Funded Stellar account |
+| [`owner-script`](./owner-script/) | 🟢 Beginner | Task Owners, Integrators | Minimal task owner lifecycle (<100 lines), deadline timeout handling | Node.js 18+, Owner wallet |
 | [`batch-register`](./batch-register/) | 🟡 Intermediate | dApp Owners, Protocols | Bulk task registration from CSV/JSON payloads | Node.js 18+, Owner wallet with XLM |
 | [`ttl-extension`](./ttl-extension/) | 🟡 Intermediate | Smart Contract Authors | State archival defense, persistent storage TTL renewal, owner cost model | Node.js 18+, Soroban CLI |
 | [`recurring-payment`](./recurring-payment/) | 🟡 Intermediate | SaaS, Subscription dApps | Subscription billing, double-payment prevention, automated next-task chaining | Node.js 18+, Token contract |
 | [`vesting-release`](./vesting-release/) | 🟡 Intermediate | DAOs, Token Teams | Autonomous keeper-triggered tranche releases, cliff gating, tranche boundaries | Node.js 18+, Token contract |
+| [`auction-settlement`](./auction-settlement/) | 🟡 Intermediate | NFT / Market Protocols | On-chain auction settlement after end time, relative deadline windows | Node.js 18+, Token contract |
+| [`dca`](./dca/) | 🟡 Intermediate | DeFi Traders, Investors | Dollar-cost averaging, fixed swap amount enforcement, owner cancellation | Node.js 18+, Token contract, DEX router |
 | [`keeper-bot-v2`](./keeper-bot-v2/) | 🔴 Advanced | Professional Operators | High-performance TypeScript bot, worker concurrency, Prometheus metrics, Postgres | Node.js 20+, Docker, PostgreSQL |
 | [`limit-order`](./limit-order/) | 🔴 Advanced | DeFi Protocols, Traders | On-chain price-threshold condition gating (epic E11), DEX swap slippage protection | Node.js 18+, Reflector Oracle, DEX Router |
+| [`governance-execution`](./governance-execution/) | 🔴 Advanced | DAOs, Governance Teams | Post-timelock governance proposal execution, premature execution defense | Node.js 18+, Governance contract |
 
 ---
 

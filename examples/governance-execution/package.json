@@ -1,0 +1,19 @@
+{
+  "name": "@soroban-keeper-network/example-governance-execution",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Example keeper-executed governance proposal task for Soroban Keeper Network",
+  "main": "src/governance-execution.js",
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "governance",
+    "timelock",
+    "proposal",
+    "keeper"
+  ],
+  "license": "Apache-2.0"
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@soroban-keeper-network/example-owner-script",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Minimal Node.js script template for Soroban Keeper Network task owners",
+  "main": "src/owner-script.js",
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "owner",
+    "script",
+    "template"
+  ],
+  "license": "Apache-2.0"
+}
