@@ -52,6 +52,34 @@ fn test_distribute_only_pulls_what_it_credits() {
     assert_eq!(s.treasury.recipient_balance(&r1), 3i128);
 }
 
+/// Issue #737: each recipient's share is floor-rounded, and the unallocated
+/// remainder is never pulled from the caller. With three equal recipients and
+/// 10 stroops, each gets 3, 9 are collected, and 1 stays with the caller
+/// rather than being stranded in the treasury.
+#[test]
+fn test_distribute_floor_rounding_leaves_dust_with_the_caller() {
+    let s = setup();
+    let mut recipients = soroban_sdk::Vec::new(&s.env);
+    for _ in 0..3 {
+        recipients.push_back(Address::generate(&s.env));
+    }
+    for recipient in recipients.iter() {
+        s.treasury.add_recipient(&s.admin, &recipient, &1u32);
+    }
+
+    let token = token::Client::new(&s.env, &s.token_id);
+    let caller_before = token.balance(&s.admin);
+
+    s.treasury.distribute(&s.admin, &10i128);
+
+    for recipient in recipients.iter() {
+        assert_eq!(s.treasury.recipient_balance(&recipient), 3i128);
+    }
+    assert_eq!(s.treasury.total_distributed(), 9i128);
+    assert_eq!(token.balance(&s.admin), caller_before - 9i128);
+    assert_eq!(token.balance(&s.treasury.address), 9i128);
+}
+
 #[test]
 fn test_distribute_rejects_non_positive_amount() {
     let s = setup();

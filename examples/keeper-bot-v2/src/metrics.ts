@@ -251,7 +251,20 @@ function escapeLabel(val: string): string {
   return val.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
 }
 
-export function startMetricsServer(collector: MetricsCollector, port = 9090): http.Server {
+/** Result of a readiness probe. Reasons are surfaced to the orchestrator. */
+export interface ReadinessResult {
+  ready: boolean;
+  reasons: string[];
+}
+
+/** Injected by the bot so probes can be tested without live RPC or Postgres. */
+export type ReadinessChecker = () => Promise<ReadinessResult>;
+
+export function startMetricsServer(
+  collector: MetricsCollector,
+  port = 9090,
+  readiness?: ReadinessChecker
+): http.Server {
   const server = http.createServer((req, res) => {
     if (req.url === "/metrics" || req.url === "/") {
       res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" });
@@ -259,6 +272,30 @@ export function startMetricsServer(collector: MetricsCollector, port = 9090): ht
     } else if (req.url === "/healthz") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
+    } else if (req.url === "/readyz") {
+      if (!readiness) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "not_ready", reasons: ["readiness checker is not configured"] }));
+        return;
+      }
+      Promise.resolve()
+        .then(() => readiness())
+        .then((result) => {
+          if (result.ready) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ status: "ready" }));
+          } else {
+            res.writeHead(503, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ status: "not_ready", reasons: result.reasons }));
+          }
+        })
+        .catch((error: unknown) => {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({
+            status: "not_ready",
+            reasons: [error instanceof Error ? error.message : String(error)],
+          }));
+        });
     } else {
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not Found");

@@ -111,7 +111,6 @@ impl KeeperRegistry {
             claim_ledger: None,
             lock_ledgers,
             verifier,
-            condition,
             condition: condition.clone(),
         };
         save_task(&e, task_id, &task);
@@ -442,7 +441,12 @@ impl KeeperRegistry {
         // into KeeperReward once its unlock_ledger passes undisputed.
         let window = dispute_window_ledgers(&e);
         if window > 0 {
-            add_pending_credit(&e, &keeper, task_id, keeper_net, window);
+            // A full pending list is finalized first by the helper; emit an
+            // event for each credit that moved into KeeperReward as a result.
+            let finalized = add_pending_credit(&e, &keeper, task_id, keeper_net, window)?;
+            for (finalized_id, amount) in finalized.iter() {
+                emit_rewards_finalized(&e, &keeper, finalized_id, amount);
+            }
         } else {
             credit_keeper(&e, &keeper, keeper_net)?;
         }

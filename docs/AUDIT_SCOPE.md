@@ -1,104 +1,116 @@
 # Audit Scope
 
-This is a minimal audit-scope document for `contracts/keeper-registry`,
-listing the surfaces an external auditor needs to review and the primary
-artifact(s) to start from for each. It exists ahead of epic E19 (Security
-& Audit Readiness) formally starting — security scope for shipped and
-in-flight code should not wait on an epic's scheduling — and it is meant
-to be extended, not treated as final, once E19 kicks off.
+This is the auditor-facing map of the shipped codebase. It supersedes the
+earlier registry-only scope note: it covers every contract crate, records the
+current size of each, and collects the known issues and accepted tradeoffs
+from every completed security review. It is a starting point, not a
+conclusion, and should be extended as new surfaces ship.
 
-## Scope items
+Snapshot: commit `22fc723` on `main`, refreshed for issue #736.
 
-| Surface | Primary artifacts | Status |
+Line counts use `src/**/*.rs` excluding files under `test/` or `tests/` and
+excluding `mocks.rs`. "Source" is the production surface an auditor reads;
+"tests" is the separate test-tree size, reported so growth in the test suite
+is not mistaken for growth in contract logic. Inline `#[cfg(test)]` modules
+that live in a production file are counted as source because they share the
+file with production code.
+
+## Contract crates
+
+| Crate / subcrate | Source lines | Test lines | Status | Primary artifacts |
+|---|---:|---:|---|---|
+| `contracts/keeper-registry` | 3,816 | 7,199 | Shipped, ABI version 7 | [`ARCHITECTURE.md`](ARCHITECTURE.md), [`STAKING_DESIGN.md`](STAKING_DESIGN.md), [`REPUTATION_DESIGN.md`](REPUTATION_DESIGN.md), [`TASK_CONDITIONS_DESIGN.md`](TASK_CONDITIONS_DESIGN.md), [`VERIFIER_DESIGN.md`](VERIFIER_DESIGN.md), `src/task.rs`, `src/staking.rs`, `src/batch.rs`, `src/views.rs` |
+| `contracts/treasury` | 848 | 1,403 | Shipped, ABI version 1 | [`TREASURY_DESIGN.md`](TREASURY_DESIGN.md), [`TREASURY_EVENTS.md`](TREASURY_EVENTS.md), `src/distribution.rs`, `src/internal.rs` |
+| `contracts/governance` | 3,161 | 373 | Shipped | [`GOVERNANCE_DESIGN.md`](GOVERNANCE_DESIGN.md), [`GOVERNANCE_AUDIT_SCOPE.md`](GOVERNANCE_AUDIT_SCOPE.md), `src/lib.rs` |
+| `contracts/governance-token` | 980 | 0 | Shipped | [`GOVERNANCE_DESIGN.md`](GOVERNANCE_DESIGN.md), `src/lib.rs` |
+| `contracts/conditions/oracle-deviation` | 252 | 0 | Shipped | [`TASK_CONDITIONS_DESIGN.md`](TASK_CONDITIONS_DESIGN.md), `src/lib.rs` |
+| `contracts/conditions/price-threshold` | 466 | 0 | Shipped | [`TASK_CONDITIONS_DESIGN.md`](TASK_CONDITIONS_DESIGN.md), `src/lib.rs` |
+| `contracts/conditions/time-window` | 354 | 0 | Shipped | [`TASK_CONDITIONS_DESIGN.md`](TASK_CONDITIONS_DESIGN.md), `src/lib.rs` |
+| `contracts/oracle-client` | 551 | 0 | Shipped | [`ORACLE_DESIGN.md`](ORACLE_DESIGN.md), `src/lib.rs` |
+| `contracts/verifiers/test-support` | 543 | 0 | Test support only, not a production verifier | [`VERIFIERS.md`](VERIFIERS.md), [`VERIFIER_DESIGN.md`](VERIFIER_DESIGN.md), `src/lib.rs` |
+
+The registry's verifier surface is shipped: `register_task` accepts an
+optional verifier address, `execute_task` calls `IKeeperVerifier` before
+crediting a keeper, and `update_verifier` lets the task owner change it.
+Reference verifier implementations remain catalogued as blocked in
+[`VERIFIERS.md`](VERIFIERS.md), and `contracts/verifiers/test-support` is the
+test harness, not an audited production verifier. Audit the trust boundary at
+the call site in `contracts/keeper-registry/src/verifier.rs` and
+`contracts/keeper-registry/src/task.rs` regardless of which verifier a task
+attaches.
+
+## Surface to artifact map
+
+| Surface | Start here |
+|---|---|
+| Task lifecycle and escrow (register, claim, execute, cancel, expire, withdraw) | [`ARCHITECTURE.md`](ARCHITECTURE.md) money invariants I-1 to I-7, `src/task.rs` |
+| Admin controls (pause, fee, sweep, transfer admin, upgrade) | [`ARCHITECTURE.md`](ARCHITECTURE.md) trust model, `src/admin.rs` |
+| Batch registration | [`BATCH_OPERATIONS.md`](BATCH_OPERATIONS.md), `src/batch.rs` |
+| TTL and archival | [`ARCHITECTURE.md`'s TTL section](ARCHITECTURE.md#ttl--archival-strategy), `src/internal.rs` |
+| Staking, unbonding, slashing and dispute windows | [`STAKING_DESIGN.md`](STAKING_DESIGN.md), [`STAKING_SECURITY_REVIEW.md`](STAKING_SECURITY_REVIEW.md), `src/staking.rs` |
+| Keeper reputation | [`REPUTATION_DESIGN.md`](REPUTATION_DESIGN.md), [`REPUTATION_SECURITY_REVIEW.md`](REPUTATION_SECURITY_REVIEW.md), `src/reputation.rs` |
+| Treasury fee routing and distribution | [`TREASURY_DESIGN.md`](TREASURY_DESIGN.md), [`TREASURY_EVENTS.md`](TREASURY_EVENTS.md), `sweep_fees` in registry `src/admin.rs` |
+| Governance and KPRS token | [`GOVERNANCE_AUDIT_SCOPE.md`](GOVERNANCE_AUDIT_SCOPE.md), [`GOVERNANCE_DESIGN.md`](GOVERNANCE_DESIGN.md) |
+| Verifier trust boundary | [`VERIFIER_DESIGN.md`](VERIFIER_DESIGN.md), [`VERIFIERS.md`](VERIFIERS.md), `src/verifier.rs`, the gate in `src/task.rs` |
+| Task conditions | [`TASK_CONDITIONS_DESIGN.md`](TASK_CONDITIONS_DESIGN.md), [`TASK_CONDITIONS_SECURITY_REVIEW.md`](TASK_CONDITIONS_SECURITY_REVIEW.md) |
+| Oracle client | [`ORACLE_DESIGN.md`](ORACLE_DESIGN.md), `contracts/oracle-client/src/lib.rs` |
+
+The verifier surface is the one trust boundary where the registry calls code
+it does not control, on a path that decides whether a keeper is paid. An
+auditor should confirm that the `try_verify` call in `execute_task` runs
+strictly before any reward crediting or task status mutation, and that its
+return value only gates an `if` branch rather than receiving any capability to
+move funds. Reference verifier implementations remain absent; the threat-model
+write-up scoped as issue 0089 was never written, so
+[`VERIFIER_DESIGN.md`](VERIFIER_DESIGN.md)'s failure-semantics and trust-model
+sections are the starting point for that analysis.
+
+## Money and state invariants
+
+The registry's seven numbered money invariants remain the primary correctness
+statement, in [`ARCHITECTURE.md`](ARCHITECTURE.md) and the property tests in
+`contracts/keeper-registry/src/invariants.rs`. The treasury's T-1 solvency
+statement is in [`TREASURY_DESIGN.md`](TREASURY_DESIGN.md) section 6 and is
+exercised by `contracts/treasury/src/test/conservation.rs`. A consolidated
+invariants reference is being added under issue #734; until it merges on
+`main`, read the design document and the property tests directly.
+
+## Known issues and accepted tradeoffs by review
+
+| Surface | Review | Known issues and accepted tradeoffs |
 |---|---|---|
-| Task lifecycle & escrow (register / claim / execute / cancel / expire / withdraw) | [`docs/ARCHITECTURE.md`](ARCHITECTURE.md)'s money invariants `I-1`–`I-7`, `contracts/keeper-registry/src/task.rs` | Shipped |
-| Admin controls (pause, fee, sweep, transfer-admin, upgrade) | [`docs/ARCHITECTURE.md`](ARCHITECTURE.md)'s trust model, `contracts/keeper-registry/src/admin.rs` | Shipped |
-| Batch registration | [`docs/BATCH_OPERATIONS.md`](BATCH_OPERATIONS.md), `contracts/keeper-registry/src/batch.rs` | Shipped |
-| TTL / archival | [`docs/ARCHITECTURE.md`](ARCHITECTURE.md#ttl--archival-strategy), `contracts/keeper-registry/src/internal.rs` | Shipped |
-| Staking, unbonding, slashing, and dispute windows (epic E06) | [`docs/STAKING_DESIGN.md`](STAKING_DESIGN.md) for design intent, [`docs/STAKING_SECURITY_REVIEW.md`](STAKING_SECURITY_REVIEW.md) for the completed security review (issue #439), `contracts/keeper-registry/src/staking.rs` | Shipped; security review complete (three findings fixed, two confirmed not to apply — one open recommendation for a stronger authorization gate on `slash` specifically before a mainnet deployment carrying meaningful value, see the review's Finding 4) |
-| Keeper reputation (epic E07) | [`docs/REPUTATION_DESIGN.md`](REPUTATION_DESIGN.md) for design intent, [`docs/REPUTATION_SECURITY_REVIEW.md`](REPUTATION_SECURITY_REVIEW.md) for the completed security review (issue #464), `contracts/keeper-registry/src/reputation.rs` | Shipped as an informational score; security review complete. Three open known limitations: self-dealing inflates the score at no cost, decay resets on any action, and an eligibility floor penalizes risk-taking. Keep any reputation floor at 0 until the review's Finding 1 mitigation ships |
-| Treasury fee routing (epic E08) | [`docs/TREASURY_DESIGN.md`](TREASURY_DESIGN.md) (solvency invariant T-1, §6), `contracts/treasury/src/lib.rs`, and `sweep_fees` in `contracts/keeper-registry/src/admin.rs` | Distribution splits implemented (issue #468); `sweep_fees` unchanged, which the design confirms (issue #469); closing security review pending (backlog 0358) |
-| **Governance and KPRS token (epic E09)** | See [`docs/GOVERNANCE_AUDIT_SCOPE.md`](GOVERNANCE_AUDIT_SCOPE.md) | **Proposed — not yet implemented** |
-| **Verifier integration (epic E04)** | See below | **Proposed — not yet implemented** |
+| Staking, unbonding, slashing, execution dispute window | [`STAKING_SECURITY_REVIEW.md`](STAKING_SECURITY_REVIEW.md) | Three findings fixed with tests: slash can draw from pending unbond, dispute-window boundary made inclusive on both sides, and `raise_slash_appeal` renews TTL. Accepted risk: `slash` is protected by a single admin key; a future multisig or timelock gate on `slash` specifically is recommended before a deployment carrying meaningful value. The appeal process cannot stall a legitimate slash because the slash executes first. |
+| Keeper reputation | [`REPUTATION_SECURITY_REVIEW.md`](REPUTATION_SECURITY_REVIEW.md) | Three open limitations: low-cost self-dealing inflates the score, decay resets on any action so timing holds a score indefinitely, and an eligibility floor penalizes risk-taking and shuts out new keepers. Treat `score_bps` and `effective_reputation` as unauthenticated, self-reportable data until the self-dealing mitigation ships. Keep any reputation floor at 0 until then. |
+| Treasury distribution | [`TREASURY_SECURITY_REVIEW.md`](TREASURY_SECURITY_REVIEW.md) | Three concerns checked and found not to apply: recipient reconfiguration cannot strand in-flight funds, upgrade cannot bypass conservation, and the treasury has no path into registry escrow. No open finding. Pro-rata dust is bounded and never collected. |
+| Governance and KPRS token | [`GOVERNANCE_SECURITY_REVIEW.md`](GOVERNANCE_SECURITY_REVIEW.md) | Review is specification-based, not code-based. Open items: state the plutocracy risk and voting threshold explicitly, verify the governance address before `transfer_admin`, define proposal execution ordering, and test timelock boundaries. Accepted tradeoffs: no hard cap on voting power, permissionless execution after timelock, and no emergency veto. Migration to governance is irreversible. |
+| Task conditions | [`TASK_CONDITIONS_SECURITY_REVIEW.md`](TASK_CONDITIONS_SECURITY_REVIEW.md) | Accepted limitation: a task owner can attach a verifier or condition that excludes specific keepers, mitigated by advisory curated-verifier guidance, pre-claim simulation, event accountability, and bot policies. Panics are isolated and treated as verification failure. Verifier observation is not a front-running vector because events are already public. The `is_claimable` gap remains a named backlog item. |
+| Indexer API | [`INDEXER_SECURITY_REVIEW.md`](INDEXER_SECURITY_REVIEW.md) | Three high findings with scoped follow-ups: API-key rate-limit buckets can be minted before authentication (#579), unbounded history work and arbitrary leaderboard windows (#580), and WebSocket connections are not bounded (#581). The API is not approved for general availability until those are closed or explicitly replaced. No SQL injection or private-data disclosure was found. |
+| Keeper bot v2 | [`KEEPER_BOT_V2_SECURITY_REVIEW.md`](KEEPER_BOT_V2_SECURITY_REVIEW.md) | All six findings resolved by design: localhost or UNIX-socket binding and secret-safe metrics labels, read-only inspection interface, no secrets in persisted state, file permissions and optional encryption at rest, in-memory-only secret hydration with log scrubbing, and secret-manager errors logged without response bodies. |
 
-## Verifier surface (epic E04)
+## Related operational documents
 
-Epic E04 adds a meaningfully new trust boundary: an arbitrary,
-task-owner-chosen third-party contract (`IKeeperVerifier`) called from
-`execute_task`. That is a different threat model from every other surface
-in this table — the registry executes code it does not control, on a path
-that gates whether a keeper gets paid — and it must be named explicitly
-here rather than assumed to be covered by a general "review the contract"
-instruction.
-
-**Current implementation status, as of this writing:** the verifier
-feature exists only as a design record. `docs/VERIFIER_DESIGN.md` (issue
-0071) documents the proposed `IKeeperVerifier` interface and its status is
-explicitly "Proposed." No contract code implements it yet — there is no
-`IKeeperVerifier` trait, no `Task.verifier` field, no `verifier` parameter
-on `register_task`, and `execute_task` never calls out to a verifier. The
-only trace of the feature in shipped code today is a reserved error
-discriminant, `KeeperError::IncompatibleVerifierInterface = 20` in
-`contracts/keeper-registry/src/errors.rs`, held aside so a future PR does
-not have to renumber existing variants. An auditor reviewing `main` today
-will not find this surface in the compiled contract — but reviewing the
-design now, before implementation lands, is exactly what lets the design
-itself be audited before code is built on top of it.
-
-The primary artifacts an auditor should start from, once this lands (and
-should review as design intent in the meantime):
-
-- **Interface** — [`docs/VERIFIER_DESIGN.md`](VERIFIER_DESIGN.md) (issue
-  0071): the `IKeeperVerifier` trait shape, why `keeper` is part of the
-  signature, and the six numbered design decisions (interface shape,
-  failure semantics, resource budget, attachment timing, trust model,
-  backward compatibility).
-- **Reference implementations** — the signature, oracle, and
-  tx-inclusion verifiers (issues 0077, 0078, 0079). **Not yet
-  implemented** — there is no `IKeeperVerifier` implementation anywhere
-  in `contracts/` today (also noted in
-  [`docs/VERIFIERS.md`](VERIFIERS.md)'s resource-cost catalog, which is
-  blocked on the same absence). Once any of these land, this scope item
-  should be updated with a link to each implementation.
-- **Failure-handling policy** — covered within
-  [`docs/VERIFIER_DESIGN.md`'s §2 "Failure semantics"](VERIFIER_DESIGN.md)
-  (issue 0075): a panicking or `false`-returning verifier both map to
-  `KeeperError::VerificationFailed` via `try_invoke_contract`, never a
-  transaction-wide revert, and task state is left unchanged either way. A
-  dedicated failure-handling document does not exist separately from this
-  section.
-- **Security-considerations write-up** — issue 0089 (the threat-model
-  write-up covering the griefing vector, panic isolation, resource-budget
-  cost transfer, and whether a malicious verifier could steal funds
-  outright). **Not yet written.** This is a real gap in scope, not filled
-  by this document: 0089 requires 0074/0075/0076 to exist first (per its
-  own `depends_on`), and none of those have landed. Until it exists, an
-  auditor's starting point for the verifier surface's threat model is
-  `docs/VERIFIER_DESIGN.md`'s §2 (failure semantics) and §5 (trust model)
-  sections directly, which reason informally about the same questions
-  0089 is meant to formalize.
-
-**What an auditor should confirm once the surface is implemented**,
-per `docs/VERIFIER_DESIGN.md`'s own reasoning: that the verifier call in
-`execute_task` happens strictly before any reward-crediting or task-status
-mutation, and that its return value only gates an `if`-branch rather than
-being handed any capability to move funds, credit a keeper balance, or
-mutate a `Task` field itself. This is the substance behind backlog issue
-0132's planned invariant (a verifier can gate a payout but never move
-funds itself) — not yet a numbered invariant in
-[`docs/ARCHITECTURE.md`](ARCHITECTURE.md), since the code it would
-describe does not exist yet either.
+- [`SECURITY_ARITHMETIC_REVIEW.md`](SECURITY_ARITHMETIC_REVIEW.md): checked
+  arithmetic, rounding direction, and bounded iteration in the registry and
+  treasury (issues #737 and #738).
+- [`OBSERVABILITY_RETROSPECTIVE.md`](OBSERVABILITY_RETROSPECTIVE.md): what
+  epic E18 shipped, implemented in open PRs, and deferred (issue #732).
+- [`CI.md`](CI.md): why workspace-wide Cargo commands currently fail on
+  pre-existing duplicate manifest keys and how verification is performed.
 
 ## Out of scope
 
-- `examples/keeper-bot/` and `examples/batch-register/` — illustrative
-  off-chain code, not production infrastructure (per
-  [`SECURITY.md`](../SECURITY.md)'s "Out of Scope" section).
+- `examples/keeper-bot/` and `examples/batch-register/` are illustrative
+  off-chain code, not production infrastructure, per
+  [`SECURITY.md`](../SECURITY.md)'s "Out of Scope" section. The indexer and
+  keeper bot v2 are covered through their own review documents above, not as
+  contract crates.
 - Theoretical attacks with no practical exploit path.
 
 ## Maintaining this document
 
-Extend the table above as new surfaces ship or as epic E19 defines a
-fuller audit process. Update the verifier row's "Status" once
-0072–0096 land, and fill in the reference-implementation and
-security-considerations links as those issues close.
+Recount source and test lines whenever a contract crate gains or loses a
+production file, and update the snapshot commit. When an epic security review
+lands, add its known issues and accepted tradeoffs to the table above rather
+than leaving them only in the epic document. Update the verifier status once
+reference implementations land, and fold in the consolidated invariants
+reference when issue #734 merges.
