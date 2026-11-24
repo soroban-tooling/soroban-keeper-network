@@ -6,6 +6,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — docs link checking and task lifecycle guide
+
+- `scripts/check-md-links.py`: dependency-free checker for relative links and
+  `#anchors` in every tracked Markdown file, run on every PR by the new
+  `markdown-links` job in `pr-hygiene.yml`. External links are checked weekly by
+  `link-check-external.yml`. See `docs/CI.md`.
+- `docs/TASK_LIFECYCLE.md`: state diagram, guards, entry points, emitted events,
+  lock-window and deadline rules, and per-transition costs for the five task states.
+- Repaired `.github/workflows/pr-hygiene.yml`, which had duplicate top-level
+  `on`/`permissions`/`jobs` keys and a truncated `changelog` job from an earlier
+  merge, so GitHub never loaded it and none of its jobs ran.
+- Fixed 14 existing broken relative links and anchors in Markdown files found by
+  the new checker.
+### Added — documentation site and integration guide (E20, E22)
+
+- `docs/site/`: an mdBook documentation site that groups the existing Markdown
+  into Concepts, Guides, Reference and Operations without moving any source
+  file. Build it with `make docs`.
+- `.github/workflows/docs.yml`: builds the site on pull requests that touch the
+  docs and deploys it to GitHub Pages on pushes to `main`.
+- `docs/INTEGRATION_GUIDE.md`: decision guide for protocol teams, with a worked
+  reward-sizing calculation.
+- `examples/README.md`: examples index and epic E22 retrospective.
+- Fixed a broken relative link in `docs/GOVERNANCE_TESTNET_REPORT.md`.
+
+### Added - bounded execution dispute credits (VERSION bumped to 7)
+
+- `PendingReward` is capped at `MAX_PENDING_CREDITS` (50). When the cap is
+  reached, `execute_task` finalizes matured credits before appending a new
+  one, and returns `TooManyPendingCredits` if no slot can be freed.
+- New read-only `max_pending_credits` view lets bots preflight the cap.
+- Matured credits are credited to `KeeperReward` in one storage write, with
+  one `RewardsFinalized` event per credit.
+- `VERSION` bumped from 6 to 7. No existing entry point signature changed.
+
 ### Added — optional on-chain condition parameter (VERSION bumped to 6)
 
 - `register_task` now takes a required tenth parameter, `condition: Option<Address>`.

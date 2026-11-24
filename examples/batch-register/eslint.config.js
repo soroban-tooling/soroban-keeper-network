@@ -4,7 +4,7 @@ module.exports = [
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "commonjs",
-      globals: { require: "readonly", module: "writable", process: "readonly", console: "readonly", Buffer: "readonly", setTimeout: "readonly", BigInt: "readonly" },
+      globals: { require: "readonly", module: "writable", process: "readonly", __dirname: "readonly", console: "readonly", Buffer: "readonly", setTimeout: "readonly", BigInt: "readonly" },
     },
     rules: {
       // Same small, non-stylistic ruleset as examples/keeper-bot — this is an

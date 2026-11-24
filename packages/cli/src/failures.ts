@@ -11,6 +11,7 @@ import { explainContractError } from "./errors.js";
 import { EXIT } from "./exitCodes.js";
 import { KeyError } from "./keys.js";
 import { fail, usage, type RunResult } from "./output.js";
+import { redactSecrets } from "./redact.js";
 import { SettingsError } from "./settings.js";
 
 /**
@@ -27,17 +28,17 @@ export function commandError(err: unknown, json: boolean): RunResult {
       ? `${help.name}: ${help.message} (${err.message})`
       : `${help.name}: ${help.message}`;
     if (err.code === KeeperErrorCode.TaskNotFound) {
-      return fail(EXIT.notFound, "NOT_FOUND", fullMessage, json, detail);
+      return fail(EXIT.notFound, "NOT_FOUND", redactSecrets(fullMessage), json, detail);
     }
-    return fail(EXIT.contract, "CONTRACT_ERROR", fullMessage, json, detail);
+    return fail(EXIT.contract, "CONTRACT_ERROR", redactSecrets(fullMessage), json, detail);
   }
   if (err instanceof treasury.TreasuryContractError) {
     const name = treasury.TreasuryErrorCode[err.code] ?? `TreasuryError(${err.code})`;
     const detail = { contractError: name, errorCode: err.code };
-    return fail(EXIT.contract, "CONTRACT_ERROR", `${name}: ${err.message}`, json, detail);
+    return fail(EXIT.contract, "CONTRACT_ERROR", redactSecrets(`${name}: ${err.message}`), json, detail);
   }
   if (err instanceof KeeperRpcError || err instanceof treasury.TreasuryRpcError) {
-    return fail(EXIT.rpc, "RPC_ERROR", err.message, json);
+    return fail(EXIT.rpc, "RPC_ERROR", redactSecrets(err.message), json);
   }
   if (
     err instanceof UsageError ||
@@ -47,15 +48,15 @@ export function commandError(err: unknown, json: boolean): RunResult {
     err instanceof KeeperSdkError ||
     err instanceof treasury.TreasurySdkError
   ) {
-    return usage(err.message, json);
+    return usage(redactSecrets(err.message), json);
   }
   if (isParseError(err)) {
-    return usage(err.message, json);
+    return usage(redactSecrets(err.message), json);
   }
   return fail(
     EXIT.internal,
     "INTERNAL_ERROR",
-    err instanceof Error ? err.message : String(err),
+    redactSecrets(err instanceof Error ? err.message : String(err)),
     json,
   );
 }

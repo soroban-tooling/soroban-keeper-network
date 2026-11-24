@@ -3,6 +3,7 @@
 //! One module per area of behaviour, mirroring the source layout, so two
 //! contributors adding tests in different areas edit different files.
 
+mod access_control;
 mod admin;
 mod batch;
 mod batch_reads;
@@ -10,6 +11,7 @@ mod cancel;
 mod claim;
 mod common;
 mod condition;
+mod cross_contract;
 mod events;
 mod expire;
 mod fee_accrual;
@@ -23,6 +25,7 @@ mod reputation;
 mod resource_report;
 mod reward_split;
 mod staking;
+mod storage_layout;
 mod ttl;
 mod verifier;
 mod withdraw;
