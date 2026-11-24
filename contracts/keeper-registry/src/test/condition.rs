@@ -25,10 +25,6 @@ struct TaskBeforeConditions {
     lock_ledgers: u32,
     verifier: Option<Address>,
 }
-use soroban_sdk::{contract, contractimpl, testutils::Address as _, Address ,Bytes,  Env};
-
-use super::common::*;
-use crate::{KeeperError, TaskStatus, TaskType};
 
 #[contract]
 struct TestCondition;

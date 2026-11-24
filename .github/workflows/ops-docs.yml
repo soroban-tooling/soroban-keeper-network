@@ -1,0 +1,29 @@
+name: Ops docs (advisory)
+
+# Advisory check for the observability plan. Kept in its own workflow so the
+# dashboards and alerts PR (issue #719) can own the ci.yml promtool job without
+# both PRs editing the same file.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observability-doc:
+    name: Observability doc consistency (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Check canonical metric and alert names
+        run: node scripts/check-observability-doc.mjs

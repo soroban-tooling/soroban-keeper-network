@@ -78,7 +78,7 @@ Either a bare array or `{ "tasks": [ … ] }`. See
       "task_type": "Liquidation",
       "calldata": "6c69717569646174653a706f736974696f6e3a31303431",
       "reward": "1000000",
-      "deadline": "1790000000",
+      "deadline": "4102444800",
       "ttl_ledgers": 17280,
       "lock_ledgers": 120
     }
@@ -93,7 +93,7 @@ Header row required; `#` comment lines and blank lines are ignored. See
 
 ```csv
 label,task_type,calldata,reward,deadline,ttl_ledgers,lock_ledgers
-liquidate-position-1041,Liquidation,6c6971…3431,1000000,1790000000,17280,120
+liquidate-position-1041,Liquidation,6c6971…3431,1000000,4102444800,17280,120
 ```
 
 The CSV reader is deliberately minimal (comma-separated, optional double
@@ -114,6 +114,111 @@ surface than it removes. Use JSON if your calldata needs embedded newlines.
 | `lock_ledgers` | integer | Ledgers the claiming keeper holds exclusively. Must be in `[12, 17280]`. |
 
 Underscores in numeric fields (`1_000_000`) are accepted and stripped.
+
+## Recipes
+
+Each recipe ships a sample input under [`recipes/`](recipes) that passes
+`--dry-run`. A test (`npm test`) re-runs that dry run for every sample, so the
+files cannot silently go stale. The samples use a deadline in the year 2100 so
+they stay valid; for real use, generate deadlines relative to the current time
+(see [staggered deadlines](#recipe-staggered-deadlines)).
+
+All commands below run from `examples/batch-register` with
+`REGISTRY_CONTRACT_ID` set. `--dry-run` does not need `OWNER_SECRET_KEY`.
+
+### Recipe: many TTL extensions
+
+Use case: keep a set of your own storage entries alive by registering one
+`TtlExtension` task per entry. [`recipes/ttl-extensions.json`](recipes/ttl-extensions.json)
+has 12 entries that differ only in `label` and `calldata`.
+
+```bash
+node index.js recipes/ttl-extensions.json --dry-run
+node index.js recipes/ttl-extensions.json
+```
+
+- Shared fields (`task_type`, `reward`, `deadline`, `ttl_ledgers`,
+  `lock_ledgers`) repeat on every row. Generate the file from your own list of
+  storage keys rather than editing it by hand.
+- Keep `reward` just above the registry's `min_reward`. The dry run reads it
+  from the chain only when `OWNER_SECRET_KEY` is set; with a key, a reward
+  below `min_reward` is reported locally for every offending entry at once.
+- Lists longer than the registry's `max_batch_size()` are split into several
+  atomic transactions automatically. See
+  [Chunking](#chunking-and-the-batch-size-ceiling).
+
+### Recipe: staggered deadlines
+
+Use case: spread tasks over time so they do not all expire at the same moment.
+[`recipes/staggered-deadlines.csv`](recipes/staggered-deadlines.csv) gives
+eight `LiquidityRebalance` tasks whose deadlines are one hour apart.
+
+```bash
+node index.js recipes/staggered-deadlines.csv --dry-run
+```
+
+The sample deadlines are fixed placeholders. To stagger from the current time,
+generate the column when you build the file, for example:
+
+```bash
+node -e '
+const start = Math.floor(Date.now() / 1000) + 3600; // first deadline: +1 h
+const step = 3600;                                  // one hour apart
+for (let i = 0; i < 8; i++) console.log(start + i * step);
+'
+```
+
+Deadlines must be in the future when the transaction is submitted, so leave
+margin for review time. The dry run rejects any entry whose deadline has
+already passed, and reports all of them at once.
+
+### Recipe: recovering from a partially failed batch
+
+Each chunk is its own atomic transaction (see
+[Chunking](#chunking-and-the-batch-size-ceiling)): a chunk either registers
+every entry or none. A *list* spanning several chunks can therefore land
+partway. Files for this recipe are in
+[`recipes/partial-failure/`](recipes/partial-failure): `batch.json` is the
+original 6-entry list and `batch.remaining.json` is what you would resubmit if
+the first 3 entries had landed.
+
+When a chunk fails, the script prints which chunks already landed, which chunk
+registered nothing, and which entries to resubmit (`entries N..M`), followed by
+the table of task ids it did register. To resume safely:
+
+1. **Do not rerun the original file.** Registration is not idempotent: running
+   it again would register the landed entries a second time and escrow their
+   rewards twice.
+2. **Save the task-id table the script printed.** It maps each registered task
+   to its `label`. Task ids are the only link between your list and the chain.
+3. **Check the failed chunk really failed.** If the error says
+   `Transaction <hash> failed: NOT_FOUND`, the script gave up polling but the
+   transaction may still land later. Look the hash up on a block explorer or
+   via RPC `getTransaction` and wait until it is `SUCCESS` or `FAILED` (or has
+   expired) before continuing. Resubmitting while the first attempt is still
+   pending can register the same entries twice. A `Simulation failed` or
+   `Send failed` error means nothing was submitted.
+4. **Fix the cause.** Typical causes are an entry the contract rejects, a
+   registry that is paused, or an owner balance that does not cover the chunk.
+5. **Build the resume file** from the entries that did not land, keeping their
+   original order. Using `jq`:
+
+   ```bash
+   # Entries 4..6 of the original list (the script's "entries 4..6" message).
+   jq '{tasks: .tasks[3:]}' recipes/partial-failure/batch.json > batch.remaining.json
+   ```
+
+6. **Dry-run, then submit:**
+
+   ```bash
+   node index.js recipes/partial-failure/batch.remaining.json --dry-run
+   node index.js recipes/partial-failure/batch.remaining.json
+   ```
+
+If you are unsure what landed, call `skn task view <task-id>` for the ids you
+hold, or read the registry's task events, before building the resume file. When
+in doubt, resubmit fewer entries: a task you forgot to register can be added
+later, but a duplicate costs you a `cancel_task` and a refund round trip.
 
 ## How `max_total_reward` is set — and why
 

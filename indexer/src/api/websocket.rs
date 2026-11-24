@@ -95,6 +95,10 @@ pub async fn subscribe(
 }
 
 async fn handle_socket(socket: WebSocket, state: ApiState, query: SubscribeQuery) {
+    // Count from the moment the upgrade succeeds. The guard decrements on
+    // every return path, including a rejected filter or a dropped client.
+    let _connections = state.metrics.websocket_connected();
+
     // Subscribe before replaying: an event ingested during the replay is then
     // buffered on the channel rather than falling into the gap between the
     // replay's last row and the live feed's first.
