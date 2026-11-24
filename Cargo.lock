@@ -1577,6 +1577,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "keeper-registry-test-support"
+version = "0.1.0"
+dependencies = [
+ "keeper-registry",
+ "soroban-sdk",
+ "soroban-token-sdk",
+]
+
+[[package]]
 name = "keeper-treasury"
 version = "0.1.0"
 dependencies = [
@@ -3082,6 +3091,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "soroban-token-sdk"
+version = "22.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0beb76f6bf6871287c688bfb0e5f24c19448e46c7bb2b6b596f7baf0455bdb69"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "soroban-wasmi"
 version = "0.31.1-soroban.20.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3411,6 +3429,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "task-bound-verifier"
+version = "0.1.0"
+dependencies = [
+ "keeper-registry-test-support",
+ "soroban-sdk",
 ]
 
 [[package]]
