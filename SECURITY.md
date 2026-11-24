@@ -14,8 +14,10 @@
 
 ### Responsible Disclosure Process
 
-1. **Email** your report to: `security@soroban-keeper.network`  
-   *(Until the domain is registered, DM `@Andreschuks101` on GitHub with subject line: `[SECURITY] Keeper Network`)*
+1. **Use GitHub's Private Vulnerability Reporting** to submit your report:
+   - Go to the [Security advisories](https://github.com/Clinton6801/soroban-keeper-network/security/advisories) page
+   - Click "Report a vulnerability"
+   - Or email: `security@soroban-keeper.network`
 
 2. **Include** in your report:
    - A description of the vulnerability
@@ -75,6 +77,13 @@ The KeeperRegistry contract follows these security principles:
 
 3. **Oracle-less deadline enforcement** — Deadlines are compared against `env.ledger().timestamp()` which is set by the Stellar consensus network. This is a trust assumption on the Stellar validator set (acceptable for this use case).
 
+## Security Contact
+
+For any security-related inquiries or to report a vulnerability, please use one of these channels (in order of preference):
+
+1. **GitHub Private Vulnerability Reporting** (recommended): https://github.com/Clinton6801/soroban-keeper-network/security/advisories
+2. **Email**: `security@soroban-keeper.network`
+
 ## Bug Bounty
 
 A formal bug bounty program will be announced after the first production deployment and audit. Until then, we offer:
@@ -90,3 +99,7 @@ A formal bug bounty program will be announced after the first production deploym
 | Planned Q4 2026 | TBD | `keeper-registry` v1.0 | TBD |
 
 Pre-audit internal reviews are tracked in GitHub Issues with the `security` label.
+
+## Security.txt
+
+A `security.txt` file will be published at `/.well-known/security.txt` on any official hosted website or service associated with this project, following [RFC 9116](https://tools.ietf.org/html/rfc9116). For now, this document and GitHub's private vulnerability reporting serve as the security contact point.

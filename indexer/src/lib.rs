@@ -38,6 +38,7 @@ pub mod cache;
 pub mod config;
 pub mod events;
 pub mod ingest;
+pub mod metrics;
 pub mod progress;
 pub mod queries;
 pub mod reorg;
@@ -52,7 +53,7 @@ pub use alerts::{
     WebhookTransport,
 };
 pub use backfill::Backfiller;
-pub use config::Config;
+pub use config::{Config, LogFormat};
 pub use events::{EventPayload, EventType, IndexedEvent};
 pub use ingest::Ingestor;
 pub use progress::{IngestionProgress, ProgressSnapshot};

@@ -73,10 +73,6 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .primary-button, .action-row button { min-height: 38px; border: 0; border-radius: 5px; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 15px; white-space: nowrap; }
 .primary-button svg, .action-row button svg { width: 17px; height: 17px; }
 .field-error { color: #b33b3b; }.success { color: var(--accent); }.form-note { color: var(--ink-muted); font-size: 13px; }
-.danger-text { color: #b33b3b; }
-.back-link { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 20px; text-decoration: none; }.back-link svg { width: 17px; }
-.live-mark,.stale-mark { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-muted); white-space: nowrap; }.live-mark span { width: 8px; height: 8px; border-radius: 50%; background: #14835e; }.stale-mark { color: #9b5b14; }.stale-mark svg { width: 17px; }
-.timeline { list-style: none; margin: 0; padding: 4px 0 0 10px; border-left: 1px solid var(--line); }.timeline li { position: relative; padding: 0 0 24px 22px; }.timeline-dot { position: absolute; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); left: -5px; top: 5px; }.timeline li div { display: grid; gap: 4px; }.timeline li strong { text-transform: capitalize; }.timeline li span,.timeline li code { color: var(--ink-muted); font-size: 12px; }
 .action-panel { margin: 30px 0; border-block: 1px solid var(--line); padding-bottom: 18px; }
 .action-row { display: grid; grid-template-columns: minmax(140px, 1fr) repeat(4, auto); gap: 10px; align-items: end; }
 .owner-actions { display: grid; grid-template-columns: minmax(150px, 1fr) auto minmax(190px, 1fr) auto auto; align-items: end; gap: 10px; }

@@ -32,17 +32,26 @@
  *     execution is dispatched per task_type to a registered executor, and
  *     execute_task is never submitted for a task type with no executor or
  *     whose executor could not complete the work
+ *   - An optional Prometheus metrics endpoint, disabled unless METRICS_PORT
+ *     is set (see metrics.js and docs/OBSERVABILITY.md)
  *
  * Production keepers should additionally add:
  *   - Persistent task state DB (SQLite / Redis) to avoid double-claiming
  *   - MEV-aware submission (bundle multiple tasks)
- *   - Prometheus metrics endpoint
  *   - Alerting (PagerDuty / Telegram) on missed executions
+ *
+ * For production, put an authenticating reverse proxy or a tunnel in front
+ * of the metrics endpoint: it binds to loopback only and is unauthenticated.
  */
 
 "use strict";
 
 require("dotenv").config();
+
+// Dependency-free metrics collector and HTTP server. Importing this module has
+// no side effects: the endpoint is only started in main() when configured.
+const { MetricsCollector, startMetricsServer } = require("./metrics.js");
+const metrics = new MetricsCollector();
 
 // `rpc` is the Soroban RPC namespace. It was called `SorobanRpc` until
 // @stellar/stellar-sdk v16 dropped that alias — destructuring the old name
@@ -365,6 +374,17 @@ async function validateAndLoadConfig() {
       validate: { fn: (v) => v >= 0n, reason: "must be >= 0" },
       fallback: 0n,
     }),
+    // Opt-in Prometheus endpoint. Unset means disabled; setting a valid port
+    // enables GET /metrics on 127.0.0.1 only. One variable controls both, so
+    // the beginner example stays simple.
+    metricsPort: requireEnv("METRICS_PORT", {
+      parse: (v) => Number.parseInt(v, 10),
+      validate: {
+        fn: (v) => Number.isInteger(v) && v >= 1 && v <= 65535,
+        reason: "must be an integer between 1 and 65535",
+      },
+      fallback: null,
+    }),
   };
 }
 
@@ -558,6 +578,7 @@ async function fetchPendingTasks(server, contractId, startLedger) {
     return tasks;
   } catch (err) {
     console.warn("Failed to fetch events:", err.message);
+    metrics.recordRpcError(err);
     return [];
   }
 }
@@ -995,6 +1016,7 @@ async function evaluateCandidateBatch(tasks, nowSeconds, evaluationContext) {
   for (const task of tasks) {
     // Skip expired tasks immediately (no evaluation cost)
     if (task.deadline <= nowSeconds) {
+      metrics.recordSkip("expired");
       continue;
     }
 
@@ -1027,6 +1049,7 @@ async function evaluateCandidateBatch(tasks, nowSeconds, evaluationContext) {
       const support = checkVerifierSupport(evaluatedTask, simulateExecution);
       if (!support.supported) {
         // Skip unsupported tasks silently during batch evaluation
+        metrics.recordSkip("unsupported_verifier");
         continue;
       }
 
@@ -1046,6 +1069,7 @@ async function evaluateCandidateBatch(tasks, nowSeconds, evaluationContext) {
 
       if (candidateProof === null || candidateProof === undefined) {
         // Skip tasks that cannot generate valid proofs
+        metrics.recordSkip("no_proof");
         continue;
       }
 
@@ -1070,6 +1094,8 @@ async function evaluateCandidateBatch(tasks, nowSeconds, evaluationContext) {
       console.warn(
         `  Failed to evaluate task ${task.taskId}: ${err.message}`
       );
+      metrics.recordSkip("evaluation_error");
+      metrics.recordRpcError(err);
     }
   }
 
@@ -1095,6 +1121,7 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
   const summary = { processed: 0, errors: [], decisions: [], skipped: 0 };
   let newEmptyRounds = emptyRounds;
   const server = client.getServer();
+  metrics.recordRound();
 
   try {
     const nowSeconds = Math.floor(Date.now() / 1000);
@@ -1115,6 +1142,7 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
     console.log(
       `  Found ${pendingTasks.length} TaskRegistered events to evaluate`
     );
+    metrics.recordEvaluation(pendingTasks.length);
 
     if (pendingTasks.length === 0) {
       newEmptyRounds++;
@@ -1182,6 +1210,7 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
           client.claimTask({ keeper: keypair.publicKey(), taskId: candidate.taskId })
         );
         console.log(`  Task ${candidate.taskId} claimed!`);
+        metrics.recordClaim();
 
         await withRetry(`execute_task ${candidate.taskId}`, () =>
           client.executeTask({
@@ -1193,11 +1222,13 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
         console.log(
           `  Task ${candidate.taskId} executed! Proof: ${candidate.proof.toString("hex").slice(0, 20)}...`
         );
+        metrics.recordExecution();
         summary.processed++;
       } catch (err) {
         console.warn(
           `  Failed to claim/execute task ${candidate.taskId}: ${err.message}`
         );
+        metrics.recordRpcError(err);
         summary.errors.push(err);
       }
     }
@@ -1227,6 +1258,7 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
     }
   } catch (err) {
     console.error(`Keeper loop error: ${err.message}`);
+    metrics.recordRpcError(err);
     summary.errors.push(err);
   }
 
@@ -1258,6 +1290,7 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
     }
   } catch (err) {
     console.warn(`  Balance check failed: ${err.message}`);
+    metrics.recordRpcError(err);
     summary.errors.push(err);
   }
 
@@ -1276,6 +1309,10 @@ async function keeperLoop(client, keypair, emptyRounds = 0) {
 
 async function main() {
   await validateAndLoadConfig();
+
+  // Started only when METRICS_PORT is set. The collector itself is inert
+  // until then, so importing this file in tests never opens a socket.
+  let metricsServer = null;
 
   const { NETWORK_PRESETS, KeeperRegistryClient, keypairSigner } = await loadSdk();
   const { rpcUrl, networkPassphrase } = NETWORK_PRESETS[CONFIG.network];
@@ -1323,7 +1360,20 @@ async function main() {
   console.log(
     `  Staking  : ${CONFIG.autoStakeEnabled ? `auto-stake ${CONFIG.autoStakeAmount} stroops once (ceiling ${CONFIG.autoStakeCeiling || "none"})` : "visibility only (no minimum enforced on-chain — AUTO_STAKE_ENABLED=false)"}`
   );
+  console.log(
+    `  Metrics  : ${CONFIG.metricsPort === null ? "disabled (set METRICS_PORT to enable)" : `http://127.0.0.1:${CONFIG.metricsPort}/metrics`}`
+  );
   console.log("");
+
+  if (CONFIG.metricsPort !== null) {
+    metricsServer = startMetricsServer(metrics, CONFIG.metricsPort);
+    metricsServer.on("error", (err) => {
+      console.error(
+        `Metrics endpoint could not bind to 127.0.0.1:${CONFIG.metricsPort}: ${err.message}`
+      );
+      process.exit(1);
+    });
+  }
 
   // Verify connectivity
   try {
@@ -1362,6 +1412,7 @@ async function main() {
     shuttingDown = true;
     console.log(`\n${signal} received — finishing current round then exiting...`);
     if (timer) clearInterval(timer);
+    if (metricsServer) metricsServer.close();
     if (!roundInFlight) {
       console.log("Clean shutdown.");
       process.exit(0);
@@ -1391,6 +1442,7 @@ async function main() {
     } finally {
       roundInFlight = false;
       if (shuttingDown) {
+        if (metricsServer) metricsServer.close();
         console.log("Clean shutdown.");
         process.exit(0);
       }
@@ -1444,6 +1496,10 @@ module.exports = {
   isAmbiguousTimeoutError,
   verifyOnChainLanding,
   safeErrorMessage,
+  // Optional metrics (issue #717)
+  metrics,
+  MetricsCollector,
+  startMetricsServer,
 };
 
 // Only run main() when executed directly, not when imported for testing

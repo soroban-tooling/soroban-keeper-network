@@ -482,14 +482,7 @@ impl KeeperRegistry {
         bump_instance(&e);
         credit.disputed = true;
         credits.set(index as u32, credit);
-        e.storage()
-            .persistent()
-            .set(&DataKey::PendingReward(keeper.clone()), &credits);
-        e.storage().persistent().extend_ttl(
-            &DataKey::PendingReward(keeper.clone()),
-            KEEPER_BALANCE_BUMP_THRESHOLD,
-            KEEPER_BALANCE_BUMP_LEDGERS,
-        );
+        save_pending_credits(&e, &keeper, &credits);
 
         emit_execution_disputed(&e, task_id, &keeper);
         Ok(())
@@ -560,17 +553,7 @@ impl KeeperRegistry {
             }
         }
 
-        let key = DataKey::PendingReward(keeper.clone());
-        if remaining.is_empty() {
-            e.storage().persistent().remove(&key);
-        } else {
-            e.storage().persistent().set(&key, &remaining);
-            e.storage().persistent().extend_ttl(
-                &key,
-                KEEPER_BALANCE_BUMP_THRESHOLD,
-                KEEPER_BALANCE_BUMP_LEDGERS,
-            );
-        }
+        save_pending_credits(&e, &keeper, &remaining);
 
         if forfeited > 0 {
             accrue_fee(&e, forfeited)?;

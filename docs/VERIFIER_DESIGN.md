@@ -472,21 +472,21 @@ a baseline change.
   enough in its current form that version-checking was not added to the
   baseline design. The registry's own VERSION field (issue 0096) provides
   ABI detection; if future breaking changes to the `verify` signature arise,
-  versioning can be revisited. See [.github/backlog/issues/0124-verifier-interface-versioning.md](.github/backlog/issues/0124-verifier-interface-versioning.md) for full reasoning.
+  versioning can be revisited. See [.github/backlog/issues/0124-verifier-interface-versioning.md](../.github/backlog/issues/0124-verifier-interface-versioning.md) for full reasoning.
 
 - **Composition (multi-verifier AND/OR)** (issue 0125) — deferred. The design
   keeps the registry single-verifier-per-task and pushes composition to the
   ecosystem: a task owner who wants to require both an oracle attestation
   *and* a signature can deploy a composite-verifier contract that calls both
-  and ANDs the results. This keeps the registry simple and permissionless. See [.github/backlog/issues/0125-verifier-composition.md](.github/backlog/issues/0125-verifier-composition.md) for full reasoning.
+  and ANDs the results. This keeps the registry simple and permissionless. See [.github/backlog/issues/0125-verifier-composition.md](../.github/backlog/issues/0125-verifier-composition.md) for full reasoning.
 
 - **Emergency disable (detach broken verifier post-claim)** (issue 0127) —
   deferred. The investigation found that allowing even an admin-only detach
   path reintroduces griefing risk (issue 0082 guards against owner-swap; admin
   bypass is not acceptable). The existing recovery path (expire_task after
-  deadline) is confirmed as the accepted tradeoff. See [.github/backlog/issues/0127-verifier-emergency-disable.md](.github/backlog/issues/0127-verifier-emergency-disable.md) for full reasoning.
+  deadline) is confirmed as the accepted tradeoff. See [.github/backlog/issues/0127-verifier-emergency-disable.md](../.github/backlog/issues/0127-verifier-emergency-disable.md) for full reasoning.
 
 - **Prior-art research (ecosystem comparison)** (issue 0131) — deferred.
   A survey of comparable automation networks' verification approaches was not
   conducted before shipping. This can be added as a follow-up to enrich the
-  documentation without blocking the implementation. See [.github/backlog/issues/0131-verifier-vs-ecosystem-research.md](.github/backlog/issues/0131-verifier-vs-ecosystem-research.md) for full reasoning.
+  documentation without blocking the implementation. See [.github/backlog/issues/0131-verifier-vs-ecosystem-research.md](../.github/backlog/issues/0131-verifier-vs-ecosystem-research.md) for full reasoning.

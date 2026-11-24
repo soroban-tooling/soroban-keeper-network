@@ -1,0 +1,11 @@
+# Staggered deadlines: each task expires one hour (3600 s) after the previous one.
+# Deadlines are far-future placeholders; regenerate them relative to "now" for real use.
+label,task_type,calldata,reward,deadline,ttl_ledgers,lock_ledgers
+rebalance-slot-1,LiquidityRebalance,726562616c616e63653a736c6f743a31,500000,4102444800,17280,120
+rebalance-slot-2,LiquidityRebalance,726562616c616e63653a736c6f743a32,500000,4102448400,17280,120
+rebalance-slot-3,LiquidityRebalance,726562616c616e63653a736c6f743a33,500000,4102452000,17280,120
+rebalance-slot-4,LiquidityRebalance,726562616c616e63653a736c6f743a34,500000,4102455600,17280,120
+rebalance-slot-5,LiquidityRebalance,726562616c616e63653a736c6f743a35,500000,4102459200,17280,120
+rebalance-slot-6,LiquidityRebalance,726562616c616e63653a736c6f743a36,500000,4102462800,17280,120
+rebalance-slot-7,LiquidityRebalance,726562616c616e63653a736c6f743a37,500000,4102466400,17280,120
+rebalance-slot-8,LiquidityRebalance,726562616c616e63653a736c6f743a38,500000,4102470000,17280,120
