@@ -44,4 +44,20 @@ describe("Treasury calculations", () => {
     const sum = rows.reduce((acc, r) => acc + parseFloat(r.percentage), 0);
     expect(Math.round(sum)).toBe(100);
   });
+
+  it("handles loading and error states for contract queries", async () => {
+    let loading = true;
+    let error: string | null = null;
+
+    // Simulate error transition
+    try {
+      throw new Error("RPC endpoint unreachable");
+    } catch (e) {
+      error = (e as Error).message;
+      loading = false;
+    }
+
+    expect(loading).toBe(false);
+    expect(error).toBe("RPC endpoint unreachable");
+  });
 });

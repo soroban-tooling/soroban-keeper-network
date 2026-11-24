@@ -21,6 +21,9 @@ export function Shell() {
 
   return (
     <div className="app-shell">
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
       {open && (
         <div
           className="sidebar-backdrop"
@@ -63,7 +66,7 @@ export function Shell() {
           </div>
         </div>
       </aside>
-      <main>
+      <main id="main-content" tabIndex={-1}>
         <header className="mobile-header">
           <div className="mobile-header-left">
             <button
