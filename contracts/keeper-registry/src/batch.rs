@@ -105,11 +105,8 @@ impl KeeperRegistry {
                 claim_ledger: None,
                 lock_ledgers: params.lock_ledgers,
                 verifier: params.verifier,
-                condition: params.condition,
-                // `BatchTaskParams` has no `verifier` field yet — attaching a
-                // verifier to a batch-registered task is backlog issue 0102,
-                // separate from this batch-registration slice.
-                verifier: None,
+                // Cloned so `params.condition` stays available for the
+                // registration event emitted below.
                 condition: params.condition.clone(),
             };
             save_task(&e, task_id, &task);
