@@ -17,7 +17,7 @@ pub mod websocket;
 
 use std::sync::Arc;
 
-use axum::Router;
+use axum::{Extension, Router};
 use utoipa::OpenApi;
 
 use crate::cache::AggregateCaches;
@@ -128,6 +128,7 @@ pub fn router_with_limiter(state: ApiState, limiter: Arc<RateLimiter>) -> Router
         .nest("/v1", rest::routes())
         .route("/v1/stream", axum::routing::get(websocket::subscribe))
         .with_state(state)
+        .layer(Extension(Arc::new(websocket::WebSocketLimits::default())))
         .layer(axum::middleware::from_fn_with_state(
             limiter,
             rate_limit::enforce,

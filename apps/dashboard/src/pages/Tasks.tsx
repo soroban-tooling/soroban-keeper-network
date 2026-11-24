@@ -6,6 +6,8 @@ import { EmptyState, ErrorState, LoadingState } from "../components/AsyncState";
 import { StatusBadge } from "../components/StatusBadge";
 import { useDashboardData } from "../data/context";
 import type { TaskState, TaskStatus } from "../data/types";
+import { useLiveEvents } from "../hooks/useLiveEvents";
+import { LiveStatus } from "../components/LiveStatus";
 
 const statuses: Array<"all" | TaskStatus> = ["all", "pending", "claimed", "executed", "cancelled", "expired"];
 
@@ -30,6 +32,7 @@ export function TasksPage() {
     finally { setLoading(false); }
   }, [cursor, indexer]);
   useEffect(() => { void load(); }, [load]);
+  const live = useLiveEvents(() => void load());
 
   const visible = useMemo(() => tasks
     .filter((task) => status === "all" || task.status === status)
@@ -41,7 +44,7 @@ export function TasksPage() {
     }), [ascending, sort, status, tasks]);
 
   return <section className="page">
-    <div className="page-heading"><div><p className="eyebrow">Indexed registry state</p><h1>Task explorer</h1><p>Review registered work, deadlines, rewards, owners, and active claims.</p></div></div>
+    <div className="page-heading"><div><p className="eyebrow">Indexed registry state</p><h1>Task explorer</h1><p>Review registered work, deadlines, rewards, owners, and active claims.</p></div><LiveStatus state={live} /></div>
     <div className="toolbar">
       <label>Status<select value={status} onChange={(event) => setStatus(event.target.value as typeof status)}>{statuses.map((value) => <option key={value}>{value}</option>)}</select></label>
       <div className="segmented" aria-label="Sort tasks"><button className={sort === "deadline" ? "selected" : ""} onClick={() => setSort("deadline")}>Deadline</button><button className={sort === "reward" ? "selected" : ""} onClick={() => setSort("reward")}>Reward</button></div>

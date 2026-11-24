@@ -1,20 +1,24 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { DashboardIndexer } from "./indexer";
-import type { RegistryReader } from "./types";
+import type { RegistryOperations, RegistryReader } from "./types";
+import { useNetwork } from "../config";
 
 interface DashboardData {
   indexer: DashboardIndexer;
   registry?: RegistryReader;
+  operations?: RegistryOperations;
+  account?: string;
 }
 
 const DataContext = createContext<DashboardData | null>(null);
 
-export function DataProvider({ children, registry }: { children: ReactNode; registry?: RegistryReader }) {
+export function DataProvider({ children, registry, operations, account }: { children: ReactNode; registry?: RegistryReader; operations?: RegistryOperations; account?: string }) {
+  const { network } = useNetwork();
   const indexer = useMemo(
-    () => new DashboardIndexer(import.meta.env.VITE_INDEXER_URL ?? "http://localhost:3000/v1"),
-    [],
+    () => new DashboardIndexer(network.indexerUrl),
+    [network.indexerUrl],
   );
-  return <DataContext.Provider value={{ indexer, registry }}>{children}</DataContext.Provider>;
+  return <DataContext.Provider value={{ indexer, registry, operations, account }}>{children}</DataContext.Provider>;
 }
 
 export function useDashboardData(): DashboardData {
