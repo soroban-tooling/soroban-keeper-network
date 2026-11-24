@@ -7,6 +7,9 @@ authors = ["Soroban Keeper Network Contributors"]
 description = "Governance contract for the Soroban Keeper Network"
 license = "Apache-2.0"
 repository = "https://github.com/soroban-tooling/soroban-keeper-network"
+keywords = ["soroban", "stellar", "governance", "dao", "proposal"]
+categories = ["cryptography::cryptocurrencies"]
+publish = false
 keywords = ["soroban", "stellar", "keeper", "governance", "dao"]
 categories = ["cryptography::cryptocurrencies"]
 

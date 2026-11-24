@@ -25,6 +25,7 @@ struct TaskBeforeConditions {
     lock_ledgers: u32,
     verifier: Option<Address>,
 }
+
 #[contract]
 struct TestCondition;
 
