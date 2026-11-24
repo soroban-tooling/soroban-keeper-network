@@ -35,7 +35,7 @@ pub struct ReputationRecord {
 
 #[contracttype]
 #[derive(Clone)]
-enum ReputationKey {
+pub(crate) enum ReputationKey {
     Keeper(Address),
 }
 

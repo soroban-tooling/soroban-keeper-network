@@ -6,54 +6,68 @@
 //!
 //! # Quick Start
 //!
-//! Add to your `Cargo.toml`:
+//! Add to your verifier crate's `Cargo.toml`:
 //! ```toml
 //! [dev-dependencies]
-//! keeper-registry-test-support = "0.1"
+//! keeper-registry-test-support = { path = "../path/to/contracts/verifiers/test-support" }
 //! soroban-sdk = { version = "22.0.1", features = ["testutils"] }
 //! ```
 //!
 //! # Example
 //!
 //! ```ignore
-//! use keeper_registry_test_support::{VerifierTestHarness, keeper, owner};
-//! use soroban_sdk::{Bytes, Address};
+//! use keeper_registry_test_support::VerifierTestHarness;
+//! use soroban_sdk::Bytes;
 //!
 //! #[test]
 //! fn test_my_verifier() {
 //!     let harness = VerifierTestHarness::new();
 //!     let env = harness.env();
 //!
-//!     // Deploy your verifier contract
-//!     let verifier_id = env.register(MyVerifier, ());
+//!     // `register` returns the contract's Address directly.
+//!     let verifier = env.register(MyVerifier, ());
 //!
-//!     // Register a task with your verifier attached
-//!     let task_id = harness.register_task_with_verifier(
-//!         &owner(),
-//!         Some(Address::from_contract_id(&env, &verifier_id)),
-//!         1_000_000,  // reward in stroops
-//!         env.ledger().timestamp() + 1000,  // deadline
-//!         &Bytes::from_slice(&env, b"calldata"),
-//!     ).unwrap();
+//!     let task_id = harness
+//!         .register_task_with_verifier(
+//!             harness.owner_address(),
+//!             Some(verifier),
+//!             1_000_000,                       // reward in stroops
+//!             env.ledger().timestamp() + 1000, // deadline
+//!             &Bytes::from_slice(env, b"calldata"),
+//!         )
+//!         .unwrap();
 //!
-//!     // Claim and execute the task
-//!     harness.claim_task(&keeper(), task_id).unwrap();
-//!     let proof = Bytes::from_slice(&env, b"proof_bytes");
-//!     harness.execute_task(&keeper(), task_id, &proof).unwrap();
+//!     harness.claim_task(harness.keeper_address(), task_id).unwrap();
+//!     let proof = Bytes::from_slice(env, b"proof_bytes");
+//!     harness
+//!         .execute_task(harness.keeper_address(), task_id, &proof)
+//!         .unwrap();
 //!
-//!     // Verify the keeper was credited
-//!     let balance = harness.keeper_balance(&keeper());
-//!     assert!(balance > 0);
+//!     assert!(harness.keeper_balance(harness.keeper_address()) > 0);
 //! }
 //! ```
 
+use keeper_registry::KeeperRegistryClient;
 pub use keeper_registry::{
     KeeperError, Task, TaskStatus, TaskType, MAX_CALLDATA_LEN, MAX_PROOF_LEN,
 };
-use keeper_registry::{KeeperRegistryClient, KeeperRegistryArgs};
-use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::token::Client as TokenClient;
-use soroban_sdk::{Address, Bytes, Env};
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::token::StellarAssetClient;
+use soroban_sdk::{Address, Bytes, Env, InvokeError};
+
+/// Collapse a generated `try_*` result into the registry's own error type.
+/// A host-level failure (a panic that is not a `KeeperError`) is a bug in the
+/// code under test, so it panics with the underlying error to make it visible.
+fn contract_result<T, C: core::fmt::Debug>(
+    result: Result<Result<T, C>, Result<KeeperError, InvokeError>>,
+) -> Result<T, KeeperError> {
+    match result {
+        Ok(Ok(value)) => Ok(value),
+        Err(Ok(error)) => Err(error),
+        Ok(Err(error)) => panic!("unexpected return value conversion error: {error:?}"),
+        Err(Err(error)) => panic!("unexpected host error: {error:?}"),
+    }
+}
 
 /// A minimal test harness for verifier authors to test their contracts.
 ///
@@ -66,8 +80,8 @@ use soroban_sdk::{Address, Bytes, Env};
 /// ```ignore
 /// let harness = VerifierTestHarness::new();
 /// let task_id = harness.register_task_with_verifier(...).unwrap();
-/// harness.claim_task(&keeper(), task_id).unwrap();
-/// harness.execute_task(&keeper(), task_id, &proof).unwrap();
+/// harness.claim_task(harness.keeper_address(), task_id).unwrap();
+/// harness.execute_task(harness.keeper_address(), task_id, &proof).unwrap();
 /// ```
 pub struct VerifierTestHarness {
     env: Env,
@@ -109,7 +123,7 @@ impl VerifierTestHarness {
         client.initialize(&admin, &reward_token, &0u32);
 
         // Mint tokens to the user for task registration
-        TokenClient::new(&env, &reward_token).mint(&user, &1_000_000_000_000_i128);
+        StellarAssetClient::new(&env, &reward_token).mint(&user, &1_000_000_000_000_i128);
 
         Self {
             env,
@@ -137,20 +151,15 @@ impl VerifierTestHarness {
     }
 
     /// Get a client for the registry contract.
-    fn client(&self) -> KeeperRegistryClient {
+    fn client(&self) -> KeeperRegistryClient<'_> {
         KeeperRegistryClient::new(&self.env, &self.contract_id)
-    }
-
-    /// Get a client for the reward token.
-    fn token_client(&self) -> TokenClient {
-        TokenClient::new(&self.env, &self.reward_token)
     }
 
     /// Register a task with an optional verifier contract attached.
     ///
     /// # Arguments
     ///
-    /// * `owner` - Address funding the task (typically from `owner()` helper)
+    /// * `owner` - Address funding the task (use `harness.owner_address()`; it is the funded account)
     /// * `verifier` - `None` to register without verification, `Some(address)` to attach your verifier
     /// * `reward` - Reward in stroops (token units)
     /// * `deadline` - Unix timestamp after which the task expires
@@ -164,7 +173,7 @@ impl VerifierTestHarness {
     ///
     /// ```ignore
     /// let task_id = harness.register_task_with_verifier(
-    ///     &owner(),
+    ///     harness.owner_address(),
     ///     Some(verifier_address),
     ///     1_000_000,
     ///     env.ledger().timestamp() + 3600,
@@ -175,40 +184,37 @@ impl VerifierTestHarness {
         &self,
         owner: &Address,
         verifier: Option<Address>,
-        condition: Option<Address>,
         reward: i128,
         deadline: u64,
         calldata: &Bytes,
     ) -> Result<u64, KeeperError> {
         let client = self.client();
 
-        // Approve the registry to spend tokens from the owner
-        self.token_client().approve(
-            &owner,
-            &self.contract_id,
-            &reward,
-            &(1000u32), // high ledger delta to avoid expiry during test
-        );
+        // The registry requires `ttl_ledgers` to cover the time until the deadline
+        // (at ~5 s per ledger) plus a one-day safety margin (17,280 ledgers).
+        // Derive it from the deadline so any deadline a test picks is accepted.
+        let seconds_to_deadline = deadline.saturating_sub(self.env.ledger().timestamp());
+        let ttl_ledgers = (seconds_to_deadline / 5 + 17_280 + 1_000).min(u32::MAX as u64) as u32;
 
-        // Register the task with verifier and condition attached
-        client.try_register_task(
+        // Register the task with the verifier attached (no condition)
+        contract_result(client.try_register_task(
             owner,
             &TaskType::Custom,
             calldata,
             &reward,
             &deadline,
-            &1000u32, // ttl_ledgers
-            &100u32,  // lock_ledgers
+            &ttl_ledgers,
+            &100u32, // lock_ledgers
             &verifier,
-            &condition,
-        )
+            &None,
+        ))
     }
 
     /// Claim an unexecuted task.
     ///
     /// # Arguments
     ///
-    /// * `keeper` - Address claiming the task (typically from `keeper()` helper)
+    /// * `keeper` - Address claiming the task (use `harness.keeper_address()`)
     /// * `task_id` - ID of the task to claim
     ///
     /// # Returns
@@ -216,7 +222,7 @@ impl VerifierTestHarness {
     /// `Ok(())` if the claim succeeded, or a `KeeperError` if the task cannot be claimed
     /// (e.g., already claimed by another keeper, or deadline passed).
     pub fn claim_task(&self, keeper: &Address, task_id: u64) -> Result<(), KeeperError> {
-        self.client().try_claim_task(keeper, &task_id)
+        contract_result(self.client().try_claim_task(keeper, &task_id))
     }
 
     /// Execute a claimed task with a proof.
@@ -239,7 +245,7 @@ impl VerifierTestHarness {
         task_id: u64,
         proof: &Bytes,
     ) -> Result<(), KeeperError> {
-        self.client().try_execute_task(keeper, &task_id, proof)
+        contract_result(self.client().try_execute_task(keeper, &task_id, proof))
     }
 
     /// Get the current state of a task.
@@ -319,37 +325,8 @@ impl Default for VerifierTestHarness {
 }
 
 // ============================================================================
-// Helper Functions for Common Test Patterns
+// Assertion helpers
 // ============================================================================
-
-/// Get a deterministic owner (task funder) address.
-///
-/// Use this address when calling `register_task_with_verifier`.
-///
-/// # Example
-///
-/// ```ignore
-/// let task_id = harness.register_task_with_verifier(&owner(), None, ...).unwrap();
-/// ```
-pub fn owner() -> Address {
-    // Generate deterministically from a fixed seed
-    let env = Env::default();
-    Address::generate(&env)
-}
-
-/// Get a deterministic keeper (claimer/executor) address.
-///
-/// Use this address when calling `claim_task` and `execute_task`.
-pub fn keeper() -> Address {
-    let env = Env::default();
-    Address::generate(&env)
-}
-
-/// Get a deterministic admin address.
-pub fn admin() -> Address {
-    let env = Env::default();
-    Address::generate(&env)
-}
 
 /// Assert that a task's escrow was released (funds moved).
 ///
@@ -365,7 +342,10 @@ pub fn assert_escrow_released(harness: &VerifierTestHarness, task_id: u64) {
 
     // Keeper should have a non-zero balance if the reward was positive
     let balance = harness.keeper_balance(harness.keeper_address());
-    assert!(balance > 0, "Keeper should have a non-zero balance after execution");
+    assert!(
+        balance > 0,
+        "Keeper should have a non-zero balance after execution"
+    );
 }
 
 /// Assert that no escrow was moved (state unchanged).
@@ -390,17 +370,17 @@ pub fn assert_no_escrow_movement(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::Ledger as _;
 
     #[test]
     fn harness_initializes_successfully() {
         let harness = VerifierTestHarness::new();
 
         // Registry should be initialized
-        assert!(!harness.registry_address().is_empty());
-        assert!(!harness.reward_token_address().is_empty());
+        assert_ne!(harness.registry_address(), harness.reward_token_address());
 
         // Balances should start clean
-        assert_eq!(harness.keeper_balance(&keeper()), 0);
+        assert_eq!(harness.keeper_balance(harness.keeper_address()), 0);
         assert_eq!(harness.fees_accrued(), 0);
     }
 
@@ -410,7 +390,7 @@ mod tests {
 
         let task_id = harness
             .register_task_with_verifier(
-                &owner(),
+                harness.owner_address(),
                 None,
                 1_000_000,
                 harness.env().ledger().timestamp() + 1000,
@@ -421,7 +401,7 @@ mod tests {
         let task = harness.get_task(task_id);
         assert_eq!(task.reward, 1_000_000);
         assert_eq!(task.status, TaskStatus::Pending);
-        assert_eq!(task.owner, owner());
+        assert_eq!(&task.owner, harness.owner_address());
     }
 
     #[test]
@@ -430,7 +410,7 @@ mod tests {
 
         let task_id = harness
             .register_task_with_verifier(
-                &owner(),
+                harness.owner_address(),
                 None,
                 1_000_000,
                 harness.env().ledger().timestamp() + 1000,
@@ -438,11 +418,13 @@ mod tests {
             )
             .unwrap();
 
-        harness.claim_task(&keeper(), task_id).unwrap();
+        harness
+            .claim_task(harness.keeper_address(), task_id)
+            .unwrap();
 
         let task = harness.get_task(task_id);
         assert_eq!(task.status, TaskStatus::Claimed);
-        assert_eq!(task.claimer, Some(keeper()));
+        assert_eq!(task.claimer.as_ref(), Some(harness.keeper_address()));
     }
 
     #[test]
@@ -451,7 +433,7 @@ mod tests {
 
         let task_id = harness
             .register_task_with_verifier(
-                &owner(),
+                harness.owner_address(),
                 None,
                 1_000_000,
                 harness.env().ledger().timestamp() + 1000,
@@ -459,16 +441,20 @@ mod tests {
             )
             .unwrap();
 
-        harness.claim_task(&keeper(), task_id).unwrap();
+        harness
+            .claim_task(harness.keeper_address(), task_id)
+            .unwrap();
 
         let proof = Bytes::new(harness.env());
-        harness.execute_task(&keeper(), task_id, &proof).unwrap();
+        harness
+            .execute_task(harness.keeper_address(), task_id, &proof)
+            .unwrap();
 
         let task = harness.get_task(task_id);
         assert_eq!(task.status, TaskStatus::Executed);
 
         // Keeper should be credited
-        let balance = harness.keeper_balance(&keeper());
+        let balance = harness.keeper_balance(harness.keeper_address());
         assert!(balance > 0);
     }
 
@@ -479,7 +465,7 @@ mod tests {
         // Register
         let task_id = harness
             .register_task_with_verifier(
-                &owner(),
+                harness.owner_address(),
                 None,
                 1_000_000,
                 harness.env().ledger().timestamp() + 1000,
@@ -488,28 +474,36 @@ mod tests {
             .unwrap();
 
         // Claim
-        harness.claim_task(&keeper(), task_id).unwrap();
+        harness
+            .claim_task(harness.keeper_address(), task_id)
+            .unwrap();
         let task = harness.get_task(task_id);
         assert_eq!(task.status, TaskStatus::Claimed);
 
         // Execute
         let proof = Bytes::from_slice(harness.env(), b"proof_bytes");
-        harness.execute_task(&keeper(), task_id, &proof).unwrap();
+        harness
+            .execute_task(harness.keeper_address(), task_id, &proof)
+            .unwrap();
         let task = harness.get_task(task_id);
         assert_eq!(task.status, TaskStatus::Executed);
 
         // Verify payment
-        let balance = harness.keeper_balance(&keeper());
-        assert_eq!(balance, 1_000_000, "Keeper should get full reward (0% fees)");
+        let balance = harness.keeper_balance(harness.keeper_address());
+        assert_eq!(
+            balance, 1_000_000,
+            "Keeper should get full reward (0% fees)"
+        );
     }
 
     #[test]
     fn harness_rejects_invalid_deadline() {
         let harness = VerifierTestHarness::new();
 
-        // Deadline in the past
+        // Deadline in the past (move the clock forward so the subtraction cannot underflow)
+        harness.env().ledger().set_timestamp(1_000);
         let result = harness.register_task_with_verifier(
-            &owner(),
+            harness.owner_address(),
             None,
             1_000_000,
             harness.env().ledger().timestamp() - 100, // past
@@ -528,7 +522,7 @@ mod tests {
 
         // Zero reward
         let result = harness.register_task_with_verifier(
-            &owner(),
+            harness.owner_address(),
             None,
             0, // invalid
             harness.env().ledger().timestamp() + 1000,

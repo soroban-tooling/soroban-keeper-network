@@ -13,7 +13,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "docs:generate": "npm run build && node scripts/generate-cli-docs.mjs"
   },
   "dependencies": {
     "@soroban-keeper-network/sdk": "file:../sdk-ts",

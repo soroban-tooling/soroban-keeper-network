@@ -171,4 +171,10 @@ impl KeeperRegistry {
     ) -> soroban_sdk::Vec<crate::types::PendingCredit> {
         pending_credits_of(&e, &keeper)
     }
+    /// Maximum number of entries `pending_reward` can hold, and the point at
+    /// which `execute_task` finalizes matured credits before appending
+    /// (issue #738). Exposed so bots can preflight instead of hardcoding it.
+    pub fn max_pending_credits(_e: Env) -> u32 {
+        MAX_PENDING_CREDITS
+    }
 }

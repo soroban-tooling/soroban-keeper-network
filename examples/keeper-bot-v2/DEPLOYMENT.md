@@ -112,6 +112,15 @@ This document details how configuration flows from the container runtime through
 
 ### Optional Variables (with Defaults)
 
+#### RPC_URL
+- **Source**: Environment variable or `.env` file
+- **Default**: Network preset (`https://soroban-testnet.stellar.org` on testnet)
+- **Validation**: Must be an `http://` or `https://` URL
+- **Failure**: `Invalid RPC_URL: ...` at configuration time
+- **Usage**: RPC endpoint used for `getHealth()` readiness probes and transaction submission
+- **Example**: `https://soroban-testnet.stellar.org`
+- **Compose**: Add `- RPC_URL=${RPC_URL}` to the keeper-bot environment to override the preset
+
 #### POLL_INTERVAL_MS
 - **Source**: Environment variable or `.env` file
 - **Default**: `10000`
@@ -461,14 +470,24 @@ aws ecs create-service \
   - Check logs: `docker logs <container-id> | tail -20`
   - Error will show `Invalid <VAR_NAME> — <reason>` (secrets suppressed)
 
-### Health Checks
+### Health Checks and Probes
+
+The metrics listener (`METRICS_PORT`, default `9090`) serves three endpoints:
+
+| Endpoint | Meaning | Failure condition |
+|----------|---------|-------------------|
+| `/metrics` | Prometheus exposition | Never fails while the process is alive |
+| `/healthz` | Process liveness | Never fails while the listener is up |
+| `/readyz` | Dependency readiness | 503 while RPC or the configured database is unreachable |
+
+`/readyz` rechecks RPC on every call and runs `SELECT 1` against Postgres when `DATABASE_URL` is set. It returns JSON with a `reasons` array listing each failed dependency, and returns 200 again as soon as the dependencies recover. A pod that fails `/readyz` is removed from service without being restarted, which avoids a restart storm during an RPC outage.
 
 **Docker Compose:**
 ```yaml
 services:
   keeper-bot:
     healthcheck:
-      test: ["CMD", "node", "-e", "process.exit(0)"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9090/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -476,15 +495,27 @@ services:
 
 **Kubernetes:**
 ```yaml
+ports:
+  - name: metrics
+    containerPort: 9090
 livenessProbe:
-  exec:
-    command:
-    - sh
-    - -c
-    - ps aux | grep -q '[n]ode dist/index.js'
+  httpGet:
+    path: /healthz
+    port: metrics
   initialDelaySeconds: 10
   periodSeconds: 30
+  timeoutSeconds: 5
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: metrics
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
 ```
+
+Keep `timeoutSeconds` at or below 5 seconds. The RPC health check is bounded by the SDK's request timeout, and a long probe interval would leave a broken pod in service too long.
 
 ### Logging
 

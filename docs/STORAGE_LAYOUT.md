@@ -126,7 +126,7 @@ but this is a big enough behavioral and storage-shape change that it belongs
 in its own scoped issue with migration analysis, not decided here.
 
 **Conclusion: worthwhile enough to file a follow-up issue** — see
-[0201-task-storage-hot-cold-split.md](../.github/backlog/issues/0201-task-storage-hot-cold-split.md).
+[0204-task-storage-hot-cold-split.md](../.github/backlog/issues/0204-task-storage-hot-cold-split.md).
 
 ## Q3 — Where should the E04 verifier field live, once it exists?
 
@@ -164,5 +164,126 @@ field.
 | Question | Finding | Action |
 |----------|---------|--------|
 | Q1 — redundant fields | None — every field is re-read on a recurring path, and events can't substitute for storage | No action |
-| Q2 — hot/cold split | Real, measurable win on the write side for the two hottest entry points | Follow-up issue filed: [0201](../.github/backlog/issues/0201-task-storage-hot-cold-split.md) |
+| Q2 — hot/cold split | Real, measurable win on the write side for the two hottest entry points | Follow-up issue filed: [0204](../.github/backlog/issues/0204-task-storage-hot-cold-split.md) |
 | Q3 — verifier field placement | Separate `DataKey::TaskVerifier(task_id)` is cheaper than a `Task` field for the common no-verifier case | Recorded here for issue 0072 to apply when implemented |
+
+---
+
+# Key / TTL matrix (issue #739)
+
+The survey above is about the *cost* of one record. This section answers the
+security question: **can two storage keys collide, and does every entry have a
+TTL policy?** It is exhaustive over both contracts' `DataKey` enums, plus the
+separate `ReputationKey` enum the registry keeps in the same storage.
+
+`contracts/keeper-registry/src/test/storage_layout.rs` mechanically checks
+that every variant below has a row and that all keys of one contract encode to
+distinct XDR byte strings. `include_str!` feeds the source into the test, so a
+new variant fails `cargo test` until it is documented here.
+
+## Collision analysis
+
+Soroban's `#[contracttype]` derives XDR `ScVal` encodings: an enum is a
+tagged union whose **variant discriminant is part of the encoded bytes**, and
+each payload is encoded after it. Within one contract's storage:
+
+- `Task(1)` and `Slash(1)` carry the same `u64` payload but different variant
+  discriminants, so they are different keys.
+- `KeeperReward(addr)` and `KeeperStake(addr)` carry the same `Address`
+  payload but different discriminants, so they are different keys.
+- A unit variant (`Admin`) cannot equal a tuple variant (`Task(u64)`).
+- `ReputationKey::Keeper(addr)` lives in a *different enum type* but is stored
+  in the same registry contract. Its own discriminant namespace is disjoint
+  from `DataKey`'s, and the XDR-encoding test below proves the concrete keys
+  are distinct.
+
+The two contracts' enums both have an `Admin` variant that would encode
+identically, but contract storage is namespaced by contract address: a key in
+the treasury can never address a cell in the registry. Same encoded bytes in
+two different contracts is not a collision.
+
+**Conclusion: no two variants that share a storage namespace can collide.**
+The test proves it for every variant, not just the examples above.
+
+## TTL model
+
+There are exactly two storage classes in use. **No production code calls
+`e.storage().temporary()`** — a source-scan test enforces that. Everything is
+either:
+
+- **Instance storage:** one shared TTL for all keys of a contract, renewed by
+  `bump_instance()` (threshold 50,000, extend-to 100,000 ledgers) from every
+  state-mutating entry point and never from read-only views. There are no
+  per-key TTLs to list here.
+- **Persistent storage:** each key has its own TTL, extended on the write path
+  named below. An entry whose TTL reaches zero is *archived*: the host refuses
+  to let the contract read or write it until an explicit `RestoreFootprint`
+  operation restores it. The contracts never restore anything, so from the
+  application's point of view an archived entry is **permanently inaccessible**.
+
+<!-- BEGIN REGISTRY KEY MATRIX -->
+## Registry keys (`contracts/keeper-registry/src/types.rs`, `reputation.rs`)
+
+| Key | Storage | Value | Written by | TTL policy | Expiry consequence |
+| --- | --- | --- | --- | --- | --- |
+| `Admin` | instance | `Address` | `initialize`, `transfer_admin` | shared instance TTL, bumped on every mutation | no config updates possible until restored; escrow still held by the contract |
+| `FeeBps` | instance | `u32` | `initialize`, `set_fee_bps` | shared instance TTL | fee reads fall back to `DEFAULT_FEE_BPS` only if the key is missing, not if the instance is archived — the whole instance is inaccessible |
+| `Paused` | instance | `bool` | `initialize`, `pause`, `unpause` | shared instance TTL | pause state unreadable; the contract is unusable |
+| `TaskCounter` | instance | `u64` | `initialize`, `next_task_id` | shared instance TTL | no new tasks could be registered even if escrow remained |
+| `RewardToken` | instance | `Address` | `initialize` | shared instance TTL | every token-moving path fails |
+| `Task(u64)` | persistent | `Task` | `save_task` from register/batch/increase/extend/claim/execute/cancel/expire | `extend_ttl(task.ttl_ledgers, task.ttl_ledgers)` on **every** write; registration enforces `ttl_ledgers >= MIN_TTL_LEDGERS` and `>= required_ttl_ledgers(deadline)` (deadline covered plus `TTL_SAFETY_MARGIN_LEDGERS` = 17,280) | **FUNDS LOST** — the owner/amount needed by `cancel_task`/`expire_task` is gone, so escrow cannot be refunded |
+| `KeeperReward(Address)` | persistent | `i128` | `credit_keeper` (execute/finalize), zeroed by `withdraw_rewards` | 50,000 / 100,000 on credit; withdrawal zeroes without extending (a zeroed entry has nothing to protect) | **FUNDS LOST** — earned rewards inaccessible; tested below |
+| `FeesAccrued` | instance | `i128` | `accrue_fee`, `sweep_fees` | shared instance TTL | protocol fees stranded in the contract |
+| `MinReward` | instance | `i128` | `set_min_reward` | shared instance TTL | floor silently disappears, not a direct fund loss |
+| `KeeperStake(Address)` | persistent | `i128` | `stake_deposit`, `initiate_unbond`, `slash`, `resolve_slash_appeal` | `KEEPER_STAKE_BUMP_THRESHOLD` 50,000 / `KEEPER_STAKE_BUMP_LEDGERS` 100,000 on every write | **FUNDS LOST** — bonded stake cannot be checked or unbonded |
+| `UnbondRequest(Address)` | persistent | `UnbondRequest` | `initiate_unbond`, partial `slash`; removed by `withdraw_stake` | 50,000 / 100,000 on every write | **FUNDS LOST** — pending withdrawal amount cannot be claimed |
+| `MinStake` | instance | `i128` | `set_min_stake` | shared instance TTL | gate silently disappears, not a direct fund loss |
+| `SlashCounter` | instance | `u64` | `next_slash_id` | shared instance TTL | new slash ids could repeat after a restore |
+| `Slash(u64)` | persistent | `SlashRecord` | `slash`, `raise_slash_appeal`; removed by `resolve_slash_appeal` | 50,000 / 100,000 on both writes (`raise_slash_appeal` renews explicitly — see `docs/STAKING_SECURITY_REVIEW.md`) | **FUNDS LOST to the keeper** — an appeal can no longer be raised or resolved, so the slashed amount stays with the treasury |
+| `DisputeWindowLedgers` | instance | `u32` | `set_dispute_window` | shared instance TTL | hold duration silently reads as 0, not a direct fund loss |
+| `PendingReward(Address)` | persistent | `Vec<PendingCredit>` | `add_pending_credit`, `finalize_rewards`, `dispute_execution`, `resolve_execution_dispute`; removed when empty | 50,000 / 100,000 via the single `save_pending_credits` helper on every write | **FUNDS LOST** — undisputed credits can no longer finalize or be withdrawn |
+| `SlashHistory(Address)` | persistent | `SlashHistory` | `write_slash_history` | `KEEPER_STAKE_BUMP_THRESHOLD` 50,000 / 100,000 | informational only — no direct fund loss |
+| `ReputationFloor` | instance | `u32` | `set_reputation_floor` | shared instance TTL | floor silently reads as 0, not a direct fund loss |
+| `ReputationKey::Keeper(Address)` | persistent | `ReputationRecord` | `reputation::update` (success / missed claim) | `REPUTATION_TTL_THRESHOLD` 50,000 / `REPUTATION_TTL_LEDGERS` 6,300,000 on every write | informational only — score resets to zero, no direct fund loss, but a keeper above an admin-set floor loses eligibility |
+<!-- END REGISTRY KEY MATRIX -->
+
+<!-- BEGIN TREASURY KEY MATRIX -->
+## Treasury keys (`contracts/treasury/src/types.rs`)
+
+| Key | Storage | Value | Written by | TTL policy | Expiry consequence |
+| --- | --- | --- | --- | --- | --- |
+| `Admin` | instance | `Address` | `initialize`, `transfer_admin` | shared instance TTL (50,000 / 100,000 on every mutation) | no admin action possible |
+| `Paused` | instance | `bool` | `initialize`, `pause`, `unpause` | shared instance TTL | pause state unreadable; contract unusable |
+| `RewardToken` | instance | `Address` | `initialize` | shared instance TTL | no transfer possible |
+| `RecipientList` | instance | `Vec<Address>` | `add_recipient`, `remove_recipient` | shared instance TTL | recipients can no longer be enumerated |
+| `TotalDistributed` | instance | `i128` | `accrue_total_distributed` | shared instance TTL | indexer reconciliation figure lost; no direct fund loss |
+| `RecipientShares(Address)` | persistent | `u32` | `set_recipient_shares` (add/update/remove) | 50,000 / 100,000 on every write via the single helper | no further distributions to that recipient; already-credited balances unaffected |
+| `RecipientBalance(Address)` | persistent | `i128` | `credit_recipient` (distribute), zeroed by `withdraw` | 50,000 / 100,000 on credit; withdrawal zeroes without extending | **FUNDS LOST** — credited balance cannot be withdrawn |
+| `RecipientReceivedTotal(Address)` | persistent | `i128` | `credit_recipient` | 50,000 / 100,000 on every write | informational only — no direct fund loss |
+<!-- END TREASURY KEY MATRIX -->
+
+## Expiry-loses-funds entries, behaviourally verified
+
+`test/storage_layout.rs` proves the archival consequence rather than merely
+asserting it in prose. Each test raises the host's `max_entry_ttl` cap and
+extends *only the registry instance* with a test util, then advances past the
+target key's own TTL. That isolates the entry under test: the failure is an
+archived `DataKey::…`, not an archived contract instance.
+`#[should_panic(expected = "archived")]` is the Soroban test host's way of
+saying "on a real network this transaction could not be submitted without a
+restore first".
+
+| Key | Test | What is stranded |
+|---|---|---|
+| `Task(u64)` | `test_expired_task_entry_strands_owner_escrow` | the owner's full reward in the pooled contract balance |
+| `KeeperReward(Address)` | `test_expired_keeper_reward_entry_strands_earnings` | a keeper's credited execution reward |
+| `KeeperStake(Address)` | `test_expired_keeper_stake_entry_strands_collateral` | a keeper's bonded stake |
+| `UnbondRequest(Address)` | `test_expired_unbond_request_strands_pending_withdrawal` | stake already moved out of `KeeperStake` but not yet withdrawn |
+| `PendingReward(Address)` | `test_expired_pending_reward_entry_strands_credits` | execution credits inside their dispute window |
+| `Slash(u64)` | `test_expired_slash_record_forecloses_appeal_refund` | an upheld appeal's refund path |
+
+These are **accepted risks**, not bugs: Soroban's TTL model requires the
+beneficiary (or a keeper bot acting for it) to restore an archived footprint,
+and the contract has no authority to do that on a user's behalf. The mitigation
+is operational — keepers should withdraw promptly, owners should not register
+tasks they will not monitor, and indexers should alert on entries nearing TTL.
