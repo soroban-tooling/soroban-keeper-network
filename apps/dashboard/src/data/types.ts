@@ -47,6 +47,11 @@ export interface RegistryReader {
   isPaused(): Promise<boolean>;
   feesAccrued(): Promise<bigint>;
   task(taskId: number): Promise<{ deadline: number; claimLedger?: number; lockLedgers: number }>;
+  admin?(): Promise<string | undefined>;
+  minReward?(): Promise<bigint>;
+  minStake?(): Promise<bigint>;
+  disputeWindow?(): Promise<number>;
+  reputationFloor?(): Promise<number>;
 }
 
 export interface RegisterTaskInput {

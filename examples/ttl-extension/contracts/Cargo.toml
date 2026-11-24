@@ -1,0 +1,19 @@
+[package]
+name = "ttl-extension-contract"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Soroban dApp contract demonstrating keeper-driven TTL extension for instance and persistent storage"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+testutils = ["soroban-sdk/testutils"]
+
+[dependencies]
+soroban-sdk = { version = "22.0.1" }
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.1", features = ["testutils"] }

@@ -18,6 +18,7 @@ without blocking your PR.
 | `examples` | Advisory (`continue-on-error: true`) | Checks every Node example under `examples/` declares a `test` script (`scripts/check-example-tests.js`), then installs, tests and lints `examples/batch-register`. See [The examples job](#the-examples-job). |
 | `rust-sdk-quickstart` | Advisory (`continue-on-error: true`) | On pushes to `main`, deploys the registry to a local Stellar Quickstart network and runs the opt-in Rust SDK lifecycle test. |
 | `indexer-client` | Required | The indexer's TypeScript client (`packages/indexer-client`) must typecheck, build, test and lint, and its generated types must match `indexer/openapi.yaml`. |
+| `dashboard` | Required | The operator dashboard (`apps/dashboard`) must typecheck, build, lint, pass unit tests, and pass automated axe accessibility audits. Path-guarded to PRs touching `apps/dashboard/`, `packages/sdk-ts/`, or `packages/indexer-client/`. |
 | `indexer-api-docs` | Advisory (`continue-on-error: true`) | `docs/INDEXER_API.md` is generated from `indexer/openapi.yaml`; this fails if the committed page is stale. Fix with `make docs-indexer-api`. |
 | `clippy` | Advisory (`continue-on-error: true`) | Lints are useful but subjective enough that a maintainer should decide case-by-case, not have every PR blocked by a new upstream lint. |
 | `audit` | Advisory (`continue-on-error: true`) | A new upstream dependency CVE should notify maintainers, not fail every open PR the moment it's published. |
@@ -30,8 +31,8 @@ without blocking your PR.
 | `resource-cost` | Advisory (`continue-on-error: true`) | Reports CPU instructions and memory per state-changing entry point against a checked-in baseline. |
 
 `ci-required` is the single check branch protection should require — it
-passes only when `format`, `test`, `build-wasm`, `sdk-ts`, `bot`, `bot-v2`, `indexer`, `rust-sdk`, and
-`indexer-client` all succeed, and ignores the advisory jobs' outcomes entirely.
+passes only when `format`, `test`, `build-wasm`, `sdk-ts`, `bot`, `bot-v2`, `indexer`, `rust-sdk`,
+`indexer-client`, and `dashboard` all succeed, and ignores the advisory jobs' outcomes entirely.
 
 Run every required check locally before opening a PR:
 

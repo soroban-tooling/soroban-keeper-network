@@ -1,0 +1,104 @@
+name: Dashboard Deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/dashboard/**"
+      - "packages/sdk-ts/**"
+      - "packages/indexer-client/**"
+      - ".github/workflows/dashboard-deploy.yml"
+  pull_request:
+    paths:
+      - "apps/dashboard/**"
+      - "packages/sdk-ts/**"
+      - "packages/indexer-client/**"
+      - ".github/workflows/dashboard-deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: dashboard-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build dashboard static assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Build TypeScript SDK
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+        working-directory: packages/sdk-ts
+
+      - name: Install dashboard dependencies
+        run: npm ci --no-audit --no-fund
+        working-directory: apps/dashboard
+
+      - name: Build dashboard for production
+        run: npm run build
+        working-directory: apps/dashboard
+
+      - name: Upload dashboard artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: dashboard-dist
+          path: apps/dashboard/dist
+          retention-days: 7
+
+  deploy-preview:
+    name: Publish preview build (PR)
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Download built assets
+        uses: actions/download-artifact@v6
+        with:
+          name: dashboard-dist
+          path: dist
+
+      - name: Summarize preview readiness
+        run: |
+          echo "### Dashboard PR Preview Build" >> "$GITHUB_STEP_SUMMARY"
+          echo "Static assets built successfully for PR #${{ github.event.pull_request.number }}." >> "$GITHUB_STEP_SUMMARY"
+          echo "Artifact \`dashboard-dist\` is available for download and preview inspection." >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-production:
+    name: Deploy production static hosting
+    needs: build
+    runs-on: ubuntu-latest
+    # Acceptance criterion: Production deploys ONLY from main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download built assets
+        uses: actions/download-artifact@v6
+        with:
+          name: dashboard-dist
+          path: dist
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

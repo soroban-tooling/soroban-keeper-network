@@ -1,0 +1,18 @@
+{
+  "name": "@soroban-keeper-network/example-dca",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Example dollar-cost averaging (DCA) bot task for Soroban Keeper Network",
+  "main": "src/dca.js",
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "keywords": [
+    "soroban",
+    "stellar",
+    "dca",
+    "swap",
+    "keeper"
+  ],
+  "license": "Apache-2.0"
+}

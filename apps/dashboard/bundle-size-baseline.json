@@ -1,0 +1,72 @@
+{
+  "timestamp": "2026-11-19T19:10:17.865Z",
+  "totalRawBytes": 1130966,
+  "totalGzippedBytes": 316856,
+  "chunks": [
+    {
+      "name": "stellar.js",
+      "rawBytes": 742663,
+      "gzippedBytes": 193105
+    },
+    {
+      "name": "react.js",
+      "rawBytes": 236462,
+      "gzippedBytes": 77438
+    },
+    {
+      "name": "index.js",
+      "rawBytes": 57381,
+      "gzippedBytes": 18226
+    },
+    {
+      "name": "Treasury.js",
+      "rawBytes": 17204,
+      "gzippedBytes": 5517
+    },
+    {
+      "name": "index.css",
+      "rawBytes": 21173,
+      "gzippedBytes": 4801
+    },
+    {
+      "name": "icons.js",
+      "rawBytes": 19188,
+      "gzippedBytes": 4003
+    },
+    {
+      "name": "Admin.js",
+      "rawBytes": 7334,
+      "gzippedBytes": 2468
+    },
+    {
+      "name": "TaskDetail.js",
+      "rawBytes": 6192,
+      "gzippedBytes": 2366
+    },
+    {
+      "name": "Owner.js",
+      "rawBytes": 6234,
+      "gzippedBytes": 2244
+    },
+    {
+      "name": "Keeper.js",
+      "rawBytes": 5556,
+      "gzippedBytes": 2078
+    },
+    {
+      "name": "RegisterTask.js",
+      "rawBytes": 4585,
+      "gzippedBytes": 1763
+    },
+    {
+      "name": "Stats.js",
+      "rawBytes": 4368,
+      "gzippedBytes": 1721
+    },
+    {
+      "name": "Leaderboard.js",
+      "rawBytes": 2626,
+      "gzippedBytes": 1126
+    }
+  ]
+}

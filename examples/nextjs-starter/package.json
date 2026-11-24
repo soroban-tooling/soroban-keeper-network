@@ -1,0 +1,25 @@
+{
+  "name": "@soroban-keeper-network/example-nextjs-starter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Next.js starter that registers and tracks tasks using SDK React hooks",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@soroban-keeper-network/sdk": "^0.1.0",
+    "next": "^14.2.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "typescript": "^5.4.0"
+  }
+}
