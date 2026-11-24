@@ -2,6 +2,7 @@
 name = "keeper-governance"
 version = "0.1.0"
 edition = "2021"
+publish = false
 authors = ["Soroban Keeper Network Contributors"]
 description = "Governance contract for the Soroban Keeper Network"
 license = "Apache-2.0"
@@ -9,6 +10,8 @@ repository = "https://github.com/soroban-tooling/soroban-keeper-network"
 keywords = ["soroban", "stellar", "governance", "dao", "proposal"]
 categories = ["cryptography::cryptocurrencies"]
 publish = false
+keywords = ["soroban", "stellar", "keeper", "governance", "dao"]
+categories = ["cryptography::cryptocurrencies"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

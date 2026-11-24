@@ -105,6 +105,8 @@ impl KeeperRegistry {
                 claim_ledger: None,
                 lock_ledgers: params.lock_ledgers,
                 verifier: params.verifier,
+                // Cloned so `params.condition` stays available for the
+                // registration event emitted below.
                 condition: params.condition.clone(),
             };
             save_task(&e, task_id, &task);

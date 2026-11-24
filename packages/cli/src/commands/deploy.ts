@@ -35,6 +35,7 @@ import { defaultConfig, writeConfig, type ConfigFile } from "../config.js";
 import type { ConfirmFn } from "../confirm.js";
 import { resolveKey } from "../keys.js";
 import { jsonResult, ok, usage, type RunResult } from "../output.js";
+import { redactSecrets } from "../redact.js";
 import { requireMainnetConfirmation, resolveSettings } from "../settings.js";
 
 /** Default native XLM SAC addresses per network. */
@@ -167,7 +168,7 @@ export async function runDeploy(
   // Format every initialization parameter so the operator sees them first.
   const paramLines = [
     `deploy ${target} on ${settings.network} (profile: ${selectedProfile})`,
-    `  rpc url:      ${settings.rpcUrl}`,
+    `  rpc url:      ${redactSecrets(settings.rpcUrl)}`,
     `  deployer:     ${deployerAddress}`,
     `  admin:        ${adminAddress}`,
     `  reward_token: ${rewardToken}`,

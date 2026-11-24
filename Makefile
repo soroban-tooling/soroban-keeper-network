@@ -17,11 +17,18 @@ INDEXER_TEST_DATABASE_URL ?=
 # so `npm ci` can run; add new packages here when they gain one.
 SETUP_PACKAGES := packages/sdk-ts packages/indexer-client examples/keeper-bot examples/keeper-bot-v2 examples/batch-register
 
-.PHONY: help build test fmt fmt-check lint wasm optimize clean setup bot bot-test bot-v2-test sdk-ts sdk-ts-lint cli indexer rust-sdk indexer-client ci check
+.PHONY: help docs docs-serve build test fmt fmt-check lint wasm optimize clean setup bot bot-test bot-v2-test sdk-ts sdk-ts-lint cli indexer rust-sdk indexer-client ci check
+.PHONY: help build test fmt fmt-check error-docs lint wasm optimize clean setup bot bot-test bot-v2-test sdk-ts sdk-ts-lint cli indexer rust-sdk indexer-client ci check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+
+docs: ## Build the documentation site into docs/site/book (needs node and mdbook)
+	./docs/site/build.sh
+
+docs-serve: ## Serve the documentation site locally with live reload
+	./docs/site/build.sh serve
 
 setup: ## Install the wasm target and npm dependencies, and report missing system tools
 	@command -v rustup >/dev/null 2>&1 || { echo "setup: rustup is required, see https://rustup.rs"; exit 1; }
@@ -51,6 +58,9 @@ fmt: ## Format all Rust code
 
 fmt-check: ## Check formatting (matches CI)
 	cargo fmt --all -- --check
+
+error-docs: ## Verify docs/ERRORS.md covers every contract error variant (matches CI)
+	bash scripts/check-error-docs.sh
 
 lint: ## Run clippy with warnings denied (stricter than CI)
 	cargo clippy --all-targets -- -D warnings
@@ -88,6 +98,10 @@ bot-test: sdk-ts ## Build the SDK then run the keeper bot's tests (matches CI) â
 bot-v2-test: sdk-ts ## Build the SDK then build, test and lint keeper-bot-v2 (matches CI)
 	cd examples/keeper-bot-v2 && npm ci --no-audit --no-fund && npm run build && npm test && npm run lint
 
+examples-test: ## Check every Node example has a test command and test batch-register (advisory CI job `examples`)
+	node scripts/check-example-tests.js
+	cd examples/batch-register && npm ci --no-audit --no-fund && npm test && npm run lint
+
 rust-sdk: ## Test the Rust SDK crate (matches CI)
 	cargo test --package soroban-keeper-sdk --locked
 
@@ -100,6 +114,6 @@ cli: sdk-ts ## Typecheck, build and test the skn CLI (matches CI) â€” depends on
 clean: ## Remove build artifacts
 	cargo clean
 
-ci: fmt-check test wasm sdk-ts bot-test bot-v2-test indexer rust-sdk indexer-client cli ## Run all required CI checks locally (blocking checks only)
+ci: fmt-check error-docs test wasm sdk-ts bot-test bot-v2-test indexer rust-sdk indexer-client cli ## Run all required CI checks locally (blocking checks only)
 
 check: ci lint sdk-ts-lint ## Run all checks contributors should run before opening a PR
