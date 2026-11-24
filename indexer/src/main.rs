@@ -103,9 +103,6 @@ async fn main() -> Result<()> {
             .init(),
     }
 
-    tracing::info!(
-        component = "indexer",
-        rpc_url = %config.rpc_url,
     let filter = EnvFilter::try_from_env("INDEXER_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
     let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter.clone());
     let (otel_layer, tracer_provider) = build_otel_layer(config.otlp_endpoint.as_deref())

@@ -32,8 +32,5 @@ unexpected_cfgs = { level = "allow", check-cfg = ["cfg(fuzzing)"] }
 [dev-dependencies]
 soroban-sdk = { version = "22.0.1", features = ["testutils"] }
 
-[lints.rust]
-unexpected_cfgs = { level = "allow", check-cfg = ["cfg(fuzzing)"] }
-
 # Note: release profile is defined once at the workspace root Cargo.toml.
 # Profiles in non-root packages are ignored by Cargo, so it is not repeated here.
