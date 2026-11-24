@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { Address } from "../components/Address";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { StatusBadge } from "../components/StatusBadge";
+import { KeeperActions } from "../components/KeeperActions";
 import { useDashboardData } from "../data/context";
 import type { TaskState } from "../data/types";
 
@@ -37,6 +38,7 @@ export function KeeperPage() {
   return <section className="page"><div className="page-heading"><div><p className="eyebrow">Keeper profile</p><h1><Address value={keeper} /></h1><p>{registry ? "Contract state is live; task history is indexed." : "Indexer data loaded. Contract metrics await network configuration."}</p></div></div>
     <div className="metric-grid"><article><span>Withdrawable balance</span><strong>{metrics.balance.toLocaleString()}</strong><small>Live contract</small></article><article><span>Effective stake</span><strong>{metrics.stake.toLocaleString()}</strong><small>Live contract</small></article><article><span>Reputation</span><strong>{metrics.reputation.toLocaleString()}</strong><small>Live contract</small></article><article><span>Slash history</span><strong>{metrics.slashCount}</strong><small>{metrics.totalSlashed.toLocaleString()} total slashed</small></article></div>
     {metrics.unbond && <div className="notice"><strong>Pending unbond</strong><span>{metrics.unbond.amount.toLocaleString()} unlocks at ledger {metrics.unbond.unlockLedger.toLocaleString()}</span></div>}
+    <KeeperActions keeper={keeper} balance={metrics.balance} unbond={metrics.unbond} />
     <div className="section-heading"><h2>Recent tasks</h2><span>{tasks.length} indexed</span></div>
     <div className="table-wrap"><table><thead><tr><th>Task</th><th>Status</th><th>Reward</th><th>Last ledger</th></tr></thead><tbody>{tasks.map((task) => <tr key={task.task_id}><td><Link to={`/tasks/${task.task_id}`}>#{task.task_id}</Link></td><td><StatusBadge status={task.status} /></td><td className="numeric">{BigInt(task.reward).toLocaleString()}</td><td>{task.last_ledger.toLocaleString()}</td></tr>)}</tbody></table></div>
   </section>;

@@ -43,4 +43,30 @@ export interface RegistryReader {
   keeperReputation(keeper: string): Promise<number>;
   pendingUnbond(keeper: string): Promise<{ amount: bigint; unlockLedger: number } | undefined>;
   slashHistory(keeper: string): Promise<{ count: number; totalSlashed: bigint }>;
+  getFeeBps(): Promise<number>;
+  isPaused(): Promise<boolean>;
+  feesAccrued(): Promise<bigint>;
+}
+
+export interface RegisterTaskInput {
+  owner: string;
+  target: string;
+  functionName: string;
+  argumentsJson: string;
+  reward: bigint;
+  deadline: number;
+  verifier?: string;
+}
+
+export interface RegistryOperations {
+  estimateRegisterTask(input: RegisterTaskInput): Promise<bigint>;
+  registerTask(input: RegisterTaskInput): Promise<bigint>;
+  withdrawRewards(keeper: string): Promise<bigint>;
+  stake(keeper: string, amount: bigint): Promise<void>;
+  unbond(keeper: string, amount: bigint): Promise<void>;
+  withdrawStake(keeper: string): Promise<bigint>;
+  latestLedger(): Promise<number>;
+  increaseReward(owner: string, taskId: number, amount: bigint): Promise<void>;
+  extendDeadline(owner: string, taskId: number, deadline: number): Promise<void>;
+  cancelTask(owner: string, taskId: number): Promise<void>;
 }
