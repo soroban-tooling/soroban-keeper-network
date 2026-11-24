@@ -1,0 +1,10 @@
+{
+  "name": "@soroban-keeper-network/example-liquidation-keeper-ts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lending liquidation keeper bot in TypeScript",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  }
+}
