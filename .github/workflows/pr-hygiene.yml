@@ -231,6 +231,26 @@ jobs:
           fi
 
   # ───────────────────────────────────────────────────────────────────────────
+  # Scan the diff for secrets using gitleaks. Blocks merge if secrets are found.
+  # Allowlist entries in .gitleaks.toml cover format-valid placeholders in
+  # .env.example files (e.g., Stellar keys starting with S or C followed by
+  # 55 X's or other placeholder characters that control no funds).
+  # ───────────────────────────────────────────────────────────────────────────
+  secrets:
+    name: Secret scanning (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: true
+
+  # ───────────────────────────────────────────────────────────────────────────
   # Lint the workflow files themselves. ci.yml is big and many people edit it,
   # and an expression typo or a bad `needs:` only shows up when the job runs.
   # actionlint catches those on the PR. It also runs shellcheck over every
