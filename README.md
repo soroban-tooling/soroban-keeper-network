@@ -18,6 +18,8 @@
 | Doc | What's inside |
 |-----|---------------|
 | [Live demo](docs/DEMO.md) | Deployed testnet contract + full on-chain transaction trace |
+| [Operator Dashboard](docs/DASHBOARD.md) | Operator web app guide with screenshots, CSP policy, self-hosting & CI deployment |
+| [Examples catalog](examples/README.md) | Interactive difficulty map and catalog of developer examples (quickstart, bots, subscriptions, vesting, limit orders) |
 | [Task lifecycle](docs/TASK_LIFECYCLE.md) | Pending, Claimed, Executed, Cancelled, Expired: state diagram, guards, entry points, events, costs |
 | [Architecture](docs/ARCHITECTURE.md) | Components, task lifecycle, storage, money invariants, trust model |
 | [Fuzzing & property testing](docs/FUZZING.md) | Running/adding fuzz targets, the shared invariant module, crash-to-regression convention |
@@ -41,7 +43,10 @@
 | [Contributing](CONTRIBUTING.md) | How to pick up an issue and open your first PR |
 | [Changelog](CHANGELOG.md) | Notable changes |
 
-**Quick start:** `make help` lists every common command (build, test, fmt, lint, wasm, optimize, bot).
+**Quick start:**
+- One-command local network quickstart: [`examples/local-quickstart`](examples/local-quickstart/)
+- Complete examples catalog & difficulty map: [`examples/README.md`](examples/README.md)
+- `make help` lists every common command (build, test, fmt, lint, wasm, optimize, bot).
 
 ---
 
