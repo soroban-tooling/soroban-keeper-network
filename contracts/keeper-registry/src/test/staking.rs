@@ -4,11 +4,13 @@
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events as _},
-    token, Address, Bytes, IntoVal,
+    token, Address, Bytes, IntoVal, TryIntoVal,
 };
 
 use super::common::*;
-use crate::{KeeperError, MAX_EXECUTION_DISPUTE_WINDOW_LEDGERS, UNBOND_DELAY_LEDGERS};
+use crate::{
+    KeeperError, MAX_EXECUTION_DISPUTE_WINDOW_LEDGERS, MAX_PENDING_CREDITS, UNBOND_DELAY_LEDGERS,
+};
 
 fn stake(s: &TestSetup, keeper: &Address, amount: i128) {
     let token_client = token::StellarAssetClient::new(&s.env, &s.token_id);
@@ -646,4 +648,92 @@ fn test_multiple_pending_credits_finalize_independently() {
     let withdrawn_second = s.registry.withdraw_rewards(&keeper);
     assert!(withdrawn_second > 0);
     assert_eq!(s.registry.pending_reward(&keeper).len(), 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bounded pending credits (issue #738)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Registers, claims, and executes one small task so a test can fill the
+/// pending-credit list without consuming the fixture's whole token supply.
+fn execute_disputed_task(s: &TestSetup, keeper: &Address) -> u64 {
+    let id = register_reward_task(s, 1_000i128);
+    s.registry.claim_task(keeper, &id);
+    s.registry
+        .execute_task(keeper, &id, &Bytes::from_slice(&s.env, b"proof"));
+    id
+}
+
+#[test]
+fn test_pending_credits_are_bounded_at_max() {
+    let s = setup();
+    s.registry.set_dispute_window(&s.admin, &1_000);
+    let keeper = Address::generate(&s.env);
+
+    assert_eq!(s.registry.max_pending_credits(), MAX_PENDING_CREDITS);
+    for _ in 0..MAX_PENDING_CREDITS {
+        execute_disputed_task(&s, &keeper);
+    }
+    assert_eq!(
+        s.registry.pending_reward(&keeper).len(),
+        MAX_PENDING_CREDITS
+    );
+
+    // One more execution has no slot to append into. The whole call reverts.
+    let id = register_reward_task(&s, 1_000i128);
+    s.registry.claim_task(&keeper, &id);
+    assert_eq!(
+        s.registry
+            .try_execute_task(&keeper, &id, &Bytes::from_slice(&s.env, b"proof")),
+        Err(Ok(KeeperError::TooManyPendingCredits))
+    );
+    assert_eq!(
+        s.registry.pending_reward(&keeper).len(),
+        MAX_PENDING_CREDITS
+    );
+}
+
+#[test]
+fn test_full_pending_list_finalizes_matured_credits_before_appending() {
+    let s = setup();
+    s.registry.set_dispute_window(&s.admin, &1_000);
+    let keeper = Address::generate(&s.env);
+
+    for _ in 0..MAX_PENDING_CREDITS {
+        execute_disputed_task(&s, &keeper);
+    }
+    assert_eq!(s.registry.keeper_balance(&keeper), 0);
+
+    // Every credit's unlock_ledger is now behind us. The next execution
+    // should finalize them all, free the list, and append only its own credit.
+    advance(&s.env, 1_000, 5_000);
+    execute_disputed_task(&s, &keeper);
+
+    // Capture events before any further contract call: the test host's event
+    // list belongs to the most recent invocation, and a view call would clear
+    // it. One RewardsFinalized event per credit is expected, even though the
+    // balances were credited in a single storage write.
+    let events = s.env.events().all();
+    let mut finalized_events = 0u32;
+    for i in 0..events.len() {
+        let event = events.get(i).unwrap();
+        let data: Result<soroban_sdk::Vec<soroban_sdk::Val>, _> = event.2.try_into_val(&s.env);
+        if let Ok(vals) = data {
+            if vals.len() == 3 {
+                let event_keeper: Address = vals.get(0).unwrap().try_into_val(&s.env).unwrap();
+                let amount: i128 = vals.get(2).unwrap().try_into_val(&s.env).unwrap();
+                if event_keeper == keeper && amount == 970 {
+                    finalized_events += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(finalized_events, MAX_PENDING_CREDITS);
+
+    assert_eq!(s.registry.pending_reward(&keeper).len(), 1);
+    // 1_000 reward, 300 bps fee, 970 net per finalized credit.
+    assert_eq!(
+        s.registry.keeper_balance(&keeper),
+        i128::from(MAX_PENDING_CREDITS) * 970
+    );
 }

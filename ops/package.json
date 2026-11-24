@@ -1,0 +1,19 @@
+{
+  "name": "soroban-keeper-ops",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only operational tooling for the Soroban Keeper Network",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check:metrics": "node scripts/check-metrics.mjs"
+  },
+  "dependencies": {
+    "@soroban-keeper-network/sdk": "file:../packages/sdk-ts",
+    "@stellar/stellar-sdk": "^16.3.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "Apache-2.0"
+}
