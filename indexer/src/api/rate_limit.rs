@@ -31,6 +31,14 @@ pub const DEFAULT_MAX_BUCKETS: usize = 10_000;
 /// Default time-to-live for an inactive bucket before it is eligible for eviction.
 pub const DEFAULT_BUCKET_TTL: Duration = Duration::from_secs(300);
 
+/// Verified identity selected by the rate-limit middleware.
+///
+/// WebSocket admission reuses this value so an unverified header can never
+/// select a fresh held-connection bucket. The value is either `key:<key_id>`,
+/// an IP-based identity, or `unknown` when transport metadata is unavailable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientIdentity(pub String);
+
 /// A token bucket for one client.
 #[derive(Debug, Clone)]
 struct Bucket {
@@ -230,6 +238,7 @@ pub async fn enforce(
 
     if limiter.allow(&identity, rps, burst) {
         request.extensions_mut().insert(caller);
+        request.extensions_mut().insert(ClientIdentity(identity));
         next.run(request).await
     } else {
         rate_limited()

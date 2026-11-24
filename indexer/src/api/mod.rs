@@ -19,6 +19,7 @@ pub mod websocket;
 use std::sync::Arc;
 use std::time::Instant;
 
+use axum::{Extension, Router};
 use axum::extract::{MatchedPath, Request, State};
 use axum::http::{header, StatusCode};
 use axum::middleware::Next;
@@ -247,6 +248,7 @@ pub fn router_with_limiter(state: ApiState, limiter: Arc<RateLimiter>) -> Router
         .route("/v1/stream", get(websocket::subscribe))
         .route("/metrics", get(metrics_handler))
         .with_state(state)
+        .layer(Extension(Arc::new(websocket::WebSocketLimits::default())))
         .layer(axum::middleware::from_fn_with_state(
             limiter,
             rate_limit::enforce,

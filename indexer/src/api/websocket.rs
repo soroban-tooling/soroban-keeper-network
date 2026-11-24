@@ -9,18 +9,155 @@
 //! ingestion itself. Delivering an event to N subscribers costs no database
 //! query per subscriber -- the event is already in hand when it is broadcast.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{Query, State, WebSocketUpgrade};
-use axum::response::Response;
+use axum::extract::{Extension, Query, State, WebSocketUpgrade};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
+use super::rate_limit::ClientIdentity;
+use super::types::ApiError;
 use super::ApiState;
 use crate::events::{EventType, IndexedEvent};
 
 /// Events replayed per batch when catching a reconnecting client up.
 const REPLAY_PAGE_SIZE: u32 = 200;
+/// Maximum sockets retained by one verified API key or transport IP.
+pub const MAX_CONNECTIONS_PER_CLIENT: usize = 8;
+/// Maximum sockets retained by one indexer process.
+pub const MAX_CONNECTIONS_GLOBAL: usize = 256;
+/// Maximum historical events sent before a client must resume with a cursor.
+pub const MAX_REPLAY_EVENTS: u32 = 5_000;
+/// Close a socket that neither sends nor receives traffic for this long.
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Admission and per-subscription resource limits for the WebSocket feed.
+#[derive(Debug)]
+pub struct WebSocketLimits {
+    global: Arc<Semaphore>,
+    clients: Arc<Mutex<HashMap<String, Arc<Semaphore>>>>,
+    max_per_client: usize,
+    max_replay_events: u32,
+    idle_timeout: Duration,
+}
+
+impl Default for WebSocketLimits {
+    fn default() -> Self {
+        Self::new(
+            MAX_CONNECTIONS_GLOBAL,
+            MAX_CONNECTIONS_PER_CLIENT,
+            MAX_REPLAY_EVENTS,
+            IDLE_TIMEOUT,
+        )
+    }
+}
+
+impl WebSocketLimits {
+    pub fn new(
+        max_global: usize,
+        max_per_client: usize,
+        max_replay_events: u32,
+        idle_timeout: Duration,
+    ) -> Self {
+        assert!(max_global > 0);
+        assert!(max_per_client > 0);
+        assert!(max_replay_events > 0);
+        Self {
+            global: Arc::new(Semaphore::new(max_global)),
+            clients: Arc::new(Mutex::new(HashMap::new())),
+            max_per_client,
+            max_replay_events,
+            idle_timeout,
+        }
+    }
+
+    fn try_acquire(&self, identity: &str) -> Result<ConnectionPermit, AdmissionError> {
+        let global = self
+            .global
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| AdmissionError::GlobalLimit)?;
+        let client_semaphore = {
+            let mut clients = self
+                .clients
+                .lock()
+                .expect("websocket limits mutex poisoned");
+            clients
+                .entry(identity.to_string())
+                .or_insert_with(|| Arc::new(Semaphore::new(self.max_per_client)))
+                .clone()
+        };
+        let client = client_semaphore
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| AdmissionError::ClientLimit)?;
+
+        Ok(ConnectionPermit {
+            global: Some(global),
+            client: Some(client),
+            client_semaphore,
+            clients: self.clients.clone(),
+            identity: identity.to_string(),
+            max_per_client: self.max_per_client,
+        })
+    }
+
+    fn next_replay_page_size(&self, replayed: u32) -> Option<u32> {
+        let remaining = self.max_replay_events.saturating_sub(replayed);
+        (remaining > 0).then_some(remaining.min(REPLAY_PAGE_SIZE))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdmissionError {
+    GlobalLimit,
+    ClientLimit,
+}
+
+impl AdmissionError {
+    fn code(self) -> &'static str {
+        match self {
+            Self::GlobalLimit => "websocket_global_limit",
+            Self::ClientLimit => "websocket_client_limit",
+        }
+    }
+}
+
+struct ConnectionPermit {
+    global: Option<OwnedSemaphorePermit>,
+    client: Option<OwnedSemaphorePermit>,
+    client_semaphore: Arc<Semaphore>,
+    clients: Arc<Mutex<HashMap<String, Arc<Semaphore>>>>,
+    identity: String,
+    max_per_client: usize,
+}
+
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        self.client.take();
+        self.global.take();
+
+        let mut clients = self
+            .clients
+            .lock()
+            .expect("websocket limits mutex poisoned");
+        if self.client_semaphore.available_permits() == self.max_per_client
+            && clients
+                .get(&self.identity)
+                .is_some_and(|current| Arc::ptr_eq(current, &self.client_semaphore))
+        {
+            clients.remove(&self.identity);
+        }
+    }
+}
 
 /// Subscription filters, given as query parameters on the upgrade request.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -64,6 +201,27 @@ struct Filter {
 }
 
 impl Filter {
+    fn from_query(query: &SubscribeQuery) -> Result<Self, String> {
+        let event_type = query
+            .event_type
+            .as_deref()
+            .map(|name| EventType::parse(name).ok_or_else(|| format!("unknown event type: {name}")))
+            .transpose()?;
+        let address = query
+            .address
+            .as_deref()
+            .map(crate::address::normalize_address)
+            .transpose()
+            .map_err(|_| {
+                "address must be a valid Stellar account or contract address".to_string()
+            })?;
+
+        Ok(Self {
+            event_type,
+            address,
+        })
+    }
+
     /// Whether this subscriber wants `event`.
     ///
     /// Matching happens in memory against the already-broadcast event, so a
@@ -88,12 +246,46 @@ impl Filter {
 /// Upgrade an HTTP request to a live event subscription.
 pub async fn subscribe(
     State(state): State<ApiState>,
+    Extension(identity): Extension<ClientIdentity>,
+    Extension(limits): Extension<Arc<WebSocketLimits>>,
     Query(query): Query<SubscribeQuery>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    upgrade.on_upgrade(move |socket| handle_socket(socket, state, query))
+    let filter = match Filter::from_query(&query) {
+        Ok(filter) => filter,
+        Err(message) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new("invalid_subscription", message)),
+            )
+                .into_response();
+        }
+    };
+    let permit = match limits.try_acquire(&identity.0) {
+        Ok(permit) => permit,
+        Err(err) => {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ApiError::new(
+                    err.code(),
+                    "WebSocket connection capacity is exhausted; retry later",
+                )),
+            )
+                .into_response();
+        }
+    };
+
+    upgrade.on_upgrade(move |socket| handle_socket(socket, state, query, filter, limits, permit))
 }
 
+async fn handle_socket(
+    socket: WebSocket,
+    state: ApiState,
+    query: SubscribeQuery,
+    filter: Filter,
+    limits: Arc<WebSocketLimits>,
+    _permit: ConnectionPermit,
+) {
 async fn handle_socket(socket: WebSocket, state: ApiState, query: SubscribeQuery) {
     // Count from the moment the upgrade succeeds. The guard decrements on
     // every return path, including a rejected filter or a dropped client.
@@ -104,42 +296,30 @@ async fn handle_socket(socket: WebSocket, state: ApiState, query: SubscribeQuery
     // replay's last row and the live feed's first.
     let live = state.ingestor.subscribe();
 
-    let event_type = match query.event_type.as_deref() {
-        None => None,
-        Some(name) => match EventType::parse(name) {
-            Some(ty) => Some(ty),
-            None => {
-                close_with(socket, format!("unknown event type: {name}")).await;
-                return;
-            }
-        },
-    };
-
-    // Normalized once, here, so both the SQL-backed replay below and the
-    // in-memory live-feed match in `Filter::matches` compare against the
-    // same canonical form a muxed address the caller supplied would
-    // otherwise miss in exactly one of the two paths (issue 0364).
-    let filter = Filter {
-        event_type,
-        address: query
-            .address
-            .clone()
-            .map(|address| crate::address::normalize_address(&address).unwrap_or(address)),
-    };
-
     let (mut sink, mut incoming) = socket.split();
 
     // Replay anything the client missed while disconnected.
     let mut replayed_through = None;
+    let mut replayed = 0u32;
     if let Some(after) = query.after {
         let mut cursor = after;
         loop {
+            let Some(page_size) = limits.next_replay_page_size(replayed) else {
+                let _ = send(
+                    &mut sink,
+                    &ServerMessage::Closed {
+                        reason: format!("replay limit reached; reconnect with ?after={cursor}"),
+                    },
+                )
+                .await;
+                return;
+            };
             let page = match state
                 .ingestor
                 .store()
                 .events_after(
                     Some(cursor),
-                    REPLAY_PAGE_SIZE,
+                    page_size,
                     filter.event_type,
                     filter.address.as_deref(),
                 )
@@ -171,6 +351,7 @@ async fn handle_socket(socket: WebSocket, state: ApiState, query: SubscribeQuery
                 }
             }
             replayed_through = Some(cursor);
+            replayed = replayed.saturating_add(page.events.len() as u32);
 
             if page.next_cursor.is_none() {
                 break;
@@ -197,6 +378,16 @@ async fn handle_socket(socket: WebSocket, state: ApiState, query: SubscribeQuery
     let mut live = live;
     loop {
         tokio::select! {
+            _ = tokio::time::sleep(limits.idle_timeout) => {
+                let _ = send(
+                    &mut sink,
+                    &ServerMessage::Closed {
+                        reason: "idle timeout; reconnect with ?after=<last cursor>".to_string(),
+                    },
+                )
+                .await;
+                break;
+            },
             // A client that closes the socket ends the subscription.
             incoming = incoming.next() => match incoming {
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
@@ -317,6 +508,54 @@ mod tests {
         let filter = Filter::default();
         assert!(filter.matches(&indexed(1, registered(1, "GOWNER"))));
         assert!(filter.matches(&indexed(2, executed(1, "GKEEPER"))));
+    }
+
+    #[test]
+    fn invalid_subscription_filters_are_rejected_before_upgrade() {
+        assert!(Filter::from_query(&SubscribeQuery {
+            event_type: Some("not-an-event".into()),
+            address: None,
+            after: None,
+        })
+        .is_err());
+        assert!(Filter::from_query(&SubscribeQuery {
+            event_type: None,
+            address: Some("not-a-stellar-address".into()),
+            after: None,
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn held_connections_are_bounded_per_client_and_released() {
+        let limits = WebSocketLimits::new(4, 1, 10, Duration::from_secs(1));
+        let first = limits.try_acquire("ip:192.0.2.1").expect("first socket");
+        assert_eq!(
+            limits.try_acquire("ip:192.0.2.1").err(),
+            Some(AdmissionError::ClientLimit)
+        );
+        drop(first);
+        assert!(limits.try_acquire("ip:192.0.2.1").is_ok());
+    }
+
+    #[test]
+    fn held_connections_are_bounded_globally() {
+        let limits = WebSocketLimits::new(2, 2, 10, Duration::from_secs(1));
+        let _first = limits.try_acquire("ip:192.0.2.1").expect("first socket");
+        let _second = limits.try_acquire("ip:192.0.2.2").expect("second socket");
+        assert_eq!(
+            limits.try_acquire("ip:192.0.2.3").err(),
+            Some(AdmissionError::GlobalLimit)
+        );
+    }
+
+    #[test]
+    fn replay_budget_stops_at_the_exact_boundary() {
+        let limits = WebSocketLimits::new(1, 1, 450, Duration::from_secs(1));
+        assert_eq!(limits.next_replay_page_size(0), Some(200));
+        assert_eq!(limits.next_replay_page_size(200), Some(200));
+        assert_eq!(limits.next_replay_page_size(400), Some(50));
+        assert_eq!(limits.next_replay_page_size(450), None);
     }
 
     #[test]

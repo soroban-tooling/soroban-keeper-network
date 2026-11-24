@@ -193,6 +193,46 @@ cargo +nightly fuzz run execute_task -- -max_total_time=120
 property tests) *is* run in ordinary CI today, same as any other unit test —
 that part isn't optional or fuzzing-specific.
 
+### Nightly source coverage
+
+The nightly workflow restores the persistent corpus, runs every registered
+target, and then runs `scripts/generate-fuzz-coverage.sh`. The script invokes
+`cargo fuzz coverage` once per target with corpus entries and uses the nightly
+`llvm-cov` tool to produce both a text report and browsable HTML. The complete
+`fuzz-nightly-coverage` artifact is retained for 30 days. Its `summary.md`
+lists successful reports, empty corpora, and build failures separately; a
+broken target cannot erase coverage produced by the working targets.
+
+To reproduce the report locally after growing a corpus:
+
+```bash
+rustup component add llvm-tools-preview --toolchain nightly
+./scripts/generate-fuzz-coverage.sh fuzz/coverage-report
+```
+
+Coverage is evidence of which lines the accumulated corpus reached, not proof
+that an assertion exists or that every value boundary was explored. Review the
+HTML together with the target assertions and the invariant map below.
+
+### Entry points not reached by a successful mutation path
+
+The following gap list was cross-checked against the registered targets when
+the coverage workflow was added. "Unreached" here means no currently working
+target drives a successful state transition through the entry point; an
+uninitialized rejection target or a read made only to assert another action
+does not count. The nightly artifact remains the authoritative line-level
+record as targets evolve.
+
+| Surface | Unreached entry points | Plan or reason |
+|---|---|---|
+| Task maintenance | `increase_reward`, `extend_deadline`, `update_verifier` | Add a lifecycle-mutation target that alternates valid and stale owner actions and checks escrow and verifier immutability. |
+| Registry administration | `set_min_reward`, `set_reputation_floor`, `transfer_admin`, `sweep_fees` | Add an admin-transition target with authorized and unauthorized callers. `upgrade` remains unit/integration tested because swapping executable WASM is not a useful in-process libFuzzer mutation. |
+| Batch reads | `get_tasks`, `get_tasks_range` | Read-only aggregation is covered by deterministic unit tests; add it to the batch-registration target when that target has a stable corpus. |
+| Staking disputes | `raise_slash_appeal`, `resolve_slash_appeal`, `set_dispute_window`, `dispute_execution`, `resolve_execution_dispute` | Extend `staking` with bounded ledger advances and a model for the appeal/dispute state machine. |
+| Treasury administration | `add_recipient`, `remove_recipient`, `update_recipient_shares`, `pause`, `unpause`, `transfer_admin`, `upgrade` | `treasury_distribution` covers accounting paths. A separate administrative target is needed so authorization mutations do not dilute distribution inputs. |
+| Governance cancellation and views | `cancel_proposal` and the read-only threshold/status helpers | Extend `governance` with cancellation timing and caller mutations. Pure views are indirectly checked by the model and do not need standalone fuzz targets. |
+| Condition contracts | price-threshold, time-window, and oracle-deviation public evaluators | These small pure evaluators have boundary-focused unit tests. Add them only if their encodings or arithmetic become stateful. |
+
 ### Wave 2 check-in (backlog 0146)
 
 Backlog 0146 asked for a check-in, once epic E03's full target list exists,
