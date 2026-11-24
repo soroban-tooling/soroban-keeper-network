@@ -15,7 +15,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node init && tsc -p tsconfig.json",
     "test": "vitest run",
     "lint": "eslint src",
     "generate:types": "openapi-typescript ../../indexer/openapi.yaml -o src/generated/openapi-types.ts",
