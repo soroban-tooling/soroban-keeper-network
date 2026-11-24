@@ -7,6 +7,7 @@ export interface NetworkConfig {
   label: string;
   indexerUrl: string;
   registryContractId: string;
+  treasuryContractId?: string;
   rpcUrl: string;
   networkPassphrase: string;
 }
@@ -17,6 +18,7 @@ export const networks: Record<NetworkName, NetworkConfig> = {
     label: "Testnet",
     indexerUrl: import.meta.env.VITE_TESTNET_INDEXER_URL ?? import.meta.env.VITE_INDEXER_URL ?? "http://localhost:3000/v1",
     registryContractId: import.meta.env.VITE_TESTNET_REGISTRY_ID ?? "",
+    treasuryContractId: import.meta.env.VITE_TESTNET_TREASURY_ID ?? "",
     rpcUrl: import.meta.env.VITE_TESTNET_RPC_URL ?? "https://soroban-testnet.stellar.org",
     networkPassphrase: "Test SDF Network ; September 2015",
   },
@@ -25,6 +27,7 @@ export const networks: Record<NetworkName, NetworkConfig> = {
     label: "Mainnet",
     indexerUrl: import.meta.env.VITE_MAINNET_INDEXER_URL ?? "",
     registryContractId: import.meta.env.VITE_MAINNET_REGISTRY_ID ?? "",
+    treasuryContractId: import.meta.env.VITE_MAINNET_TREASURY_ID ?? "",
     rpcUrl: import.meta.env.VITE_MAINNET_RPC_URL ?? "https://mainnet.sorobanrpc.com",
     networkPassphrase: "Public Global Stellar Network ; September 2015",
   },
