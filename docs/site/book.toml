@@ -1,0 +1,14 @@
+[book]
+title = "Soroban Keeper Network"
+description = "Documentation for the Soroban Keeper Network: concepts, guides, reference and operations."
+authors = ["Soroban Keeper Network contributors"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/soroban-tooling/soroban-keeper-network"
+edit-url-template = "https://github.com/soroban-tooling/soroban-keeper-network/edit/main/{path}"

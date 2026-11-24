@@ -98,6 +98,8 @@ export interface KeeperBotV2Config {
   registryContractId: string;
   signingKeys: string[];
   databaseUrl?: string;
+  /** Explicit Soroban RPC endpoint. Defaults to the network preset when unset. */
+  rpcUrl?: string;
   persistenceEnabled: boolean;
   maxConcurrentTasks: number;
   maxTasksPerRound: number;
@@ -307,6 +309,21 @@ export function validateConfig(rawEnv: Record<string, string | undefined> = proc
   const databaseUrl = rawEnv.DATABASE_URL?.trim();
   const persistenceEnabled = Boolean(databaseUrl);
 
+  const rpcUrl = rawEnv.RPC_URL?.trim();
+  if (rpcUrl) {
+    try {
+      const parsed = new URL(rpcUrl);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error("must use http or https");
+      }
+    } catch (error) {
+      throw new ConfigValidationError(
+        `Invalid RPC_URL: ${error instanceof Error ? error.message : String(error)}`,
+        "RPC_URL"
+      );
+    }
+  }
+
   const metricsEnabled = requireEnvValue<boolean>(rawEnv, "METRICS_ENABLED", {
     parse: (v) => v.toLowerCase() === "true",
     fallback: true,
@@ -378,6 +395,7 @@ export function validateConfig(rawEnv: Record<string, string | undefined> = proc
     registryContractId,
     signingKeys,
     databaseUrl,
+    rpcUrl,
     persistenceEnabled,
     maxConcurrentTasks,
     maxTasksPerRound,

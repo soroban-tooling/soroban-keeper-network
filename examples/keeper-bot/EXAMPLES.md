@@ -313,5 +313,5 @@ jq -r 'select(.evaluationPhase==4)' decisions.ndjson | wc -l | awk '$1 > 3 {prin
 ## See Also
 
 - [DRY_RUN.md](./DRY_RUN.md) - Complete dry-run mode documentation
-- [README.md](../../../README.md) - Keeper network overview
+- [README.md](../../README.md) - Keeper network overview
 - [jq Manual](https://stedolan.github.io/jq/manual/) - JSON query language reference

@@ -1,0 +1,17 @@
+{
+  "name": "@soroban-keeper-network/docs-tooling",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Generators that build reference pages under docs/ from checked-in sources",
+  "type": "module",
+  "scripts": {
+    "indexer-api": "node generate-indexer-api.mjs",
+    "indexer-api:check": "node generate-indexer-api.mjs --check"
+  },
+  "dependencies": {
+    "yaml": "^2.8.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

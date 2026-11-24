@@ -1,6 +1,6 @@
 # Same three tasks as tasks.example.json, in CSV form.
 # Lines starting with # and blank lines are ignored.
 label,task_type,calldata,reward,deadline,ttl_ledgers,lock_ledgers
-liquidate-position-1041,Liquidation,6c69717569646174653a706f736974696f6e3a31303431,1000000,1790000000,17280,120
-liquidate-position-1042,Liquidation,6c69717569646174653a706f736974696f6e3a31303432,1500000,1790000000,17280,120
-push-xlm-usd-price,OraclePricePush,707573683a584c4d2f555344,2000000,1790000000,17280,240
+liquidate-position-1041,Liquidation,6c69717569646174653a706f736974696f6e3a31303431,1000000,4102444800,17280,120
+liquidate-position-1042,Liquidation,6c69717569646174653a706f736974696f6e3a31303432,1500000,4102444800,17280,120
+push-xlm-usd-price,OraclePricePush,707573683a584c4d2f555344,2000000,4102444800,17280,240

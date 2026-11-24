@@ -4,6 +4,8 @@ members = [
     "contracts/oracle-client",
     "contracts/conditions/oracle-deviation",
     "contracts/keeper-registry",
+    "contracts/verifiers/test-support",
+    "contracts/verifiers/task-bound",
     "contracts/conditions/time-window",
     "contracts/treasury",
     "contracts/governance",
