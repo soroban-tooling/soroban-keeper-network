@@ -160,7 +160,7 @@ export function TreasuryPage() {
   if (loading) {
     return (
       <section className="page">
-        <LoadingState label="Loading treasury state and recipient shares" />
+        <LoadingState label="Loading treasury state and recipient shares..." skeleton="cards" count={4} />
       </section>
     );
   }
@@ -168,7 +168,7 @@ export function TreasuryPage() {
   if (error) {
     return (
       <section className="page">
-        <ErrorState message={error} retry={() => void load()} />
+        <ErrorState error={error} source="rpc" retry={() => void load()} />
       </section>
     );
   }

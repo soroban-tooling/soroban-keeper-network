@@ -87,7 +87,7 @@ export function AdminPage() {
   if (loading) {
     return (
       <section className="page">
-        <LoadingState label="Loading protocol parameters" />
+        <LoadingState label="Loading protocol parameters..." skeleton="cards" count={6} />
       </section>
     );
   }
@@ -95,7 +95,7 @@ export function AdminPage() {
   if (error) {
     return (
       <section className="page">
-        <ErrorState message={error} retry={() => void load()} />
+        <ErrorState error={error} source={registry ? "rpc" : "indexer"} retry={() => void load()} />
       </section>
     );
   }
