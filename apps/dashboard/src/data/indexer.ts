@@ -10,6 +10,18 @@ interface LeaderboardResponse {
   entries: LeaderboardEntry[];
 }
 
+export interface TaskDetail { task: TaskState; history: IndexedEvent[] }
+
+export class IndexerRequestError extends Error {
+  constructor(readonly status: number, message: string) { super(message); this.name = "IndexerRequestError"; }
+}
+
+export interface AdminConfig {
+  fee_bps?: number | null;
+  paused?: boolean | null;
+  total_fees_swept: string;
+}
+
 export class DashboardIndexer {
   constructor(private readonly baseUrl: string, private readonly fetchFn = fetch) {}
 
@@ -23,8 +35,12 @@ export class DashboardIndexer {
   }
 
   async task(taskId: number): Promise<TaskState> {
-    const payload = await this.get<{ task: TaskState }>(`/tasks/${taskId}`);
+    const payload = await this.taskDetail(taskId);
     return payload.task;
+  }
+
+  taskDetail(taskId: number): Promise<TaskDetail> {
+    return this.get<TaskDetail>(`/tasks/${taskId}`, { limit: 200 });
   }
 
   async tasksByKeeper(keeper: string, after?: number, limit = 25): Promise<Page<TaskState>> {
@@ -42,6 +58,10 @@ export class DashboardIndexer {
     return (await this.get<LeaderboardResponse>("/leaderboard", { rank_by: rankBy, limit })).entries;
   }
 
+  adminConfig(): Promise<AdminConfig> {
+    return this.get<AdminConfig>("/admin/config");
+  }
+
   async allTasks(after?: number, limit = 25): Promise<Page<TaskState>> {
     const registrations = await this.events(after, limit, "task_registered");
     const ids = registrations.items
@@ -57,7 +77,7 @@ export class DashboardIndexer {
       if (value !== undefined) url.searchParams.set(key, String(value));
     });
     const response = await this.fetchFn(url, { headers: { accept: "application/json" } });
-    if (!response.ok) throw new Error(`Indexer request failed (${response.status})`);
+    if (!response.ok) throw new IndexerRequestError(response.status, `Indexer request failed (${response.status})`);
     return response.json() as Promise<T>;
   }
 }
