@@ -1,74 +1,5 @@
 #![no_std]
 
-//! Typed, `no_std` access to the Reflector Pulse SEP-40 price interface.
-//!
-//! The ABI mirrors Reflector's published contract interface:
-//! <https://github.com/reflector-network/reflector-contract>.
-
-use soroban_sdk::{contractclient, contracttype, Address, Env, Symbol};
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub enum Asset {
-    Stellar(Address),
-    Other(Symbol),
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct PriceData {
-    pub price: i128,
-    pub timestamp: u64,
-}
-
-#[contractclient(name = "ReflectorPulseClient")]
-pub trait ReflectorPulse {
-    fn decimals() -> u32;
-    fn lastprice(asset: Asset) -> Option<PriceData>;
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NormalizedPrice {
-    pub value: u128,
-    pub observed_at: u64,
-}
-
-/// Reads a fresh positive price and normalizes it to exactly 18 decimals.
-/// Any provider, conversion, timestamp, or arithmetic failure returns `None`.
-pub fn read_normalized(
-    env: &Env,
-    oracle: &Address,
-    asset: &Asset,
-    max_age_seconds: u64,
-) -> Option<NormalizedPrice> {
-    let client = ReflectorPulseClient::new(env, oracle);
-    let decimals = match client.try_decimals() {
-        Ok(Ok(value)) if value <= 18 => value,
-        _ => return None,
-    };
-    let data = match client.try_lastprice(asset) {
-        Ok(Ok(Some(value))) => value,
-        _ => return None,
-    };
-    if data.price <= 0 {
-        return None;
-    }
-
-    let now = env.ledger().timestamp();
-    if data.timestamp > now || now.checked_sub(data.timestamp)? > max_age_seconds {
-        return None;
-    }
-
-    let multiplier = 10_u128.checked_pow(18_u32.checked_sub(decimals)?)?;
-    let value = (data.price as u128).checked_mul(multiplier)?;
-    Some(NormalizedPrice {
-        value,
-        observed_at: data.timestamp,
-    })
-}
-
-#[cfg(feature = "testutils")]
-pub mod mock;
 //! A typed client for the Reflector price-feed oracle.
 //!
 //! This crate provides a Soroban contract interface for reading price feeds from the
@@ -85,7 +16,7 @@ pub mod mock;
 //! ## Creating a Client
 //!
 //! ```ignore
-//! use oracle_client::{ReflectorPulseClient, Asset};
+//! use keeper_oracle_client::{ReflectorPulseClient, Asset};
 //! use soroban_sdk::{Address, Env, Symbol};
 //!
 //! pub fn fetch_price(env: Env, asset_symbol: &str) -> Option<i128> {
@@ -110,7 +41,7 @@ pub mod mock;
 //! Prices include a timestamp so callers can enforce staleness rules:
 //!
 //! ```ignore
-//! use oracle_client::{ReflectorPulseClient, Asset};
+//! use keeper_oracle_client::{ReflectorPulseClient, Asset};
 //!
 //! pub fn fetch_fresh_price(env: Env, max_age_secs: u64) -> Option<i128> {
 //!     let oracle = Address::from_str(&env, "CAFJZQWSED6YAWZU3GWRTOCNPPCGBN32L7QV43XX5LZLFTK6JLN34DLN");
@@ -128,7 +59,7 @@ pub mod mock;
 //! }
 //! ```
 
-use soroban_sdk::{contractclient, contracttype, Address, Symbol, Vec};
+use soroban_sdk::{contractclient, contracttype, Address, Env, Symbol, Vec};
 
 /// A typed client for the Reflector Pulse price-feed oracle.
 ///
@@ -254,6 +185,49 @@ pub struct PriceData {
     pub timestamp: u64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NormalizedPrice {
+    pub value: u128,
+    pub observed_at: u64,
+}
+
+/// Reads a fresh positive price and normalizes it to exactly 18 decimals.
+/// Any provider, conversion, timestamp, or arithmetic failure returns `None`.
+pub fn read_normalized(
+    env: &Env,
+    oracle: &Address,
+    asset: &Asset,
+    max_age_seconds: u64,
+) -> Option<NormalizedPrice> {
+    let client = ReflectorPulseClient::new(env, oracle);
+    let decimals = match client.try_decimals() {
+        Ok(Ok(value)) if value <= 18 => value,
+        _ => return None,
+    };
+    let data = match client.try_lastprice(asset) {
+        Ok(Ok(Some(value))) => value,
+        _ => return None,
+    };
+    if data.price <= 0 {
+        return None;
+    }
+
+    let now = env.ledger().timestamp();
+    if data.timestamp > now || now.checked_sub(data.timestamp)? > max_age_seconds {
+        return None;
+    }
+
+    let multiplier = 10_u128.checked_pow(18_u32.checked_sub(decimals)?)?;
+    let value = (data.price as u128).checked_mul(multiplier)?;
+    Some(NormalizedPrice {
+        value,
+        observed_at: data.timestamp,
+    })
+}
+
+#[cfg(feature = "testutils")]
+pub mod mock;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,8 +237,8 @@ mod tests {
     #[test]
     fn test_asset_stellar_equality() {
         let env = Env::default();
-        let addr1 = Address::random(&env);
-        let addr2 = Address::random(&env);
+        let addr1 = Address::generate(&env);
+        let addr2 = Address::generate(&env);
 
         let asset1 = Asset::Stellar(addr1.clone());
         let asset2 = Asset::Stellar(addr1.clone());
@@ -419,7 +393,7 @@ mod tests {
     #[test]
     fn test_mock_reflector_lastprice_returns_some_for_btc() {
         let env = Env::default();
-        let oracle_addr = Address::random(&env);
+        let oracle_addr = Address::generate(&env);
 
         // Register the mock contract
         let oracle_id = env.register_contract(&oracle_addr, MockReflector);
@@ -441,7 +415,7 @@ mod tests {
     #[test]
     fn test_mock_reflector_lastprice_returns_none_for_missing_asset() {
         let env = Env::default();
-        let oracle_addr = Address::random(&env);
+        let oracle_addr = Address::generate(&env);
 
         // Register the mock contract
         let _oracle_id = env.register_contract(&oracle_addr, MockReflector);
@@ -460,7 +434,7 @@ mod tests {
     #[test]
     fn test_mock_reflector_decimals_returns_precision() {
         let env = Env::default();
-        let oracle_addr = Address::random(&env);
+        let oracle_addr = Address::generate(&env);
 
         // Register the mock contract
         let _oracle_id = env.register_contract(&oracle_addr, MockReflector);
@@ -478,7 +452,7 @@ mod tests {
     #[test]
     fn test_price_and_timestamp_round_trip() {
         let env = Env::default();
-        let oracle_addr = Address::random(&env);
+        let oracle_addr = Address::generate(&env);
 
         // Register the mock contract
         let _oracle_id = env.register_contract(&oracle_addr, MockReflector);

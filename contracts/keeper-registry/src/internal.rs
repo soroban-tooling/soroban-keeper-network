@@ -402,7 +402,11 @@ pub(crate) fn pending_credits_of(e: &Env, keeper: &Address) -> Vec<PendingCredit
         .unwrap_or_else(|| Vec::new(e))
 }
 
-fn save_pending_credits(e: &Env, keeper: &Address, credits: &Vec<PendingCredit>) {
+/// Persists a keeper's pending-credit list, removing the entry when empty and
+/// renewing its TTL otherwise. Crate-visible so every mutation of
+/// `PendingReward` (execution, dispute, resolution, finalization) shares the
+/// same write and TTL policy rather than repeating it inline.
+pub(crate) fn save_pending_credits(e: &Env, keeper: &Address, credits: &Vec<PendingCredit>) {
     let key = DataKey::PendingReward(keeper.clone());
     if credits.is_empty() {
         e.storage().persistent().remove(&key);
@@ -420,14 +424,34 @@ fn save_pending_credits(e: &Env, keeper: &Address, credits: &Vec<PendingCredit>)
 /// only when the dispute window is enabled (`dispute_window_ledgers > 0`);
 /// when it is `0`, `execute_task` credits `KeeperReward` directly instead,
 /// exactly as before this feature existed.
+///
+/// Issue #738 bounds the list at [`MAX_PENDING_CREDITS`]. When the list is
+/// already at the cap, matured credits are finalized first (the same way
+/// `withdraw_rewards` finalizes them) to free slots; if none can be freed,
+/// [`KeeperError::TooManyPendingCredits`] is returned and no state is changed.
+/// The finalized `(task_id, amount)` pairs are returned so the caller can
+/// emit one `RewardsFinalized` event per credit.
 pub(crate) fn add_pending_credit(
     e: &Env,
     keeper: &Address,
     task_id: u64,
     net_reward: i128,
     window_ledgers: u32,
-) {
+) -> Result<Vec<(u64, i128)>, KeeperError> {
     let mut credits = pending_credits_of(e, keeper);
+    let mut finalized: Vec<(u64, i128)> = Vec::new(e);
+
+    // The common case stays a single append. Only a full list triggers the
+    // scan, so executions with a short pending queue do not pay for a pass
+    // over every older credit.
+    if credits.len() >= MAX_PENDING_CREDITS {
+        finalized = finalize_rewards(e, keeper)?;
+        credits = pending_credits_of(e, keeper);
+        if credits.len() >= MAX_PENDING_CREDITS {
+            return Err(KeeperError::TooManyPendingCredits);
+        }
+    }
+
     credits.push_back(PendingCredit {
         task_id,
         net_reward,
@@ -435,19 +459,22 @@ pub(crate) fn add_pending_credit(
         disputed: false,
     });
     save_pending_credits(e, keeper, &credits);
+    Ok(finalized)
 }
 
 /// Moves every one of `keeper`'s pending credits whose `unlock_ledger` has
 /// passed and that was never disputed into the ordinary `KeeperReward`
 /// balance via `credit_keeper` (the same helper `execute_task` already
 /// uses for the window-disabled path), removing each from the pending
-/// list as it finalizes. Disputed credits are left in place untouched —
+/// list as it finalizes. Disputed credits are left in place untouched.
 /// `resolve_execution_dispute` is what eventually removes or un-disputes
 /// them. Called from `withdraw_rewards` before it reads `KeeperReward`, so
 /// a withdrawal always sees the most up-to-date finalized balance.
 ///
-/// Returns the finalized `(task_id, amount)` pairs, so the caller can emit
-/// one `RewardsFinalized` event per credit.
+/// Matured amounts are summed with a checked addition and credited in one
+/// write, so finalizing a full list costs one storage write and one TTL bump
+/// rather than one per credit. Returns the finalized `(task_id, amount)`
+/// pairs, so the caller can emit one `RewardsFinalized` event per credit.
 pub(crate) fn finalize_rewards(
     e: &Env,
     keeper: &Address,
@@ -460,10 +487,13 @@ pub(crate) fn finalize_rewards(
     let now = e.ledger().sequence();
     let mut remaining: Vec<PendingCredit> = Vec::new(e);
     let mut finalized: Vec<(u64, i128)> = Vec::new(e);
+    let mut total: i128 = 0;
 
     for credit in credits.iter() {
         if !credit.disputed && now >= credit.unlock_ledger {
-            credit_keeper(e, keeper, credit.net_reward)?;
+            total = total
+                .checked_add(credit.net_reward)
+                .ok_or(KeeperError::ArithmeticOverflow)?;
             finalized.push_back((credit.task_id, credit.net_reward));
         } else {
             remaining.push_back(credit.clone());
@@ -471,6 +501,7 @@ pub(crate) fn finalize_rewards(
     }
 
     if !finalized.is_empty() {
+        credit_keeper(e, keeper, total)?;
         save_pending_credits(e, keeper, &remaining);
     }
 

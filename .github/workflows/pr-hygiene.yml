@@ -1,12 +1,5 @@
 name: PR Hygiene
 
-on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, labeled, unlabeled]
-
-permissions:
-  contents: read
 # Fast, advisory checks on the shape of a pull request — title, size, and
 # obvious footguns in the diff. Runs automatically on every PR.
 #
@@ -14,14 +7,23 @@ permissions:
 # output is guidance for the contributor and a summary for the reviewer.
 # Hard gates live in ci.yml.
 #
-# `actionlint` is the one job that can show red: it is not part of
-# `ci-required`, so it still never blocks a merge, but a finding is a real
-# mistake in a workflow file, not a style opinion, so it should not be hidden
-# behind continue-on-error.
+# `actionlint` and `markdown-links` are the jobs that can show red: neither is
+# part of `ci-required`, so they still never block a merge on their own, but a
+# finding is a real mistake (a malformed workflow, a broken relative link or
+# anchor), not a style opinion, so they are not hidden behind
+# continue-on-error. External (http/https) links are deliberately NOT checked
+# here; third-party sites flake, so link-check-external.yml does that on a
+# schedule instead.
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+# Read-only. This workflow deliberately takes no write permissions so it
+# behaves identically for fork PRs, which is where most contributions arrive.
+permissions:
+  contents: read
 
 concurrency:
   group: pr-hygiene-${{ github.event.pull_request.number }}
@@ -40,12 +42,34 @@ jobs:
           fetch-depth: 0
 
       - name: Require CHANGELOG.md when contract source changes
-# Read-only. This workflow deliberately takes no write permissions so it
-# behaves identically for fork PRs, which is where most contributions arrive.
-permissions:
-  contents: read
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
 
-jobs:
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+
+          # Contract source under contracts/*/src, excluding unit-test code
+          # (src/test/ and src/test.rs), which is not user-facing.
+          contract_src="$(grep -E '^contracts/[^/]+/src/' <<< "$changed" \
+            | grep -v -E '^contracts/[^/]+/src/test(/|\.rs$)' || true)"
+
+          if [ -z "$contract_src" ]; then
+            echo "No contract source changes; CHANGELOG entry not required."
+            exit 0
+          fi
+
+          echo "Contract source changes:"
+          echo "$contract_src"
+
+          if grep -qx 'CHANGELOG.md' <<< "$changed"; then
+            echo "CHANGELOG.md is updated."
+          else
+            echo "::error::Contract source changed without a CHANGELOG.md update. Add an entry, or apply the 'no-changelog' label if the change is not user-facing."
+            exit 1
+          fi
+
   # ───────────────────────────────────────────────────────────────────────────
   # PR title should follow Conventional Commits, because maintainers
   # squash-merge and the title becomes the commit message on main.
@@ -106,26 +130,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
-
-          # Contract source under contracts/*/src, excluding unit-test code
-          # (src/test/ and src/test.rs), which is not user-facing.
-          contract_src="$(grep -E '^contracts/[^/]+/src/' <<< "$changed" \
-            | grep -v -E '^contracts/[^/]+/src/test(/|\.rs$)' || true)"
-
-          if [ -z "$contract_src" ]; then
-            echo "No contract source changes; CHANGELOG entry not required."
-            exit 0
-          fi
-
-          echo "Contract source changes:"
-          echo "$contract_src"
-
-          if grep -qx 'CHANGELOG.md' <<< "$changed"; then
-            echo "CHANGELOG.md is updated."
-          else
-            echo "::error::Contract source changed without a CHANGELOG.md update. Add an entry, or apply the 'no-changelog' label if the change is not user-facing."
-            exit 1
           # Compare against the merge base so unrelated commits landing on the
           # base branch are not counted against this PR.
           base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
@@ -227,6 +231,26 @@ jobs:
           fi
 
   # ───────────────────────────────────────────────────────────────────────────
+  # Scan the diff for secrets using gitleaks. Blocks merge if secrets are found.
+  # Allowlist entries in .gitleaks.toml cover format-valid placeholders in
+  # .env.example files (e.g., Stellar keys starting with S or C followed by
+  # 55 X's or other placeholder characters that control no funds).
+  # ───────────────────────────────────────────────────────────────────────────
+  secrets:
+    name: Secret scanning (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: true
+
+  # ───────────────────────────────────────────────────────────────────────────
   # Lint the workflow files themselves. ci.yml is big and many people edit it,
   # and an expression typo or a bad `needs:` only shows up when the job runs.
   # actionlint catches those on the PR. It also runs shellcheck over every
@@ -278,3 +302,27 @@ jobs:
             echo
             echo "Skipped — no changes under \`.github/workflows/\`."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Docs reference files that move. Fail when a relative link or `#anchor` in
+  # any tracked Markdown file no longer resolves. Dependency-free (Python 3
+  # ships on ubuntu-latest), so there is nothing to install or pin.
+  #
+  # Reproduce locally:  python3 scripts/check-md-links.py
+  # ───────────────────────────────────────────────────────────────────────────
+  markdown-links:
+    name: Markdown links (relative + anchors)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Self-test the link checker
+        run: python3 -m unittest scripts/test_check_md_links.py
+
+      - name: Check relative links and anchors
+        run: python3 scripts/check-md-links.py
+
+      - name: How to fix a failure
+        if: failure()
+        run: |
+          echo "::error::Broken relative link or anchor in a Markdown file. Run 'python3 scripts/check-md-links.py' locally to list them. Links are case-sensitive; anchors follow GitHub heading slugs."
