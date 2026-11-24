@@ -91,6 +91,10 @@ bot-test: sdk-ts ## Build the SDK then run the keeper bot's tests (matches CI) â
 bot-v2-test: sdk-ts ## Build the SDK then build, test and lint keeper-bot-v2 (matches CI)
 	cd examples/keeper-bot-v2 && npm ci --no-audit --no-fund && npm run build && npm test && npm run lint
 
+examples-test: ## Check every Node example has a test command and test batch-register (advisory CI job `examples`)
+	node scripts/check-example-tests.js
+	cd examples/batch-register && npm ci --no-audit --no-fund && npm test && npm run lint
+
 rust-sdk: ## Test the Rust SDK crate (matches CI)
 	cargo test --package soroban-keeper-sdk --locked
 
