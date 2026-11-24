@@ -1,4 +1,4 @@
-import { BarChart3, Gauge, ListChecks, Menu, ShieldCheck, X } from "lucide-react";
+import { BarChart3, Gauge, ListChecks, Menu, PlusCircle, ShieldCheck, X } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
@@ -6,6 +6,7 @@ const links = [
   { to: "/tasks", label: "Tasks", icon: ListChecks },
   { to: "/keepers", label: "Keepers", icon: ShieldCheck },
   { to: "/stats", label: "Stats", icon: BarChart3 },
+  { to: "/register", label: "Register task", icon: PlusCircle },
 ];
 
 export function Shell() {
