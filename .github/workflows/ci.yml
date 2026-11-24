@@ -796,6 +796,10 @@ jobs:
         if: steps.changes.outputs.relevant == 'true'
         run: npm run lint
 
+      - name: Report bundle size
+        if: steps.changes.outputs.relevant == 'true'
+        run: node scripts/report-bundle-size.mjs >> "$GITHUB_STEP_SUMMARY"
+
       - name: Skip notice
         if: steps.changes.outputs.relevant == 'false'
         run: |
