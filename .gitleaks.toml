@@ -1,0 +1,62 @@
+title = "Gitleaks configuration for soroban-keeper-network"
+description = "Secret scanning configuration with allowlist for format-valid placeholders in .env.example files"
+
+# Extends the default gitleaks ruleset
+[extend]
+useDefault = true
+
+# Allowlist entries for format-valid placeholder secrets in .env.example files.
+# These placeholders follow the correct Stellar key format (S for secret keys,
+# C for contract IDs) but contain only valid base32 characters and no actual
+# secrets. They are used solely to validate parsing and startup logic in
+# documentation and example code, controlling no funds.
+
+[[allowlist]]
+description = "Stellar secret key placeholder in batch-register/.env.example"
+paths = ["examples/batch-register/.env.example"]
+regexes = ["SXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"]
+
+[[allowlist]]
+description = "Stellar contract ID placeholder in batch-register/.env.example"
+paths = ["examples/batch-register/.env.example"]
+regexes = ["CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"]
+
+[[allowlist]]
+description = "Stellar secret key placeholder in keeper-bot/.env.example"
+paths = ["examples/keeper-bot/.env.example"]
+regexes = ["SXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"]
+
+[[allowlist]]
+description = "Stellar contract ID placeholder in keeper-bot/.env.example"
+paths = ["examples/keeper-bot/.env.example"]
+regexes = ["CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"]
+
+[[allowlist]]
+description = "Stellar secret key placeholder in keeper-bot-v2/.env.example"
+paths = ["examples/keeper-bot-v2/.env.example"]
+regexes = ["SBGWKM3CD4IL47QN6X54N6Y33T3JDNVI6AIJ6CD5IM47HG3IG4O36XCU"]
+
+[[allowlist]]
+description = "Stellar contract ID placeholder in keeper-bot-v2/.env.example"
+paths = ["examples/keeper-bot-v2/.env.example"]
+regexes = ["CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"]
+
+[[allowlist]]
+description = "Stellar secret key placeholder in node-signing/.env.example"
+paths = ["packages/sdk-ts/examples/node-signing/.env.example"]
+regexes = ["SXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"]
+
+[[allowlist]]
+description = "Stellar contract ID placeholder in node-signing/.env.example"
+paths = ["packages/sdk-ts/examples/node-signing/.env.example"]
+regexes = ["CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"]
+
+[[allowlist]]
+description = "Stellar secret key placeholder in react-app/.env.example"
+paths = ["packages/sdk-ts/examples/react-app/.env.example"]
+regexes = ["SXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"]
+
+[[allowlist]]
+description = "Stellar contract ID placeholder in react-app/.env.example"
+paths = ["packages/sdk-ts/examples/react-app/.env.example"]
+regexes = ["CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"]

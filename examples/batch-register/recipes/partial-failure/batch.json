@@ -1,0 +1,58 @@
+{
+  "tasks": [
+    {
+      "label": "liquidate-position-2001",
+      "task_type": "Liquidation",
+      "calldata": "6c69717569646174653a706f736974696f6e3a32303031",
+      "reward": "1000000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 120
+    },
+    {
+      "label": "liquidate-position-2002",
+      "task_type": "Liquidation",
+      "calldata": "6c69717569646174653a706f736974696f6e3a32303032",
+      "reward": "1000000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 120
+    },
+    {
+      "label": "liquidate-position-2003",
+      "task_type": "Liquidation",
+      "calldata": "6c69717569646174653a706f736974696f6e3a32303033",
+      "reward": "1000000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 120
+    },
+    {
+      "label": "liquidate-position-2004",
+      "task_type": "Liquidation",
+      "calldata": "6c69717569646174653a706f736974696f6e3a32303034",
+      "reward": "1000000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 120
+    },
+    {
+      "label": "liquidate-position-2005",
+      "task_type": "Liquidation",
+      "calldata": "6c69717569646174653a706f736974696f6e3a32303035",
+      "reward": "1000000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 120
+    },
+    {
+      "label": "liquidate-position-2006",
+      "task_type": "Liquidation",
+      "calldata": "6c69717569646174653a706f736974696f6e3a32303036",
+      "reward": "1000000",
+      "deadline": "4102444800",
+      "ttl_ledgers": 17280,
+      "lock_ledgers": 120
+    }
+  ]
+}
